@@ -8,7 +8,18 @@ from .enums import EstadoCilindro, TipoRectificado
 
 class Cilindro:
     """
-    Representa un cilindro con su información de diámetro, estado y ubicación.
+    Representa un cilindro con su diámetro, estado y ubicación en el taller.
+
+    Atributos principales:
+      id                      Identificador único del cilindro.
+      diametro                Diámetro actual en mm (decrece con cada rectificado).
+      diametro_original       Diámetro con el que entró al sistema.
+      estado                  Estado actual (EstadoCilindro).
+      jaula                   Número de jaula asignada, o None si no está en jaula.
+      posicion                Posición dentro de la jaula (opcional).
+      mm_a_rectificar         Milímetros a remover en el próximo rectificado.
+      tipo_rectificado_actual Tipo de rectificado pendiente o en curso.
+      historial               Lista de eventos registrados para trazabilidad.
     """
 
     def __init__(
@@ -19,25 +30,25 @@ class Cilindro:
         jaula: Optional[int] = None,
         posicion: Optional[int] = None
     ):
-        self.id = id_cilindro
-        self.diametro = diametro
-        self.diametro_original = diametro
-        self.estado = estado
-        self.jaula = jaula
-        self.posicion = posicion
+        self.id: str = id_cilindro
+        self.diametro: float = diametro
+        self.diametro_original: float = diametro
+        self.estado: EstadoCilindro = estado
+        self.jaula: Optional[int] = jaula
+        self.posicion: Optional[int] = posicion
 
-        # Información de rectificado
-        self.maquina_actual = None
-        self.rectificado_inicio = None
-        self.rectificado_fin = None
-        self.tipo_rectificado_actual = None
-        self.mm_a_rectificar = 0.0
+        # Información de rectificado en curso
+        self.maquina_actual: Optional[str] = None
+        self.rectificado_inicio: Optional[datetime] = None
+        self.rectificado_fin: Optional[datetime] = None
+        self.tipo_rectificado_actual: Optional[TipoRectificado] = None
+        self.mm_a_rectificar: float = 0.0
 
         # Historial de eventos para trazabilidad
         self.historial: List[Dict[str, Any]] = []
 
-    def registrar_evento(self, tiempo: datetime, evento: str, detalle: str = ""):
-        """Registra un evento en el historial del cilindro."""
+    def registrar_evento(self, tiempo: datetime, evento: str, detalle: str = "") -> None:
+        """Añade una entrada al historial del cilindro."""
         self.historial.append({
             "tiempo": tiempo,
             "evento": evento,
@@ -46,9 +57,11 @@ class Cilindro:
             "detalle": detalle
         })
 
-    def rectificar(self, milimetros: float):
-        """Aplica el desgaste por rectificado al diámetro del cilindro."""
+    def rectificar(self, milimetros: float) -> None:
+        """Reduce el diámetro del cilindro en la cantidad indicada."""
+        if milimetros < 0:
+            raise ValueError(f"milimetros debe ser >= 0, recibido: {milimetros}")
         self.diametro = round(self.diametro - milimetros, 2)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Cilindro({self.id}, D={self.diametro}, Est={self.estado.value})"

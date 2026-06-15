@@ -45,6 +45,8 @@ class App(ctk.CTk):
         self.snapshot_actual_idx = 0
         self.velocidad_reproduccion = 1.0
 
+        self._figs: dict = {}  # {tab_name: Figure} — para cerrar figuras al regenerar
+
         self._setup_grid()
         self._create_sidebar()
         self._create_main_content()
@@ -162,10 +164,14 @@ class App(ctk.CTk):
         self.taller.simular(estrategia=estrat, callback_log=self._log)
 
         self.snapshot_actual_idx = 0
-        self.status_label.configure(text=f"Simulación completada. Snapshots: {len(self.taller.snapshots)}")
+        n_snaps = len(self.taller.snapshots)
+        self.status_label.configure(text=f"Simulación completada. Snapshots: {n_snaps}")
 
-        self.slider_progreso.configure(from_=0, to=len(self.taller.snapshots)-1)
+        self.slider_progreso.configure(from_=0, to=max(0, n_snaps - 1))
         self.slider_progreso.set(0)
+
+        # Reconstruir frames de jaulas si la cantidad cambió
+        self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
 
         # Actualizar otras pestañas
         llenar_tabla(self.tab_tabla, self.taller)
@@ -176,10 +182,16 @@ class App(ctk.CTk):
         self._log("Simulación finalizada. Use los controles de reproducción para ver los resultados.")
 
     def _dash(self, tab, func):
+        import matplotlib.pyplot as plt
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        tab_name = tab.winfo_name()
+        # Cerrar figura anterior para liberar memoria
+        if tab_name in self._figs:
+            plt.close(self._figs[tab_name])
         for w in tab.winfo_children():
             w.destroy()
         fig = func(self.taller)
+        self._figs[tab_name] = fig
         cv = FigureCanvasTkAgg(fig, master=tab)
         cv.draw()
         cv.get_tk_widget().pack(fill="both", expand=True)

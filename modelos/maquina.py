@@ -9,25 +9,30 @@ from .cilindro import Cilindro
 
 class MaquinaRectificadora:
     """
-    Simula el comportamiento de una rectificadora, su capacidad y tiempos de proceso.
+    Simula el comportamiento de una rectificadora: capacidad, tiempos de proceso
+    e historial de trabajos realizados.
+
+    Tasas de rectificado:
+      Cada tipo de pase (produccion/desbaste) tiene su propia tasa en mm/min.
+      Si la tasa es 0 o el tipo no está configurado, calcular_tiempo_proceso
+      devuelve float('inf'), indicando que ese tipo de pase no es posible.
     """
 
     def __init__(self, nombre: str):
-        self.nombre = nombre
-        self.ocupada = False
+        self.nombre: str = nombre
+        self.ocupada: bool = False
         self.cilindro_actual: Optional[Cilindro] = None
         self.tiempo_fin_rectificado: Optional[datetime] = None
 
-        # Tasas de rectificado: {tipo: {"mm": mm, "t_min": min, "rate": mm/min}}
+        # {tipo_str: {"mm": float, "t_min": float, "rate": float}}
         self.tasas_rectificado: Dict[str, Dict[str, float]] = {}
-        self.prioridad_defecto = TipoRectificado.PRODUCCION
+        self.prioridad_defecto: TipoRectificado = TipoRectificado.PRODUCCION
 
-        # Estadísticas e historial
         self.historial_trabajo: List[Dict[str, Any]] = []
-        self.tiempo_total_ocupada_min = 0.0
+        self.tiempo_total_ocupada_min: float = 0.0
 
-    def configurar_tasa(self, tipo: str, mm_removidos: float, tiempo_minutos: float):
-        """Configura la velocidad de rectificado para un tipo de pase."""
+    def configurar_tasa(self, tipo: str, mm_removidos: float, tiempo_minutos: float) -> None:
+        """Registra la velocidad de rectificado para un tipo de pase."""
         tasa = mm_removidos / tiempo_minutos if tiempo_minutos > 0 else 0.0
         self.tasas_rectificado[tipo] = {
             "mm": mm_removidos,
@@ -36,19 +41,30 @@ class MaquinaRectificadora:
         }
 
     def calcular_tiempo_proceso(self, mm_a_rectificar: float, tipo: str) -> float:
-        """Calcula cuántos minutos tomará rectificar una cantidad de mm."""
-        if tipo not in self.tasas_rectificado or self.tasas_rectificado[tipo]["rate"] <= 0:
-            return float("inf")
-        return mm_a_rectificar / self.tasas_rectificado[tipo]["rate"]
+        """
+        Calcula cuántos minutos tomará rectificar la cantidad indicada.
 
-    def iniciar_rectificado(self, cilindro: Cilindro, tiempo_actual: datetime, tipo: TipoRectificado, mm: float):
+        Devuelve float('inf') si el tipo no está configurado o su tasa es 0,
+        lo que excluirá este trabajo de la asignación.
+        """
+        cfg = self.tasas_rectificado.get(tipo)
+        if cfg is None or cfg["rate"] <= 0:
+            return float("inf")
+        return mm_a_rectificar / cfg["rate"]
+
+    def iniciar_rectificado(
+        self,
+        cilindro: Cilindro,
+        tiempo_actual: datetime,
+        tipo: TipoRectificado,
+        mm: float
+    ) -> None:
         """Inicia el proceso de rectificado para un cilindro."""
         duracion_minutos = self.calcular_tiempo_proceso(mm, tipo.value)
         self.ocupada = True
         self.cilindro_actual = cilindro
         self.tiempo_fin_rectificado = tiempo_actual + timedelta(minutes=duracion_minutos)
 
-        # Actualizar estado del cilindro
         cilindro.estado = EstadoCilindro.RECTIFICANDO
         cilindro.maquina_actual = self.nombre
         cilindro.rectificado_inicio = tiempo_actual
@@ -62,7 +78,6 @@ class MaquinaRectificadora:
             f"D{cilindro.diametro}->{round(cilindro.diametro - mm, 2)} ({duracion_minutos:.0f} min)"
         )
 
-        # Registrar en historial de la máquina
         self.historial_trabajo.append({
             "cilindro_id": cilindro.id,
             "inicio": tiempo_actual,
@@ -74,7 +89,7 @@ class MaquinaRectificadora:
         self.tiempo_total_ocupada_min += duracion_minutos
 
     def finalizar_rectificado(self, tiempo_actual: datetime) -> Optional[Cilindro]:
-        """Finaliza el proceso actual y libera la máquina."""
+        """Finaliza el proceso actual, actualiza el cilindro y libera la máquina."""
         if not self.ocupada or not self.cilindro_actual:
             return None
 

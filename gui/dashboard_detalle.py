@@ -54,10 +54,11 @@ def crear_dashboard_detalle(t):
             ax3.scatter([e.tiempo for e in evs], [e.jaula for e in evs],
                         c=ce, s=100, zorder=5, edgecolors="white",
                         linewidths=0.5, alpha=0.8, label=tn.capitalize())
-    ax3.set_yticks([1, 2, 3, 4])
-    ax3.set_yticklabels(["J1", "J2", "J3", "J4"], color=FG, fontsize=9)
+    n_jaulas = t.cantidad_jaulas
+    ax3.set_yticks(list(range(1, n_jaulas + 1)))
+    ax3.set_yticklabels([f"J{i}" for i in range(1, n_jaulas + 1)], color=FG, fontsize=9)
     ax3.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
-    ax3.set_ylim(0.5, 4.5)
+    ax3.set_ylim(0.5, n_jaulas + 0.5)
     ax3.legend(fontsize=8, facecolor="#333", edgecolor="#333", labelcolor=FG)
 
     return fig
