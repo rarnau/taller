@@ -118,6 +118,19 @@ class App(ctk.CTk):
         # Pestaña de configuración (rangos por jaula y prioridades de máquinas)
         self.cfg_widget = crear_tab_configuracion(self.tab_cfg, self)
 
+        # Dashboard: barra de control con selector de SubStock para la evolución temporal
+        self.dash_ctrl = ctk.CTkFrame(self.tab_dash, fg_color="transparent")
+        self.dash_ctrl.pack(fill="x", padx=10, pady=(10, 0))
+        ctk.CTkLabel(self.dash_ctrl, text="Evolución temporal:").pack(side="left", padx=(0, 8))
+        self.combo_dash_ss = ctk.CTkComboBox(
+            self.dash_ctrl, values=["Global"], width=220, state="readonly",
+            command=lambda _v: self._render_dashboard()
+        )
+        self.combo_dash_ss.set("Global")
+        self.combo_dash_ss.pack(side="left")
+        self.dash_holder = ctk.CTkFrame(self.tab_dash, fg_color="transparent")
+        self.dash_holder.pack(fill="both", expand=True)
+
         # Placeholder para la vista real
         self.label_real = ctk.CTkLabel(self.tab_visual, text="Cargue un archivo y simule para ver la vista en tiempo real", font=ctk.CTkFont(size=16))
         self.label_real.pack(pady=100)
@@ -146,6 +159,12 @@ class App(ctk.CTk):
             self.status_label.configure(text=f"Cargado: {os.path.basename(fp)}")
             self._log(f"Archivo cargado: {fp}")
             self.cfg_widget.refrescar()
+            # Mostrar en Vista Real las rectificadoras y jaulas del Excel cargado
+            self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
+            self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
+            self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))
+            self.vista_rt.set_estrategia(self.combo_est.get())
+            self._refrescar_combo_substocks()
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar el archivo: {e}")
 
@@ -175,29 +194,48 @@ class App(ctk.CTk):
         self.slider_progreso.configure(from_=0, to=max(0, n_snaps - 1))
         self.slider_progreso.set(0)
 
-        # Reconstruir frames de jaulas si la cantidad cambió
+        # Reconstruir frames de jaulas y rectificadoras de la Vista Real
         self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
+        self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))
+        self.vista_rt.set_estrategia(estrat)
 
         # Actualizar otras pestañas
         llenar_tabla(self.tab_tabla, self.taller)
         llenar_kpis(self.tab_kpis, self.taller)
 
-        self._dash(self.tab_dash, crear_dashboard_principal)
-        self._dash(self.tab_det, crear_dashboard_detalle)
+        self._refrescar_combo_substocks()
+        self._render_dashboard()
+        self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
         self._log("Simulación finalizada. Use los controles de reproducción para ver los resultados.")
 
-    def _dash(self, tab, func):
+    def _refrescar_combo_substocks(self):
+        """Actualiza las opciones del selector de SubStock del Dashboard."""
+        nombres = [ss.nombre for ss in self.taller.lista_substocks]
+        valores = ["Global"] + nombres
+        self.combo_dash_ss.configure(values=valores)
+        if self.combo_dash_ss.get() not in valores:
+            self.combo_dash_ss.set("Global")
+
+    def _render_dashboard(self):
+        """Renderiza el dashboard principal aplicando el filtro de SubStock seleccionado."""
+        if not self.taller.snapshots:
+            return
+        sel = self.combo_dash_ss.get()
+        substock = None if sel == "Global" else sel
+        self._dash_into(self.dash_holder, "dashboard",
+                        lambda t: crear_dashboard_principal(t, substock=substock))
+
+    def _dash_into(self, container, key, func):
         import matplotlib.pyplot as plt
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-        tab_name = tab.winfo_name()
         # Cerrar figura anterior para liberar memoria
-        if tab_name in self._figs:
-            plt.close(self._figs[tab_name])
-        for w in tab.winfo_children():
+        if key in self._figs:
+            plt.close(self._figs[key])
+        for w in container.winfo_children():
             w.destroy()
         fig = func(self.taller)
-        self._figs[tab_name] = fig
-        cv = FigureCanvasTkAgg(fig, master=tab)
+        self._figs[key] = fig
+        cv = FigureCanvasTkAgg(fig, master=container)
         cv.draw()
         cv.get_tk_widget().pack(fill="both", expand=True)
 

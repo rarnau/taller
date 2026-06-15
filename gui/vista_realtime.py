@@ -5,6 +5,14 @@ import customtkinter as ctk
 from config.tema import *
 
 
+# Texto descriptivo del sentido de toma de la cola según la estrategia.
+_SENTIDO_TOMA = {
+    "mayor_diametro": "Sentido de toma:  mayor diámetro primero  →",
+    "menor_diametro": "Sentido de toma:  menor diámetro primero  →",
+    "fifo": "Sentido de toma:  orden de llegada (FIFO)  →",
+}
+
+
 class CilindroGrafico(ctk.CTkFrame):
     """Representación visual de un cilindro."""
 
@@ -27,15 +35,22 @@ class CilindroGrafico(ctk.CTkFrame):
 
 
 class SeccionTaller(ctk.CTkFrame):
-    """Contenedor para una sección del taller (Jaula o CRC)."""
+    """Contenedor de tamaño fijo para una sección del taller (Jaula o CRC)."""
+
+    # Tamaño fijo para que los recuadros no aparezcan enormes cuando están vacíos.
+    ANCHO = 190
+    ALTO = 96
 
     def __init__(self, master, titulo: str, color_borde=ACCENT):
-        super().__init__(master, border_width=2, border_color=color_borde)
-        self.titulo = ctk.CTkLabel(self, text=titulo, font=ctk.CTkFont(size=14, weight="bold"))
-        self.titulo.pack(pady=5)
+        super().__init__(master, border_width=2, border_color=color_borde,
+                         width=self.ANCHO, height=self.ALTO)
+        self.pack_propagate(False)  # mantiene el tamaño fijo aunque esté vacío
+
+        self.titulo = ctk.CTkLabel(self, text=titulo, font=ctk.CTkFont(size=13, weight="bold"))
+        self.titulo.pack(pady=(4, 2))
 
         self.container = ctk.CTkFrame(self, fg_color="transparent")
-        self.container.pack(expand=True, fill="both", padx=10, pady=10)
+        self.container.pack(expand=True, fill="both", padx=8, pady=(0, 8))
         self.cilindros_widgets: dict = {}  # {cilindro_id: widget}
 
     def actualizar(self, lista_cilindros: list, on_click_callback) -> None:
@@ -54,7 +69,7 @@ class SeccionTaller(ctk.CTkFrame):
                 self.cilindros_widgets[cid].label.configure(text=f"{cid}\n{c['d']:.1f}")
             else:
                 cg = CilindroGrafico(self.container, cid, c["d"], command=on_click_callback)
-                cg.pack(side="left", padx=5)
+                cg.pack(side="left", padx=4)
                 self.cilindros_widgets[cid] = cg
 
 
@@ -65,6 +80,7 @@ class VistaRealTime(ctk.CTkScrollableFrame):
         super().__init__(master)
         self.on_cilindro_click = on_cilindro_click
         self.cantidad_jaulas = cantidad_jaulas
+        self.estrategia = "mayor_diametro"
 
         self.jaulas_frames: dict = {}
         self.crc_frames: dict = {}
@@ -78,46 +94,67 @@ class VistaRealTime(ctk.CTkScrollableFrame):
             self, text="ESTADO DEL TALLER EN TIEMPO REAL",
             font=ctk.CTkFont(size=20, weight="bold")
         )
-        self.title_label.pack(pady=20)
+        self.title_label.pack(pady=(20, 10))
 
-        self.main_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_container.pack(fill="both", expand=True, padx=20)
+        # Dos columnas: jaulas/buffer a la izquierda, rectificadoras/cola a la derecha.
+        self.columnas = ctk.CTkFrame(self, fg_color="transparent")
+        self.columnas.pack(fill="both", expand=True, padx=20)
 
+        # ── Columna izquierda: jaulas + buffer CRC ───────────────────────
+        self.col_jaulas = ctk.CTkFrame(self.columnas, fg_color="transparent")
+        self.col_jaulas.pack(side="left", anchor="n", padx=(0, 20))
+
+        ctk.CTkLabel(self.col_jaulas, text="JAULAS",
+                     font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(0, 10))
+
+        self.main_container = ctk.CTkFrame(self.col_jaulas, fg_color="transparent")
+        self.main_container.pack(fill="both", expand=True)
         self._crear_filas_jaulas(self.cantidad_jaulas)
 
-        self.maqs_title = ctk.CTkLabel(self, text="RECTIFICADORAS", font=ctk.CTkFont(size=18, weight="bold"))
-        self.maqs_title.pack(pady=(30, 10))
+        # ── Columna derecha: rectificadoras + cola ───────────────────────
+        self.col_maqs = ctk.CTkFrame(self.columnas, fg_color="transparent")
+        self.col_maqs.pack(side="left", anchor="n", fill="both", expand=True)
 
-        self.maqs_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.maqs_container.pack(fill="x", padx=20)
+        self.maqs_title = ctk.CTkLabel(self.col_maqs, text="RECTIFICADORAS",
+                                       font=ctk.CTkFont(size=18, weight="bold"))
+        self.maqs_title.pack(pady=(0, 10))
+
+        self.maqs_container = ctk.CTkFrame(self.col_maqs, fg_color="transparent")
+        self.maqs_container.pack(fill="x")
 
         self.cola_title = ctk.CTkLabel(
-            self, text="COLA DE ESPERA RECTIFICADO",
+            self.col_maqs, text="COLA DE ESPERA RECTIFICADO",
             font=ctk.CTkFont(size=18, weight="bold")
         )
-        self.cola_title.pack(pady=(30, 10))
+        self.cola_title.pack(pady=(24, 2))
+
+        self.cola_sentido = ctk.CTkLabel(
+            self.col_maqs, text=_SENTIDO_TOMA.get(self.estrategia, ""),
+            font=ctk.CTkFont(size=12), text_color=ACCENT
+        )
+        self.cola_sentido.pack(pady=(0, 6))
 
         self.cola_container = ctk.CTkScrollableFrame(
-            self, fg_color="transparent", orientation="horizontal", height=100
+            self.col_maqs, fg_color="transparent", orientation="horizontal", height=100
         )
-        self.cola_container.pack(fill="x", padx=20, pady=(0, 30))
+        self.cola_container.pack(fill="x", pady=(0, 20))
 
     def _crear_filas_jaulas(self, n: int) -> None:
         """Crea N filas de jaula + CRC en el contenedor principal."""
         for i in range(1, n + 1):
             f = ctk.CTkFrame(self.main_container)
-            f.pack(fill="x", pady=10)
+            f.pack(fill="x", pady=8)
 
-            ctk.CTkLabel(f, text=f"J{i}", font=ctk.CTkFont(size=24, weight="bold"), width=50).pack(
-                side="left", padx=20
+            ctk.CTkLabel(f, text=f"J{i}", font=ctk.CTkFont(size=24, weight="bold"), width=40).pack(
+                side="left", padx=(12, 8)
             )
 
             jf = SeccionTaller(f, "TRABAJANDO", color_borde=COLORES_ESTADO["Trabajando"])
-            jf.pack(side="left", padx=10, pady=10, fill="y")
+            jf.pack(side="left", padx=8, pady=8)
             self.jaulas_frames[i] = jf
 
             cf = SeccionTaller(f, "BUFFER CRC", color_borde=COLORES_ESTADO["CRC"])
-            cf.pack(side="left", padx=10, pady=10, fill="y")
+            cf.pack(side="left", padx=8, pady=8)
             self.crc_frames[i] = cf
 
     def ajustar_jaulas(self, cantidad_jaulas: int) -> None:
@@ -131,6 +168,46 @@ class VistaRealTime(ctk.CTkScrollableFrame):
         self.crc_frames.clear()
         self._crear_filas_jaulas(cantidad_jaulas)
 
+    def set_estrategia(self, estrategia: str) -> None:
+        """Define la estrategia de selección y actualiza el indicador de sentido de toma."""
+        self.estrategia = estrategia
+        self.cola_sentido.configure(text=_SENTIDO_TOMA.get(estrategia, "Sentido de toma  →"))
+
+    def mostrar_maquinas(self, nombres) -> None:
+        """Crea los recuadros de las rectificadoras disponibles (estado Libre)."""
+        for w in self.maqs_container.winfo_children():
+            w.destroy()
+        self.maq_widgets.clear()
+        for nombre in nombres:
+            self._crear_maquina_widget(nombre)
+
+    def _crear_maquina_widget(self, nombre: str) -> None:
+        f = ctk.CTkFrame(self.maqs_container, width=200, height=100)
+        f.pack(side="left", padx=10, pady=10)
+        f.pack_propagate(False)
+
+        ctk.CTkLabel(f, text=nombre, font=ctk.CTkFont(weight="bold")).pack()
+
+        content = ctk.CTkFrame(f, fg_color="transparent")
+        content.pack(expand=True, fill="both")
+
+        prog = ctk.CTkProgressBar(f)
+        prog.set(0)
+        prog.configure(progress_color="gray")
+        prog.pack(fill="x", padx=10, pady=5)
+
+        lbl = ctk.CTkLabel(content, text="Libre")
+        lbl.pack(expand=True)
+        self.maq_widgets[nombre] = {"frame": content, "prog": prog, "label": lbl}
+
+    def _ordenar_cola(self, lista: list) -> list:
+        """Ordena la cola según el sentido de toma (el próximo a tomar queda primero)."""
+        if self.estrategia == "mayor_diametro":
+            return sorted(lista, key=lambda c: c["d"], reverse=True)
+        if self.estrategia == "menor_diametro":
+            return sorted(lista, key=lambda c: c["d"])
+        return list(lista)  # FIFO: respeta el orden de llegada
+
     def actualizar(self, snapshot) -> None:
         """Actualiza todos los componentes visuales con el estado de un snapshot."""
         for i in range(1, self.cantidad_jaulas + 1):
@@ -139,43 +216,25 @@ class VistaRealTime(ctk.CTkScrollableFrame):
             if i in snapshot.detalle_crc and i in self.crc_frames:
                 self.crc_frames[i].actualizar(snapshot.detalle_crc[i], self.on_cilindro_click)
 
-        # Actualizar Cola de rectificado
-        ids_nuevos_cola = [c["id"] for c in snapshot.detalle_cola_rectificado]
-        for cid in [cid for cid in self.cola_widgets if cid not in ids_nuevos_cola]:
-            self.cola_widgets[cid].destroy()
-            del self.cola_widgets[cid]
+        # Cola de rectificado: se reconstruye ordenada según el sentido de toma.
+        for w in self.cola_widgets.values():
+            w.destroy()
+        self.cola_widgets.clear()
 
-        for c in snapshot.detalle_cola_rectificado:
-            cid = c["id"]
-            if cid in self.cola_widgets:
-                self.cola_widgets[cid].label.configure(text=f"{cid}\n{c['d']:.1f}")
-            else:
-                cg = CilindroGrafico(
-                    self.cola_container, cid, c["d"],
-                    color=COLORES_ESTADO["A rectificar"],
-                    command=self.on_cilindro_click
-                )
-                cg.pack(side="left", padx=5)
-                self.cola_widgets[cid] = cg
+        for idx, c in enumerate(self._ordenar_cola(snapshot.detalle_cola_rectificado)):
+            # El primero (próximo a tomar) se resalta con el color de acento.
+            color = ACCENT if idx == 0 else COLORES_ESTADO["A rectificar"]
+            cg = CilindroGrafico(
+                self.cola_container, c["id"], c["d"],
+                color=color, command=self.on_cilindro_click
+            )
+            cg.pack(side="left", padx=5)
+            self.cola_widgets[c["id"]] = cg
 
-        # Actualizar Máquinas
+        # Máquinas
         for m_nombre, data in snapshot.detalle_maquinas.items():
             if m_nombre not in self.maq_widgets:
-                f = ctk.CTkFrame(self.maqs_container, width=200, height=100)
-                f.pack(side="left", padx=10, pady=10)
-                f.pack_propagate(False)
-
-                ctk.CTkLabel(f, text=m_nombre, font=ctk.CTkFont(weight="bold")).pack()
-
-                content = ctk.CTkFrame(f, fg_color="transparent")
-                content.pack(expand=True, fill="both")
-
-                prog = ctk.CTkProgressBar(f)
-                prog.pack(fill="x", padx=10, pady=5)
-
-                lbl = ctk.CTkLabel(content, text="Libre")
-                lbl.pack(expand=True)
-                self.maq_widgets[m_nombre] = {"frame": content, "prog": prog, "label": lbl}
+                self._crear_maquina_widget(m_nombre)
 
             w = self.maq_widgets[m_nombre]
             if data:
