@@ -72,6 +72,12 @@ class TallerCilindros:
         self._recurso_crc_libre_en: Optional[datetime] = None
         self._reposicion_pendiente: set = set()
 
+        # Parada de línea: cuando alguna jaula se detiene, la línea entera se
+        # frena. Mientras dure, los CAMBIO posteriores se difieren; al reanudar,
+        # todo el programa de cambios restante se desplaza por la duración total.
+        self._linea_parada_desde: Optional[datetime] = None
+        self._cambios_diferidos: List["_EventoSim"] = []
+
     # ── Configuración externa ───────────────────────────────────────────────
 
     def configurar_substocks(self, rangos_config: List[Dict[str, Any]]) -> None:
@@ -318,27 +324,36 @@ class TallerCilindros:
         return True
 
     def _parar_jaula(self, jaula_id: int, tiempo: datetime, log) -> None:
-        """Marca una jaula como PARADA (si no lo estaba) y registra la alerta."""
+        """
+        Marca una jaula como PARADA (si no lo estaba) y, con ella, detiene toda
+        la línea: registra el instante en que la línea se frenó (si no lo estaba).
+        """
         jaula = self.jaulas[jaula_id]
-        if jaula.parada:
-            return
-        jaula.parada = True
-        jaula.parada_desde = tiempo
-        self.alertas.append(Alerta(
-            tiempo, "CRITICO",
-            f"PARADA Jaula {jaula_id}: sin stock para formar la pareja de cilindros",
-            jaula_id
-        ))
-        log(f"  >>> JAULA {jaula_id} PARADA: sin CRC ni disponibles para formar pareja <<<")
+        if not jaula.parada:
+            jaula.parada = True
+            jaula.parada_desde = tiempo
+            self.alertas.append(Alerta(
+                tiempo, "CRITICO",
+                f"PARADA Jaula {jaula_id}: sin stock para formar la pareja de cilindros",
+                jaula_id
+            ))
+            log(f"  >>> JAULA {jaula_id} PARADA: sin CRC ni disponibles para formar pareja <<<")
+
+        # La línea entera se detiene desde el primer instante de parada.
+        if self._linea_parada_desde is None:
+            self._linea_parada_desde = tiempo
+            log(f"  >>> LÍNEA DETENIDA desde {tiempo.strftime('%m-%d %H:%M')} "
+                "(se difieren los cambios posteriores) <<<")
 
     def _intentar_reactivar_jaulas(self, tiempo: datetime, log, cola: list) -> bool:
         """
         Intenta rearmar las jaulas en PARADA si ya hay stock para una pareja.
-        Al reactivar, desplaza todos los CAMBIO futuros de esa jaula el mismo
-        tiempo que estuvo parada (la línea se detiene).
-        Los CAMBIO con el mismo instante que inició la parada NO se desplazan
-        (son cambios simultáneos al que causó la parada, en otras jaulas).
-        Las máquinas y la reposición del CRC siguen sin cambios.
+
+        Si tras el intento NO queda ninguna jaula parada, la línea se reanuda:
+        todo el programa de cambios restante (eventos diferidos durante la parada
+        y los que aún quedan en la cola, posteriores al inicio de la parada) se
+        desplaza por la duración total de la parada de línea.
+        Las máquinas y la reposición del CRC nunca se detienen.
         Devuelve True si reactivó al menos una jaula.
         """
         reactivo = False
@@ -346,34 +361,53 @@ class TallerCilindros:
             if not jaula.parada:
                 continue
             if self._instalar_pareja_o_parar(jaula_id, tiempo):
-                parada_desde = jaula.parada_desde
-                dur = (tiempo - parada_desde).total_seconds() / 60 if parada_desde else 0.0
-                retraso = timedelta(minutes=dur)
-
-                # Desplazar los CAMBIO futuros de esta jaula en la cola.
-                # Solo se desplazan los eventos estrictamente posteriores al inicio
-                # de la parada (los simultáneos corresponden a otras jaulas y
-                # no deben verse afectados).
-                for i, ev_s in enumerate(cola):
-                    if (ev_s.tipo == "CAMBIO"
-                            and ev_s.datos.jaula == jaula_id
-                            and parada_desde is not None
-                            and ev_s.tiempo > parada_desde):
-                        cola[i] = _EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos)
-
+                dur = (tiempo - jaula.parada_desde).total_seconds() / 60 if jaula.parada_desde else 0.0
                 jaula.parada = False
                 jaula.parada_desde = None
                 self.alertas.append(Alerta(
                     tiempo, "INFO",
-                    f"Jaula {jaula_id} reactivada tras {dur:.0f} min de parada; "
-                    f"cambios futuros desplazados {dur:.0f} min", jaula_id
+                    f"Jaula {jaula_id} reactivada tras {dur:.0f} min de parada", jaula_id
                 ))
-                log(f"  >>> JAULA {jaula_id} REACTIVADA tras {dur:.0f} min | "
-                    f"cambios futuros desplazados {dur:.0f} min <<<")
+                log(f"  >>> JAULA {jaula_id} REACTIVADA tras {dur:.0f} min de parada <<<")
                 reactivo = True
-        if reactivo:
-            cola.sort(key=lambda x: x.tiempo)
+
+        # ¿Se reanuda la línea? Solo si ya no queda ninguna jaula parada.
+        if self._linea_parada_desde is not None and not any(j.parada for j in self.jaulas.values()):
+            self._reanudar_linea(tiempo, log, cola)
+
         return reactivo
+
+    def _reanudar_linea(self, tiempo: datetime, log, cola: list) -> None:
+        """
+        Reanuda la línea tras una parada: desplaza por la duración total de la
+        parada todos los CAMBIO pendientes (los diferidos y los que siguen en la
+        cola con tiempo posterior al inicio de la parada). Reintegra los diferidos.
+        """
+        inicio = self._linea_parada_desde
+        dur = (tiempo - inicio).total_seconds() / 60 if inicio else 0.0
+        retraso = timedelta(minutes=dur)
+
+        # Desplazar los CAMBIO que aún están en la cola (posteriores al inicio).
+        for i, ev_s in enumerate(cola):
+            if ev_s.tipo == "CAMBIO" and inicio is not None and ev_s.tiempo > inicio:
+                cola[i] = _EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos)
+
+        # Reintegrar los cambios diferidos durante la parada, ya desplazados.
+        for ev_s in self._cambios_diferidos:
+            cola.append(_EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos))
+        n_dif = len(self._cambios_diferidos)
+        self._cambios_diferidos = []
+
+        cola.sort(key=lambda x: x.tiempo)
+        self._linea_parada_desde = None
+
+        self.alertas.append(Alerta(
+            tiempo, "INFO",
+            f"LÍNEA REANUDADA tras {dur:.0f} min; programa de cambios desplazado {dur:.0f} min "
+            f"({n_dif} cambio(s) diferido(s) reprogramado(s))"
+        ))
+        log(f"  >>> LÍNEA REANUDADA tras {dur:.0f} min | programa desplazado {dur:.0f} min "
+            f"| {n_dif} cambio(s) diferido(s) <<<")
 
     # ── Consultas de estado ─────────────────────────────────────────────────
 
@@ -560,6 +594,8 @@ class TallerCilindros:
         t_actual = self.eventos_programados[0].tiempo - timedelta(minutes=1)
         self._recurso_crc_libre_en = t_actual
         self._reposicion_pendiente = set()
+        self._linea_parada_desde = None
+        self._cambios_diferidos = []
         self.generar_snapshot(t_actual)
 
         cola: List[_EventoSim] = [_EventoSim("CAMBIO", ev.tiempo, ev) for ev in self.eventos_programados]
@@ -607,6 +643,16 @@ class TallerCilindros:
                 ev = ev_sim.datos
                 if ev.id in eventos_procesados:
                     continue
+
+                # Línea detenida: se difieren los cambios posteriores al inicio
+                # de la parada (los simultáneos a la parada sí se ejecutan).
+                # Se reprograman al reanudarse la línea, desplazados por la
+                # duración total de la parada.
+                if (self._linea_parada_desde is not None
+                        and ev_sim.tiempo > self._linea_parada_desde):
+                    self._cambios_diferidos.append(ev_sim)
+                    continue
+
                 eventos_procesados.add(ev.id)
                 jaula = self.jaulas[ev.jaula]
 
@@ -668,6 +714,15 @@ class TallerCilindros:
 
         t_final = max(s.tiempo for s in self.snapshots) + timedelta(minutes=30) if self.snapshots else datetime.now()
         self.generar_snapshot(t_final)
+
+        # Cambios que nunca se ejecutaron por una parada de línea sin reanudar.
+        sin_ejecutar = list(self._cambios_diferidos) + [e for e in cola if e.tipo == "CAMBIO"]
+        if sin_ejecutar:
+            ids = ", ".join(e.datos.id for e in sin_ejecutar)
+            msg = (f"ADVERTENCIA: {len(sin_ejecutar)} cambio(s) no se ejecutaron por parada "
+                   f"de línea sin reanudar: {ids}")
+            logger.warning(msg)
+            _log(f"  >>> {msg} <<<")
 
         nc = sum(1 for a in self.alertas if a.tipo == "CRITICO")
         nb = len(self.obtener_cilindros_por_estado(EstadoCilindro.BAJA))
