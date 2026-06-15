@@ -109,3 +109,34 @@ Copy and adapt `datos/generar_caso_parada.py`. The Excel must have exactly four 
 ### Theme / colors
 
 All UI color constants are in `config/tema.py` and imported with `from config.tema import *`. The app uses CustomTkinter Dark mode. Do not hardcode color strings in GUI files.
+
+## Key Design Decisions
+
+These are non-obvious invariants that must be preserved when modifying the engine.
+
+### PARADA is all-or-nothing
+`_instalar_pareja_o_parar()` never installs a partial pair. If there are fewer than `_BUFFER_CRC_SIZE` cylinders available in a jaula's range, it installs **none** and returns `False`. A jaula with only one cylinder working is not a valid state.
+
+### PARADA stops the entire line, not just the affected jaula
+When any jaula goes PARADA, `_linea_parada_desde` is set and ALL subsequent `CAMBIO` events (those with `tiempo > _linea_parada_desde`) are moved to `_cambios_diferidos`. CAMBIO events at the exact same timestamp as the stoppage **do** execute. The line resumes only when **no** jaula remains stopped.
+
+### Machines and CRC replenishment never stop during a PARADA
+`FIN_RECT` and `REPONER_CRC` events always execute. This is intentional: rectification is what produces the stock that allows the line to restart. `asignar_trabajo_maquinas()` is called unconditionally after every `FIN_RECT`, even during a stoppage.
+
+### Reactivation has priority over CRC replenishment
+In the `FIN_RECT` handler, `_intentar_reactivar_jaulas()` is called **before** `_programar_reposicion_crc()`. This ensures a freshly rectified cylinder goes to rearm a stopped jaula first.
+
+### Two-layer time: `ev_sim.tiempo` vs `ev.tiempo`
+`_EventoSim.tiempo` is the actual processing time (may be shifted during line resumption). `ev_sim.datos.tiempo` (the original `EventoCambio.tiempo`) is the time from the Excel file. All simulation logic (cylinder events, snapshots, machine assignment) must use `ev_sim.tiempo`, never `ev.tiempo`.
+
+### SubStock boundary convention
+`hasta < diámetro <= desde` — `hasta` is exclusive (lower bound), `desde` is inclusive (upper bound). This is the opposite of what the variable names suggest at first glance.
+
+### Cylinders marked BAJA in Excel above the minimum diameter
+The simulation does **not** change their state — the Excel is the source of truth. They may be out of service for reasons unrelated to diameter (cracks, defects). A warning is added to `taller.avisos_carga` and shown in the console after loading.
+
+### Single CRC transport resource
+Only one pair of cylinders can be in transit to CRC at a time, serialized via `_recurso_crc_libre_en` and `_reposicion_pendiente`. Do not add parallel CRC transport logic.
+
+### Snapshot granularity
+A snapshot is generated after **every** event (CAMBIO, FIN_RECT, REPONER_CRC). Do not skip snapshots for performance — the GUI seekbar depends on having a snapshot at each simulation step.
