@@ -22,6 +22,7 @@ from gui.dashboard_principal import crear_dashboard_principal
 from gui.dashboard_detalle import crear_dashboard_detalle
 from gui.tab_tabla import llenar_tabla
 from gui.tab_kpis import llenar_kpis
+from gui.tab_config import crear_tab_configuracion
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -114,6 +115,9 @@ class App(ctk.CTk):
         self.tab_cfg = self.tabview.add("Configuración")
         self.tab_log = self.tabview.add("Consola")
 
+        # Pestaña de configuración (rangos por jaula y prioridades de máquinas)
+        self.cfg_widget = crear_tab_configuracion(self.tab_cfg, self)
+
         # Placeholder para la vista real
         self.label_real = ctk.CTkLabel(self.tab_visual, text="Cargue un archivo y simule para ver la vista en tiempo real", font=ctk.CTkFont(size=16))
         self.label_real.pack(pady=100)
@@ -141,6 +145,7 @@ class App(ctk.CTk):
             self.archivo_cargado = fp
             self.status_label.configure(text=f"Cargado: {os.path.basename(fp)}")
             self._log(f"Archivo cargado: {fp}")
+            self.cfg_widget.refrescar()
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar el archivo: {e}")
 
