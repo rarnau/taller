@@ -331,9 +331,14 @@ class TallerCilindros:
         ))
         log(f"  >>> JAULA {jaula_id} PARADA: sin CRC ni disponibles para formar pareja <<<")
 
-    def _intentar_reactivar_jaulas(self, tiempo: datetime, log) -> bool:
+    def _intentar_reactivar_jaulas(self, tiempo: datetime, log, cola: list) -> bool:
         """
         Intenta rearmar las jaulas en PARADA si ya hay stock para una pareja.
+        Al reactivar, desplaza todos los CAMBIO futuros de esa jaula el mismo
+        tiempo que estuvo parada (la línea se detiene).
+        Los CAMBIO con el mismo instante que inició la parada NO se desplazan
+        (son cambios simultáneos al que causó la parada, en otras jaulas).
+        Las máquinas y la reposición del CRC siguen sin cambios.
         Devuelve True si reactivó al menos una jaula.
         """
         reactivo = False
@@ -341,15 +346,33 @@ class TallerCilindros:
             if not jaula.parada:
                 continue
             if self._instalar_pareja_o_parar(jaula_id, tiempo):
-                dur = (tiempo - jaula.parada_desde).total_seconds() / 60 if jaula.parada_desde else 0.0
+                parada_desde = jaula.parada_desde
+                dur = (tiempo - parada_desde).total_seconds() / 60 if parada_desde else 0.0
+                retraso = timedelta(minutes=dur)
+
+                # Desplazar los CAMBIO futuros de esta jaula en la cola.
+                # Solo se desplazan los eventos estrictamente posteriores al inicio
+                # de la parada (los simultáneos corresponden a otras jaulas y
+                # no deben verse afectados).
+                for i, ev_s in enumerate(cola):
+                    if (ev_s.tipo == "CAMBIO"
+                            and ev_s.datos.jaula == jaula_id
+                            and parada_desde is not None
+                            and ev_s.tiempo > parada_desde):
+                        cola[i] = _EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos)
+
                 jaula.parada = False
                 jaula.parada_desde = None
                 self.alertas.append(Alerta(
                     tiempo, "INFO",
-                    f"Jaula {jaula_id} reactivada tras {dur:.0f} min de parada", jaula_id
+                    f"Jaula {jaula_id} reactivada tras {dur:.0f} min de parada; "
+                    f"cambios futuros desplazados {dur:.0f} min", jaula_id
                 ))
-                log(f"  >>> JAULA {jaula_id} REACTIVADA tras {dur:.0f} min de parada <<<")
+                log(f"  >>> JAULA {jaula_id} REACTIVADA tras {dur:.0f} min | "
+                    f"cambios futuros desplazados {dur:.0f} min <<<")
                 reactivo = True
+        if reactivo:
+            cola.sort(key=lambda x: x.tiempo)
         return reactivo
 
     # ── Consultas de estado ─────────────────────────────────────────────────
@@ -561,7 +584,7 @@ class TallerCilindros:
                 cil_terminado = maq.finalizar_rectificado(ev_sim.tiempo)
                 if cil_terminado:
                     # Prioridad: rearmar jaulas paradas con el nuevo stock disponible
-                    self._intentar_reactivar_jaulas(ev_sim.tiempo, _log)
+                    self._intentar_reactivar_jaulas(ev_sim.tiempo, _log, cola)
                     # Programar reposición del CRC (recurso único, secuencial)
                     for j_id in range(1, self.cantidad_jaulas + 1):
                         self._programar_reposicion_crc(j_id, ev_sim.tiempo, cola)
@@ -577,7 +600,7 @@ class TallerCilindros:
                 # Solo repone (y genera snapshot) si el CRC sigue incompleto
                 if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
                     self.reponer_buffer_crc(j_id, ev_sim.tiempo)
-                    self._intentar_reactivar_jaulas(ev_sim.tiempo, _log)
+                    self._intentar_reactivar_jaulas(ev_sim.tiempo, _log, cola)
                     self.generar_snapshot(ev_sim.tiempo)
 
             elif ev_sim.tipo == "CAMBIO":
@@ -587,7 +610,14 @@ class TallerCilindros:
                 eventos_procesados.add(ev.id)
                 jaula = self.jaulas[ev.jaula]
 
-                _log(f"  {ev.tiempo.strftime('%m-%d %H:%M')} | Jaula {ev.jaula} | Cambio a {ev.tipo.value} | CRC={len(jaula.cilindros_crc)}")
+                # ev_sim.tiempo es el tiempo real de procesamiento (puede estar
+                # desplazado respecto al ev.tiempo original si hubo una PARADA).
+                t_proc = ev_sim.tiempo
+                retraso_str = (f" [orig {ev.tiempo.strftime('%H:%M')}, retr "
+                               f"{int((t_proc - ev.tiempo).total_seconds() / 60)} min]"
+                               if t_proc != ev.tiempo else "")
+                _log(f"  {t_proc.strftime('%m-%d %H:%M')} | Jaula {ev.jaula} | Cambio a {ev.tipo.value}"
+                     f" | CRC={len(jaula.cilindros_crc)}{retraso_str}")
 
                 # 1. Los cilindros trabajando pasan a cola de rectificado
                 for cil in list(jaula.cilindros_trabajando):
@@ -595,24 +625,24 @@ class TallerCilindros:
                     cil.jaula = None
                     cil.tipo_rectificado_actual = ev.tipo
                     cil.mm_a_rectificar = ev.mm_a_rectificar
-                    cil.registrar_evento(ev.tiempo, f"Retirado de Jaula {ev.jaula} para rectificado")
+                    cil.registrar_evento(t_proc, f"Retirado de Jaula {ev.jaula} para rectificado")
                 jaula.cilindros_trabajando.clear()
 
                 # 2. Subir una pareja completa a la jaula; si no hay stock, PARADA.
                 #    La jaula no puede operar con menos de _BUFFER_CRC_SIZE cilindros.
-                if self._instalar_pareja_o_parar(ev.jaula, ev.tiempo):
+                if self._instalar_pareja_o_parar(ev.jaula, t_proc):
                     jaula.parada = False
                     jaula.parada_desde = None
                 else:
-                    self._parar_jaula(ev.jaula, ev.tiempo, _log)
+                    self._parar_jaula(ev.jaula, t_proc, _log)
 
                 # 3. Asignar trabajo a máquinas y snapshot con el CRC ya vaciado
-                nuevos = self.asignar_trabajo_maquinas(ev.tiempo)
+                nuevos = self.asignar_trabajo_maquinas(t_proc)
                 cola.extend(nuevos)
                 # 4. Programar la reposición del CRC (recurso único, secuencial)
-                self._programar_reposicion_crc(ev.jaula, ev.tiempo, cola)
+                self._programar_reposicion_crc(ev.jaula, t_proc, cola)
                 cola.sort(key=lambda x: x.tiempo)
-                self.generar_snapshot(ev.tiempo)
+                self.generar_snapshot(t_proc)
 
         if cola and iteracion >= _MAX_ITERACIONES_SIM:
             msg = f"ADVERTENCIA: Límite de {_MAX_ITERACIONES_SIM} iteraciones alcanzado con {len(cola)} eventos pendientes."
@@ -627,7 +657,7 @@ class TallerCilindros:
                     hay_actividad = True
                     t_fin = maq.tiempo_fin_rectificado
                     maq.finalizar_rectificado(t_fin)
-                    self._intentar_reactivar_jaulas(t_fin, _log)
+                    self._intentar_reactivar_jaulas(t_fin, _log, cola)
                     for j_id in range(1, self.cantidad_jaulas + 1):
                         if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
                             self.reponer_buffer_crc(j_id, t_fin + timedelta(minutes=self.tiempo_traslado_crc_min))
