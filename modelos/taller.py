@@ -173,6 +173,17 @@ class TallerCilindros:
 
             self.cilindros[cil.id] = cil
 
+        # Cilindros que ya vienen por debajo del mínimo utilizable -> BAJA.
+        # (Durante la simulación esto no puede ocurrir; solo desde datos iniciales.)
+        for cil in self.cilindros.values():
+            if cil.estado != EstadoCilindro.BAJA and cil.diametro < self.diametro_minimo:
+                logger.warning(
+                    "Cilindro %s con diámetro %.2f < mínimo %.2f: marcado BAJA al cargar.",
+                    cil.id, cil.diametro, self.diametro_minimo
+                )
+                cil.estado = EstadoCilindro.BAJA
+                cil.jaula = None
+
         # Inicializar jaulas y ubicar cilindros
         for j_id in range(1, self.cantidad_jaulas + 1):
             self.jaulas[j_id] = Jaula(j_id)
