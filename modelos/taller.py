@@ -31,9 +31,9 @@ _HOJA_CAMBIOS = "Programa_Cambios"
 
 class _EventoSim(NamedTuple):
     """Evento interno tipado para la cola de simulación."""
-    tipo: str       # "CAMBIO" | "FIN_RECT"
+    tipo: str       # "CAMBIO" | "FIN_RECT" | "REPONER_CRC"
     tiempo: datetime
-    datos: Any      # EventoCambio (CAMBIO) | str nombre máquina (FIN_RECT)
+    datos: Any      # EventoCambio (CAMBIO) | str nombre máquina (FIN_RECT) | int jaula (REPONER_CRC)
 
 
 class TallerCilindros:
