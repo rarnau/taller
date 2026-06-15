@@ -1,21 +1,96 @@
-"""Maquina."""
-from datetime import datetime,timedelta
-from .enums import EstadoCilindro,TipoRectificado
+"""
+Modelo de una máquina rectificadora de cilindros.
+"""
+from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any
+from .enums import EstadoCilindro, TipoRectificado
 from .cilindro import Cilindro
-class MaquinaRect:
-    def __init__(self,nombre):
-        self.nombre=nombre;self.ocupada=False;self.cil_actual=None;self.fin_rect=None
-        self.tasas={};self.prioridad=TipoRectificado.PRODUCCION;self.hist=[];self.t_ocupada=0.0
-    def config_tasa(self,tipo,mm,t_min): self.tasas[tipo]={"mm":mm,"t_min":t_min,"rate":mm/t_min if t_min>0 else 0.0}
-    def calc_tiempo(self,mm_rect,tipo):
-        if tipo not in self.tasas or self.tasas[tipo]["rate"]<=0: return float("inf")
-        return mm_rect/self.tasas[tipo]["rate"]
-    def iniciar(self,cil,t_now,tipo,mm):
-        dur=self.calc_tiempo(mm,tipo.value);self.ocupada=True;self.cil_actual=cil;self.fin_rect=t_now+timedelta(minutes=dur)
-        cil.estado=EstadoCilindro.RECTIFICANDO;cil.maquina=self.nombre;cil.rect_inicio=t_now;cil.rect_fin=self.fin_rect;cil.tipo_rect=tipo;cil.mm_rect=mm
-        cil.log(t_now,f"Inicio rect. {tipo.value} en {self.nombre}",f"D{cil.diametro}->{round(cil.diametro-mm,2)} ({dur:.0f}min)")
-        self.hist.append({"cil":cil.id,"ini":t_now,"fin":self.fin_rect,"tipo":tipo.value,"mm":mm,"dur":dur});self.t_ocupada+=dur
-    def finalizar(self,t_now):
-        if not self.ocupada or not self.cil_actual: return None
-        c=self.cil_actual;c.rectificar(c.mm_rect);c.estado=EstadoCilindro.DISPONIBLE;c.maquina=None
-        c.log(t_now,f"Fin rect. {self.nombre}",f"Nuevo D{c.diametro}mm");self.ocupada=False;self.cil_actual=None;self.fin_rect=None;return c
+
+
+class MaquinaRectificadora:
+    """
+    Simula el comportamiento de una rectificadora, su capacidad y tiempos de proceso.
+    """
+
+    def __init__(self, nombre: str):
+        self.nombre = nombre
+        self.ocupada = False
+        self.cilindro_actual: Optional[Cilindro] = None
+        self.tiempo_fin_rectificado: Optional[datetime] = None
+
+        # Tasas de rectificado: {tipo: {"mm": mm, "t_min": min, "rate": mm/min}}
+        self.tasas_rectificado: Dict[str, Dict[str, float]] = {}
+        self.prioridad_defecto = TipoRectificado.PRODUCCION
+
+        # Estadísticas e historial
+        self.historial_trabajo: List[Dict[str, Any]] = []
+        self.tiempo_total_ocupada_min = 0.0
+
+    def configurar_tasa(self, tipo: str, mm_removidos: float, tiempo_minutos: float):
+        """Configura la velocidad de rectificado para un tipo de pase."""
+        tasa = mm_removidos / tiempo_minutos if tiempo_minutos > 0 else 0.0
+        self.tasas_rectificado[tipo] = {
+            "mm": mm_removidos,
+            "t_min": tiempo_minutos,
+            "rate": tasa
+        }
+
+    def calcular_tiempo_proceso(self, mm_a_rectificar: float, tipo: str) -> float:
+        """Calcula cuántos minutos tomará rectificar una cantidad de mm."""
+        if tipo not in self.tasas_rectificado or self.tasas_rectificado[tipo]["rate"] <= 0:
+            return float("inf")
+        return mm_a_rectificar / self.tasas_rectificado[tipo]["rate"]
+
+    def iniciar_rectificado(self, cilindro: Cilindro, tiempo_actual: datetime, tipo: TipoRectificado, mm: float):
+        """Inicia el proceso de rectificado para un cilindro."""
+        duracion_minutos = self.calcular_tiempo_proceso(mm, tipo.value)
+        self.ocupada = True
+        self.cilindro_actual = cilindro
+        self.tiempo_fin_rectificado = tiempo_actual + timedelta(minutes=duracion_minutos)
+
+        # Actualizar estado del cilindro
+        cilindro.estado = EstadoCilindro.RECTIFICANDO
+        cilindro.maquina_actual = self.nombre
+        cilindro.rectificado_inicio = tiempo_actual
+        cilindro.rectificado_fin = self.tiempo_fin_rectificado
+        cilindro.tipo_rectificado_actual = tipo
+        cilindro.mm_a_rectificar = mm
+
+        cilindro.registrar_evento(
+            tiempo_actual,
+            f"Inicio rectificado {tipo.value} en {self.nombre}",
+            f"D{cilindro.diametro}->{round(cilindro.diametro - mm, 2)} ({duracion_minutos:.0f} min)"
+        )
+
+        # Registrar en historial de la máquina
+        self.historial_trabajo.append({
+            "cilindro_id": cilindro.id,
+            "inicio": tiempo_actual,
+            "fin": self.tiempo_fin_rectificado,
+            "tipo": tipo.value,
+            "mm": mm,
+            "duracion": duracion_minutos
+        })
+        self.tiempo_total_ocupada_min += duracion_minutos
+
+    def finalizar_rectificado(self, tiempo_actual: datetime) -> Optional[Cilindro]:
+        """Finaliza el proceso actual y libera la máquina."""
+        if not self.ocupada or not self.cilindro_actual:
+            return None
+
+        cilindro = self.cilindro_actual
+        cilindro.rectificar(cilindro.mm_a_rectificar)
+        cilindro.estado = EstadoCilindro.DISPONIBLE
+        cilindro.maquina_actual = None
+
+        cilindro.registrar_evento(
+            tiempo_actual,
+            f"Fin rectificado en {self.nombre}",
+            f"Nuevo diámetro: {cilindro.diametro} mm"
+        )
+
+        self.ocupada = False
+        self.cilindro_actual = None
+        self.tiempo_fin_rectificado = None
+
+        return cilindro

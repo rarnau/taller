@@ -1,49 +1,58 @@
-"""KPIs."""
-import tkinter as tk
+"""KPIs adaptados."""
+import customtkinter as ctk
 import numpy as np
 from modelos.enums import EstadoCilindro
-from config.tema import BG, BG2, BG3, BG_CARD, FG2, ACCENT, GREEN, ORANGE, RED, PURPLE, CYAN, YELLOW, FONT_FAMILY, FONT_SIZE, FONT_SIZE_KPI
-
+from config.tema import *
 
 def _ct(p, l, v, co, r, c):
-    f = tk.Frame(p, bg=BG_CARD, bd=1, relief="solid", highlightbackground=co, highlightthickness=1)
-    f.grid(row=r, column=c, padx=12, pady=10, sticky="nsew", ipadx=20, ipady=16)
-    tk.Frame(f, bg=co, height=3).pack(fill="x", side="top")
-    tk.Label(f, text=l.upper(), bg=BG_CARD, fg=FG2, font=(FONT_FAMILY, FONT_SIZE, "bold")).pack(pady=(12, 4))
-    tk.Label(f, text=v, bg=BG_CARD, fg=co, font=(FONT_FAMILY, FONT_SIZE_KPI, "bold")).pack(pady=(0, 12))
+    f = ctk.CTkFrame(p, border_width=1, border_color=co)
+    f.grid(row=r, column=c, padx=10, pady=10, sticky="nsew")
+
+    ctk.CTkLabel(f, text=l.upper(), font=ctk.CTkFont(size=11, weight="bold"), text_color=FG2).pack(pady=(15, 5))
+    ctk.CTkLabel(f, text=v, font=ctk.CTkFont(size=24, weight="bold"), text_color=co).pack(pady=(0, 15))
 
 
 def llenar_kpis(tab, taller):
     for w in tab.winfo_children():
         w.destroy()
-    shell = tk.Frame(tab, bg=BG, padx=10, pady=10)
-    shell.pack(fill="both", expand=True)
-    card = tk.Frame(shell, bg=BG2, bd=1, relief="solid", highlightbackground=BG3, highlightthickness=1)
-    card.pack(fill="both", expand=True)
-    header = tk.Frame(card, bg=BG3, height=44)
-    header.pack(fill="x")
-    header.pack_propagate(False)
-    tk.Label(header, text="Indicadores clave de rendimiento", bg=BG3, fg=ACCENT, font=(FONT_FAMILY, 13, "bold")).pack(side="left", padx=12, pady=8)
-    m = tk.Frame(card, bg=BG2, padx=14, pady=10)
-    m.pack(fill="both", expand=True)
-    t2 = len(taller.cils)
-    act = len([c for c in taller.cils.values() if c.estado != EstadoCilindro.BAJA])
+
+    container = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+    container.pack(fill="both", expand=True, padx=20, pady=20)
+
+    t2 = len(taller.cilindros)
+    act = len([c for c in taller.cilindros.values() if c.estado != EstadoCilindro.BAJA])
     baj = t2 - act
     nc = sum(1 for a in taller.alertas if a.tipo == "CRITICO")
-    nr = sum(len(mq.hist) for mq in taller.maqs.values())
-    th = (taller.snaps[-1].t - taller.snaps[0].t).total_seconds() / 3600 if taller.snaps else 0
-    da = np.mean([c.diametro for c in taller.cils.values() if c.estado != EstadoCilindro.BAJA]) if act else 0
-    dl = [c.diam_original - c.diametro for c in taller.cils.values() if c.diam_original != c.diametro]
+    nr = sum(len(mq.historial_trabajo) for mq in taller.maquinas.values())
+
+    th = 0
+    if taller.snapshots:
+        th = (taller.snapshots[-1].tiempo - taller.snapshots[0].tiempo).total_seconds() / 3600
+
+    da = np.mean([c.diametro for c in taller.cilindros.values() if c.estado != EstadoCilindro.BAJA]) if act else 0
+    dl = [c.diametro_original - c.diametro for c in taller.cilindros.values() if c.diametro_original != c.diametro]
     dd = np.mean(dl) if dl else 0
-    kpis = [("Cilindros Totales", str(t2), ACCENT), ("Activos", str(act), GREEN), ("Bajas", str(baj), RED if baj else GREEN), ("Alertas Críticas", str(nc), RED if nc else GREEN), ("Cambios", str(len(taller.eventos)), ORANGE), ("Rectificados", str(nr), PURPLE), ("Horizonte (h)", f"{th:.1f}", CYAN), ("Diam. Promedio", f"{da:.1f} mm", YELLOW), ("Desgaste Medio", f"{dd:.2f} mm", "#F97316")]
-    for mn, mq in taller.maqs.items():
-        pct = (mq.t_ocupada / 60) / th * 100 if th else 0
-        kpis.append((f"Util. {mn}", f"{pct:.0f}%", GREEN if pct < 85 else ORANGE))
+
+    kpis = [
+        ("Cilindros Totales", str(t2), ACCENT),
+        ("Activos", str(act), GREEN),
+        ("Bajas", str(baj), RED if baj else GREEN),
+        ("Alertas Críticas", str(nc), RED if nc else GREEN),
+        ("Cambios Programados", str(len(taller.eventos_programados)), ORANGE),
+        ("Rectificados Realizados", str(nr), PURPLE),
+        ("Horizonte Simulación (h)", f"{th:.1f}", CYAN),
+        ("Diámetro Promedio", f"{da:.1f} mm", YELLOW),
+        ("Desgaste Medio", f"{dd:.2f} mm", "#F97316")
+    ]
+
+    for mn, mq in taller.maquinas.items():
+        pct = (mq.tiempo_total_ocupada_min / 60) / th * 100 if th else 0
+        kpis.append((f"Utilización {mn}", f"{pct:.0f}%", GREEN if pct < 85 else ORANGE))
+
     cols = 3
     for i, (lbl, val, co) in enumerate(kpis):
         r, c2 = divmod(i, cols)
-        _ct(m, lbl, val, co, r, c2)
+        _ct(container, lbl, val, co, r, c2)
+
     for i in range(cols):
-        m.columnconfigure(i, weight=1)
-    for i in range((len(kpis) + cols - 1) // cols):
-        m.rowconfigure(i, weight=1)
+        container.columnconfigure(i, weight=1)
