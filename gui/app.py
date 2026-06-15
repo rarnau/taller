@@ -95,8 +95,8 @@ class App(ctk.CTk):
 
         self.label_vel = ctk.CTkLabel(self.sidebar, text="Velocidad: 1x")
         self.label_vel.grid(row=7, column=0, padx=20, pady=0)
-        self.slider_vel = ctk.CTkSlider(self.sidebar, from_=0.1, to=10, number_of_steps=99, command=self._change_speed)
-        self.slider_vel.set(1.0)
+        self.slider_vel = ctk.CTkSlider(self.sidebar, from_=1, to=100, number_of_steps=99, command=self._change_speed)
+        self.slider_vel.set(10)  # 10/10 = 1.0x
         self.slider_vel.grid(row=8, column=0, padx=20, pady=10)
 
     def _create_main_content(self):
@@ -249,7 +249,7 @@ class App(ctk.CTk):
             messagebox.showinfo(f"Detalle Cilindro {id_cilindro}", msg)
 
     def _change_speed(self, value):
-        self.velocidad_reproduccion = float(value)
+        self.velocidad_reproduccion = float(value) / 10.0
         self.label_vel.configure(text=f"Velocidad: {self.velocidad_reproduccion:.1f}x")
 
     def _exportar(self):
