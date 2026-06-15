@@ -59,6 +59,9 @@ class Snapshot:
         # Conteo de CRC por jaula
         self.crc_por_jaula: Dict[int, int] = {}
 
+        # Jaulas detenidas (PARADA) en este instante por falta de stock
+        self.jaulas_paradas: List[int] = []
+
         # Detalle para visualización en tiempo real
         self.detalle_jaulas: Dict[int, List[Dict[str, Any]]] = {}       # {jaula_id: [{"id", "d"}]}
         self.detalle_crc: Dict[int, List[Dict[str, Any]]] = {}          # {jaula_id: [{"id", "d"}]}

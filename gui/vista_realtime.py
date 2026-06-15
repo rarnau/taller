@@ -46,12 +46,28 @@ class SeccionTaller(ctk.CTkFrame):
                          width=self.ANCHO, height=self.ALTO)
         self.pack_propagate(False)  # mantiene el tamaño fijo aunque esté vacío
 
+        self._titulo_orig = titulo
+        self._color_borde_orig = color_borde
+        self.parada = False
+
         self.titulo = ctk.CTkLabel(self, text=titulo, font=ctk.CTkFont(size=13, weight="bold"))
         self.titulo.pack(pady=(4, 2))
 
         self.container = ctk.CTkFrame(self, fg_color="transparent")
         self.container.pack(expand=True, fill="both", padx=8, pady=(0, 8))
         self.cilindros_widgets: dict = {}  # {cilindro_id: widget}
+
+    def set_parada(self, parada: bool) -> None:
+        """Resalta la sección como PARADA (borde rojo y título de aviso)."""
+        if parada == self.parada:
+            return
+        self.parada = parada
+        if parada:
+            self.configure(border_color=RED, border_width=3)
+            self.titulo.configure(text="⛔ PARADA", text_color=RED)
+        else:
+            self.configure(border_color=self._color_borde_orig, border_width=2)
+            self.titulo.configure(text=self._titulo_orig, text_color=FG)
 
     def actualizar(self, lista_cilindros: list, on_click_callback) -> None:
         ids_nuevos = [c["id"] for c in lista_cilindros]
@@ -210,9 +226,11 @@ class VistaRealTime(ctk.CTkScrollableFrame):
 
     def actualizar(self, snapshot) -> None:
         """Actualiza todos los componentes visuales con el estado de un snapshot."""
+        paradas = set(getattr(snapshot, "jaulas_paradas", []))
         for i in range(1, self.cantidad_jaulas + 1):
             if i in snapshot.detalle_jaulas and i in self.jaulas_frames:
                 self.jaulas_frames[i].actualizar(snapshot.detalle_jaulas[i], self.on_cilindro_click)
+                self.jaulas_frames[i].set_parada(i in paradas)
             if i in snapshot.detalle_crc and i in self.crc_frames:
                 self.crc_frames[i].actualizar(snapshot.detalle_crc[i], self.on_cilindro_click)
 
