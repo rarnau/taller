@@ -7,43 +7,60 @@ from .enums import TipoRectificado
 
 
 class EventoCambio:
-    """Representa un evento de cambio de cilindros programado."""
-    def __init__(self, id_evento: str, tiempo: datetime, jaula: int, tipo: TipoRectificado, mm_a_rectificar: float, observacion: str = ""):
-        self.id = id_evento
-        self.tiempo = tiempo
-        self.jaula = jaula
-        self.tipo = tipo
-        self.mm_a_rectificar = mm_a_rectificar
-        self.observacion = observacion
+    """Representa un evento de cambio de cilindros programado en el taller."""
+
+    def __init__(
+        self,
+        id_evento: str,
+        tiempo: datetime,
+        jaula: int,
+        tipo: TipoRectificado,
+        mm_a_rectificar: float,
+        observacion: str = ""
+    ):
+        self.id: str = id_evento
+        self.tiempo: datetime = tiempo
+        self.jaula: int = jaula
+        self.tipo: TipoRectificado = tipo
+        self.mm_a_rectificar: float = mm_a_rectificar
+        self.observacion: str = observacion
 
 
 class Alerta:
-    """Representa una notificación o alerta generada durante la simulación."""
+    """Notificación generada durante la simulación (INFO o CRITICO)."""
+
     def __init__(self, tiempo: datetime, tipo: str, mensaje: str, jaula: Optional[int] = None):
-        self.tiempo = tiempo
-        self.tipo = tipo  # "INFO", "CRITICO", etc.
-        self.mensaje = mensaje
-        self.jaula = jaula
+        self.tiempo: datetime = tiempo
+        self.tipo: str = tipo       # "INFO" | "CRITICO"
+        self.mensaje: str = mensaje
+        self.jaula: Optional[int] = jaula
 
 
 class Snapshot:
     """
-    Captura el estado completo del taller en un momento específico del tiempo.
-    Se utiliza para la reproducción de la simulación y gráficos.
+    Captura el estado completo del taller en un instante de la simulación.
+    Utilizado para reproducción en la GUI y generación de gráficos.
     """
+
     def __init__(self, tiempo: datetime):
-        self.tiempo = tiempo
+        self.tiempo: datetime = tiempo
+
+        # Conteos globales por estado
         self.conteo_por_estado: Dict[str, int] = {}
+        self.cantidad_disponibles: int = 0
+        self.cantidad_crc_total: int = 0
+        self.cantidad_bajas: int = 0
+        self.maquinas_ocupadas: int = 0
+
+        # Conteos por SubStock
         self.conteo_por_substock: Dict[str, Dict[str, int]] = {}
-        self.maquinas_ocupadas = 0
-        self.cantidad_bajas = 0
-        self.cantidad_disponibles = 0
-        self.cantidad_crc_total = 0
-        self.crc_por_jaula: Dict[int, int] = {}
         self.disponibles_por_substock: Dict[str, int] = {}
 
-        # Nuevos campos para visualización detallada en tiempo real
-        self.detalle_jaulas: Dict[int, List[Dict[str, Any]]] = {}  # {jaula_id: [{"id": id, "d": diam}, ...]}
-        self.detalle_crc: Dict[int, List[Dict[str, Any]]] = {}     # {jaula_id: [{"id": id, "d": diam}, ...]}
-        self.detalle_maquinas: Dict[str, Optional[Dict[str, Any]]] = {} # {maq_id: {"id": id, "d": diam, "progreso": %}}
-        self.detalle_cola_rectificado: List[Dict[str, Any]] = []    # [{"id": id, "d": diam}, ...]
+        # Conteo de CRC por jaula
+        self.crc_por_jaula: Dict[int, int] = {}
+
+        # Detalle para visualización en tiempo real
+        self.detalle_jaulas: Dict[int, List[Dict[str, Any]]] = {}       # {jaula_id: [{"id", "d"}]}
+        self.detalle_crc: Dict[int, List[Dict[str, Any]]] = {}          # {jaula_id: [{"id", "d"}]}
+        self.detalle_maquinas: Dict[str, Optional[Dict[str, Any]]] = {} # {maq_id: {"id","d","progreso"} | None}
+        self.detalle_cola_rectificado: List[Dict[str, Any]] = []        # [{"id", "d"}]
