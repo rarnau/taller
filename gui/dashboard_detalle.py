@@ -4,7 +4,7 @@ from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
 from matplotlib.dates import DateFormatter
 from modelos.enums import EstadoCilindro
-from config.tema import BG, BG2, BG3, FG, FG2, ACCENT, RED, GREEN, COLORES_ESTADO
+from config.tema import BG, BG2, BG3, FG, FG2, ACCENT, RED, GREEN, ORANGE, COLORES_ESTADO
 
 def _style_ax(ax, title):
     ax.set_facecolor("#222")
