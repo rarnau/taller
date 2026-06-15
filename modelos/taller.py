@@ -272,6 +272,14 @@ class TallerCilindros:
                     continue
                 break
 
+            # Una jaula no puede arrancar con menos de una pareja completa.
+            if len(jaula.cilindros_trabajando) < _BUFFER_CRC_SIZE:
+                jaula.parada = True
+                logger.warning(
+                    "Jaula %s arranca PARADA: solo %d cilindro(s) en su rango de diámetros.",
+                    j_id, len(jaula.cilindros_trabajando)
+                )
+
     def _instalar_en_jaula(self, cil: Cilindro, jaula_id: int, tiempo: datetime, motivo: str) -> None:
         """Mueve un cilindro al estado TRABAJANDO en la jaula indicada."""
         jaula = self.jaulas[jaula_id]
@@ -281,6 +289,68 @@ class TallerCilindros:
             jaula.cilindros_crc.remove(cil)
         jaula.cilindros_trabajando.append(cil)
         cil.registrar_evento(tiempo, motivo)
+
+    def _instalar_pareja_o_parar(self, jaula_id: int, tiempo: datetime) -> bool:
+        """
+        Completa la pareja de trabajo de una jaula (CRC primero, luego disponibles
+        del rango). Una jaula no puede operar con menos de _BUFFER_CRC_SIZE
+        cilindros: si no hay stock suficiente para completarla, NO instala ninguno
+        y devuelve False (la jaula debe quedar PARADA).
+        """
+        jaula = self.jaulas[jaula_id]
+        faltan = _BUFFER_CRC_SIZE - len(jaula.cilindros_trabajando)
+        if faltan <= 0:
+            return True
+
+        candidatos = list(jaula.cilindros_crc)
+        if len(candidatos) < faltan:
+            disponibles = sorted(
+                self.obtener_disponibles_para_jaula(jaula_id),
+                key=lambda c: c.diametro, reverse=True
+            )
+            candidatos += [c for c in disponibles if c not in candidatos]
+
+        if len(candidatos) < faltan:
+            return False  # no se puede formar la pareja -> PARADA
+
+        for cil in candidatos[:faltan]:
+            self._instalar_en_jaula(cil, jaula_id, tiempo, f"Instalado en Jaula {jaula_id}")
+        return True
+
+    def _parar_jaula(self, jaula_id: int, tiempo: datetime, log) -> None:
+        """Marca una jaula como PARADA (si no lo estaba) y registra la alerta."""
+        jaula = self.jaulas[jaula_id]
+        if jaula.parada:
+            return
+        jaula.parada = True
+        jaula.parada_desde = tiempo
+        self.alertas.append(Alerta(
+            tiempo, "CRITICO",
+            f"PARADA Jaula {jaula_id}: sin stock para formar la pareja de cilindros",
+            jaula_id
+        ))
+        log(f"  >>> JAULA {jaula_id} PARADA: sin CRC ni disponibles para formar pareja <<<")
+
+    def _intentar_reactivar_jaulas(self, tiempo: datetime, log) -> bool:
+        """
+        Intenta rearmar las jaulas en PARADA si ya hay stock para una pareja.
+        Devuelve True si reactivó al menos una jaula.
+        """
+        reactivo = False
+        for jaula_id, jaula in self.jaulas.items():
+            if not jaula.parada:
+                continue
+            if self._instalar_pareja_o_parar(jaula_id, tiempo):
+                dur = (tiempo - jaula.parada_desde).total_seconds() / 60 if jaula.parada_desde else 0.0
+                jaula.parada = False
+                jaula.parada_desde = None
+                self.alertas.append(Alerta(
+                    tiempo, "INFO",
+                    f"Jaula {jaula_id} reactivada tras {dur:.0f} min de parada", jaula_id
+                ))
+                log(f"  >>> JAULA {jaula_id} REACTIVADA tras {dur:.0f} min de parada <<<")
+                reactivo = True
+        return reactivo
 
     # ── Consultas de estado ─────────────────────────────────────────────────
 
@@ -342,6 +412,8 @@ class TallerCilindros:
             sn.crc_por_jaula[j_id] = len(jaula.cilindros_crc)
             sn.detalle_jaulas[j_id] = [{"id": c.id, "d": c.diametro} for c in jaula.cilindros_trabajando]
             sn.detalle_crc[j_id] = [{"id": c.id, "d": c.diametro} for c in jaula.cilindros_crc]
+            if jaula.parada:
+                sn.jaulas_paradas.append(j_id)
 
         for m_nombre, maq in self.maquinas.items():
             if maq.ocupada and maq.cilindro_actual:
@@ -488,6 +560,8 @@ class TallerCilindros:
 
                 cil_terminado = maq.finalizar_rectificado(ev_sim.tiempo)
                 if cil_terminado:
+                    # Prioridad: rearmar jaulas paradas con el nuevo stock disponible
+                    self._intentar_reactivar_jaulas(ev_sim.tiempo, _log)
                     # Programar reposición del CRC (recurso único, secuencial)
                     for j_id in range(1, self.cantidad_jaulas + 1):
                         self._programar_reposicion_crc(j_id, ev_sim.tiempo, cola)
@@ -503,6 +577,7 @@ class TallerCilindros:
                 # Solo repone (y genera snapshot) si el CRC sigue incompleto
                 if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
                     self.reponer_buffer_crc(j_id, ev_sim.tiempo)
+                    self._intentar_reactivar_jaulas(ev_sim.tiempo, _log)
                     self.generar_snapshot(ev_sim.tiempo)
 
             elif ev_sim.tipo == "CAMBIO":
@@ -523,36 +598,13 @@ class TallerCilindros:
                     cil.registrar_evento(ev.tiempo, f"Retirado de Jaula {ev.jaula} para rectificado")
                 jaula.cilindros_trabajando.clear()
 
-                # 2. Subir cilindros del CRC a la jaula
-                if len(jaula.cilindros_crc) >= _BUFFER_CRC_SIZE:
-                    pareja = list(jaula.cilindros_crc[:_BUFFER_CRC_SIZE])
-                    for cil in pareja:
-                        self._instalar_en_jaula(cil, ev.jaula, ev.tiempo, f"Instalado en Jaula {ev.jaula} (desde CRC)")
+                # 2. Subir una pareja completa a la jaula; si no hay stock, PARADA.
+                #    La jaula no puede operar con menos de _BUFFER_CRC_SIZE cilindros.
+                if self._instalar_pareja_o_parar(ev.jaula, ev.tiempo):
+                    jaula.parada = False
+                    jaula.parada_desde = None
                 else:
-                    # Caso crítico: CRC insuficiente
-                    for cil in list(jaula.cilindros_crc):
-                        self._instalar_en_jaula(cil, ev.jaula, ev.tiempo, f"Instalado en Jaula {ev.jaula} (urgente)")
-
-                    deficit = _BUFFER_CRC_SIZE - len(jaula.cilindros_trabajando)
-                    if deficit > 0:
-                        disponibles = sorted(
-                            self.obtener_disponibles_para_jaula(ev.jaula),
-                            key=lambda c: c.diametro, reverse=True
-                        )
-                        for cil in disponibles[:deficit]:
-                            self._instalar_en_jaula(
-                                cil, ev.jaula, ev.tiempo,
-                                f"Instalado en Jaula {ev.jaula} (directo desde disponible)"
-                            )
-
-                    deficit = _BUFFER_CRC_SIZE - len(jaula.cilindros_trabajando)
-                    if deficit > 0:
-                        self.alertas.append(
-                            Alerta(ev.tiempo, "CRITICO",
-                                   f"STOCK INSUFICIENTE Jaula {ev.jaula}: faltan {deficit} cilindros",
-                                   ev.jaula)
-                        )
-                        _log(f"  >>> ALERTA CRÍTICA: Jaula {ev.jaula} desabastecida! <<<")
+                    self._parar_jaula(ev.jaula, ev.tiempo, _log)
 
                 # 3. Asignar trabajo a máquinas y snapshot con el CRC ya vaciado
                 nuevos = self.asignar_trabajo_maquinas(ev.tiempo)
@@ -575,6 +627,7 @@ class TallerCilindros:
                     hay_actividad = True
                     t_fin = maq.tiempo_fin_rectificado
                     maq.finalizar_rectificado(t_fin)
+                    self._intentar_reactivar_jaulas(t_fin, _log)
                     for j_id in range(1, self.cantidad_jaulas + 1):
                         if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
                             self.reponer_buffer_crc(j_id, t_fin + timedelta(minutes=self.tiempo_traslado_crc_min))

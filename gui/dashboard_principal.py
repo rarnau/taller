@@ -4,8 +4,25 @@ from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
 from matplotlib.dates import DateFormatter
 from matplotlib.patches import Patch
-from config.tema import (BG, BG2, BG3, FG, FG2, ACCENT, GREEN, ORANGE,
+from config.tema import (BG, BG2, BG3, FG, FG2, ACCENT, GREEN, ORANGE, RED,
                           COLORES_ESTADO, SS_COLORS, TIPO_RECT_COLORS)
+
+
+def _marcar_paradas(ax, tiempos, snapshots):
+    """Sombrea en rojo los intervalos en los que hay al menos una jaula PARADA."""
+    flags = [bool(getattr(s, "jaulas_paradas", [])) for s in snapshots]
+    en_parada, ini, etiquetado = False, None, False
+    for k, f in enumerate(flags):
+        if f and not en_parada:
+            en_parada, ini = True, tiempos[k]
+        elif not f and en_parada:
+            en_parada = False
+            ax.axvspan(ini, tiempos[k], color=RED, alpha=0.18,
+                       label=None if etiquetado else "Jaula(s) parada(s)")
+            etiquetado = True
+    if en_parada:
+        ax.axvspan(ini, tiempos[-1], color=RED, alpha=0.18,
+                   label=None if etiquetado else "Jaula(s) parada(s)")
 
 def _style_ax(ax, title, bg=BG2, fontsize=13):
     ax.set_facecolor(bg)
@@ -39,6 +56,7 @@ def crear_dashboard_principal(t, substock=None):
         ds = {e: [s.conteo_por_estado.get(e, 0) for s in t.snapshots] for e in EN}
     ax.stackplot(ti, np.array([ds[e] for e in EN]),
                  labels=EN, colors=[COLORES_ESTADO.get(e, "#999") for e in EN], alpha=0.85)
+    _marcar_paradas(ax, ti, t.snapshots)
     ax.legend(loc="upper right", fontsize=7, ncol=3, facecolor="#333", edgecolor="#333", labelcolor=FG)
     ax.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
 
@@ -52,6 +70,7 @@ def crear_dashboard_principal(t, substock=None):
     ax2.plot(ti, bv, color=GREEN, lw=2, label="Disp + CRC")
     ax2.plot(ti, dv, color="#66BB6A", lw=1.5, label="Disponible", ls="--")
     ax2.plot(ti, cv, color=ORANGE, lw=1.5, label="CRC", ls="--")
+    _marcar_paradas(ax2, ti, t.snapshots)
     ax2.legend(fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
     ax2.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
 
