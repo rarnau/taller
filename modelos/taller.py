@@ -609,6 +609,10 @@ class TallerCilindros:
             iteracion += 1
             ev_sim = cola.pop(0)
 
+            # Una PARADA de línea solo afecta a los CAMBIO (ver handler de CAMBIO).
+            # El rectificado (FIN_RECT) y la carga del buffer (REPONER_CRC) NUNCA
+            # se detienen: las máquinas siguen trabajando durante la parada y son,
+            # de hecho, las que generan el stock que permite reanudar la línea.
             if ev_sim.tipo == "FIN_RECT":
                 maq_nombre = ev_sim.datos
                 maq = self.maquinas.get(maq_nombre)
