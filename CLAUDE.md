@@ -132,6 +132,9 @@ In the `FIN_RECT` handler, `_intentar_reactivar_jaulas()` is called **before** `
 ### SubStock boundary convention
 `hasta < diámetro <= desde` — `hasta` is exclusive (lower bound), `desde` is inclusive (upper bound). This is the opposite of what the variable names suggest at first glance.
 
+### SubStock auto-derivation
+`cargar_datos()` is self-sufficient: if `lista_substocks` is empty when it finishes loading, `_derivar_substocks_por_defecto()` divides the global diameter range into N equal bands (one per jaula). This means code that instantiates `TallerCilindros` directly (scripts, tests) does not need to call `configurar_substocks()` first. The App always calls `configurar_substocks()` from `user_config.json` before loading, which takes precedence and is not affected by this fallback.
+
 ### Cylinders marked BAJA in Excel above the minimum diameter
 The simulation does **not** change their state — the Excel is the source of truth. They may be out of service for reasons unrelated to diameter (cracks, defects). A warning is added to `taller.avisos_carga` and shown in the console after loading.
 
