@@ -429,16 +429,26 @@ class TallerCilindros:
 
                 cil_terminado = maq.finalizar_rectificado(ev_sim.tiempo)
                 if cil_terminado:
+                    # Programar reposición del CRC (tarda tiempo_traslado_crc_min)
                     for j_id in range(1, self.cantidad_jaulas + 1):
                         if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
-                            self.reponer_buffer_crc(
-                                j_id, ev_sim.tiempo + timedelta(minutes=self.tiempo_traslado_crc_min)
-                            )
+                            cola.append(_EventoSim(
+                                "REPONER_CRC",
+                                ev_sim.tiempo + timedelta(minutes=self.tiempo_traslado_crc_min),
+                                j_id
+                            ))
 
                 nuevos = self.asignar_trabajo_maquinas(ev_sim.tiempo)
                 cola.extend(nuevos)
                 cola.sort(key=lambda x: x.tiempo)
                 self.generar_snapshot(ev_sim.tiempo)
+
+            elif ev_sim.tipo == "REPONER_CRC":
+                j_id = ev_sim.datos
+                # Solo repone (y genera snapshot) si el CRC sigue incompleto
+                if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
+                    self.reponer_buffer_crc(j_id, ev_sim.tiempo)
+                    self.generar_snapshot(ev_sim.tiempo)
 
             elif ev_sim.tipo == "CAMBIO":
                 ev = ev_sim.datos
@@ -489,10 +499,15 @@ class TallerCilindros:
                         )
                         _log(f"  >>> ALERTA CRÍTICA: Jaula {ev.jaula} desabastecida! <<<")
 
-                # 3. Reponer CRC y asignar trabajo a máquinas
-                self.reponer_buffer_crc(ev.jaula, ev.tiempo + timedelta(minutes=self.tiempo_traslado_crc_min))
+                # 3. Asignar trabajo a máquinas y snapshot con el CRC ya vaciado
                 nuevos = self.asignar_trabajo_maquinas(ev.tiempo)
                 cola.extend(nuevos)
+                # 4. Programar la reposición del CRC (tarda tiempo_traslado_crc_min)
+                cola.append(_EventoSim(
+                    "REPONER_CRC",
+                    ev.tiempo + timedelta(minutes=self.tiempo_traslado_crc_min),
+                    ev.jaula
+                ))
                 cola.sort(key=lambda x: x.tiempo)
                 self.generar_snapshot(ev.tiempo)
 
