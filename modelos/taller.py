@@ -58,6 +58,7 @@ class TallerCilindros:
         self.eventos_programados: List[EventoCambio] = []
         self.alertas: List[Alerta] = []
         self.snapshots: List[Snapshot] = []
+        self.avisos_carga: List[str] = []  # avisos surgidos al cargar datos (para la GUI)
 
         # Parámetros de configuración (sobreescritos al cargar Excel)
         self.diametro_maximo: float = 575.0
@@ -102,6 +103,7 @@ class TallerCilindros:
         self.eventos_programados.clear()
         self.alertas.clear()
         self.snapshots.clear()
+        self.avisos_carga.clear()
 
         try:
             xl = pd.ExcelFile(ruta_excel, engine="openpyxl")
@@ -183,6 +185,23 @@ class TallerCilindros:
                 )
                 cil.estado = EstadoCilindro.BAJA
                 cil.jaula = None
+
+        # Aviso: cilindros que vienen marcados BAJA pese a estar sobre el mínimo.
+        # No se modifica su estado (el dato del Excel es la fuente de verdad);
+        # solo se registra para revisión manual, ya que podrían estar fuera de
+        # servicio por motivos ajenos al diámetro (fisuras, defectos, etc.).
+        bajas_sobre_minimo = [
+            cil for cil in self.cilindros.values()
+            if cil.estado == EstadoCilindro.BAJA and cil.diametro >= self.diametro_minimo
+        ]
+        if bajas_sobre_minimo:
+            ids = ", ".join(f"{c.id} ({c.diametro:.2f})" for c in bajas_sobre_minimo)
+            msg = (
+                f"AVISO: {len(bajas_sobre_minimo)} cilindro(s) vienen marcados BAJA en los datos "
+                f"pese a estar sobre el mínimo ({self.diametro_minimo:.2f}): {ids}"
+            )
+            logger.warning(msg)
+            self.avisos_carga.append(msg)
 
         # Inicializar jaulas y ubicar cilindros
         for j_id in range(1, self.cantidad_jaulas + 1):
