@@ -126,6 +126,15 @@ class TallerCilindros:
         self._cargar_stock(xl.parse(_HOJA_STOCK))
         self._cargar_cambios(xl.parse(_HOJA_CAMBIOS))
 
+        # Si nadie llamó configurar_substocks() antes de cargar los datos,
+        # se derivan rangos iguales a partir del rango global y la cantidad
+        # de jaulas. Esto hace que cargar_datos() sea auto-suficiente cuando
+        # se usa fuera de la App (tests, scripts, verificaciones).
+        # La App siempre llama configurar_substocks() con user_config.json
+        # antes de cargar, por lo que este fallback no la afecta.
+        if not self.lista_substocks:
+            self._derivar_substocks_por_defecto()
+
     def _cargar_configuracion(self, df: pd.DataFrame) -> None:
         """Aplica los parámetros generales de la hoja Configuración."""
         cfg = dict(zip(df["Parámetro"], df["Valor"]))
@@ -135,6 +144,28 @@ class TallerCilindros:
             cfg.get("Tiempo Disponible→CRC por pareja (min)", self.tiempo_traslado_crc_min)
         )
         self.cantidad_jaulas = int(cfg.get("Cantidad de Jaulas", self.cantidad_jaulas))
+
+    def _derivar_substocks_por_defecto(self) -> None:
+        """
+        Divide el rango global (diametro_minimo, diametro_maximo] en N bandas
+        iguales, una por jaula. Se invoca automáticamente desde cargar_datos()
+        si lista_substocks está vacía, garantizando que el motor funcione
+        correctamente sin necesidad de llamar configurar_substocks() primero.
+        """
+        n = self.cantidad_jaulas
+        paso = (self.diametro_maximo - self.diametro_minimo) / n
+        for i in range(n):
+            jaula = i + 1
+            hasta = self.diametro_minimo + i * paso
+            desde = hasta + paso
+            nombre = f"SS{jaula} ({hasta:.0f}-{desde:.0f})"
+            self.lista_substocks.append(
+                SubStock(nombre, jaula, desde, hasta, jaula_asignada=jaula)
+            )
+        logger.info(
+            "SubStocks derivados automáticamente (%d bandas de %.2f mm cada una).",
+            n, paso
+        )
 
     def _cargar_maquinas(self, df: pd.DataFrame) -> None:
         """Carga las tasas de rectificado de cada máquina."""
