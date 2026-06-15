@@ -158,6 +158,8 @@ class App(ctk.CTk):
             self.archivo_cargado = fp
             self.status_label.configure(text=f"Cargado: {os.path.basename(fp)}")
             self._log(f"Archivo cargado: {fp}")
+            for aviso in self.taller.avisos_carga:
+                self._log(aviso)
             self.cfg_widget.refrescar()
             # Mostrar en Vista Real las rectificadoras y jaulas del Excel cargado
             self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
