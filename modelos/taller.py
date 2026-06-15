@@ -66,6 +66,11 @@ class TallerCilindros:
         self.cantidad_jaulas: int = 4
         self.estrategia_seleccion: str = "mayor_diametro"
 
+        # Recurso único de traslado Disponible→CRC (grúa/operario).
+        # Las reposiciones se serializan: solo se mueve una pareja a la vez.
+        self._recurso_crc_libre_en: Optional[datetime] = None
+        self._reposicion_pendiente: set = set()
+
     # ── Configuración externa ───────────────────────────────────────────────
 
     def configurar_substocks(self, rangos_config: List[Dict[str, Any]]) -> None:
@@ -387,6 +392,28 @@ class TallerCilindros:
 
         return completados >= necesarios
 
+    def _programar_reposicion_crc(self, jaula_id: int, tiempo_solicitud: datetime, cola: List["_EventoSim"]) -> None:
+        """
+        Encola una reposición del CRC respetando el recurso único de traslado.
+
+        El traslado Disponible→CRC lo realiza un único recurso (grúa/operario),
+        por lo que las reposiciones se serializan: cada pareja tarda
+        tiempo_traslado_crc_min y la siguiente no comienza hasta que la anterior
+        termina. Si ya hay una reposición pendiente para la jaula, o su CRC ya
+        está completo, no se programa nada.
+        """
+        if jaula_id in self._reposicion_pendiente:
+            return
+        if len(self.jaulas[jaula_id].cilindros_crc) >= _BUFFER_CRC_SIZE:
+            return
+
+        libre_en = self._recurso_crc_libre_en or tiempo_solicitud
+        inicio = max(tiempo_solicitud, libre_en)
+        fin = inicio + timedelta(minutes=self.tiempo_traslado_crc_min)
+        self._recurso_crc_libre_en = fin
+        self._reposicion_pendiente.add(jaula_id)
+        cola.append(_EventoSim("REPONER_CRC", fin, jaula_id))
+
     # ── Simulación ──────────────────────────────────────────────────────────
 
     def simular(self, estrategia: str = "mayor_diametro", callback_log: Optional[Callable[[str], None]] = None) -> None:
@@ -406,6 +433,8 @@ class TallerCilindros:
         _log(f"Iniciando simulación | Estrategia: {estrategia} | Cilindros: {len(self.cilindros)}")
 
         t_actual = self.eventos_programados[0].tiempo - timedelta(minutes=1)
+        self._recurso_crc_libre_en = t_actual
+        self._reposicion_pendiente = set()
         self.generar_snapshot(t_actual)
 
         cola: List[_EventoSim] = [_EventoSim("CAMBIO", ev.tiempo, ev) for ev in self.eventos_programados]
@@ -429,14 +458,9 @@ class TallerCilindros:
 
                 cil_terminado = maq.finalizar_rectificado(ev_sim.tiempo)
                 if cil_terminado:
-                    # Programar reposición del CRC (tarda tiempo_traslado_crc_min)
+                    # Programar reposición del CRC (recurso único, secuencial)
                     for j_id in range(1, self.cantidad_jaulas + 1):
-                        if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
-                            cola.append(_EventoSim(
-                                "REPONER_CRC",
-                                ev_sim.tiempo + timedelta(minutes=self.tiempo_traslado_crc_min),
-                                j_id
-                            ))
+                        self._programar_reposicion_crc(j_id, ev_sim.tiempo, cola)
 
                 nuevos = self.asignar_trabajo_maquinas(ev_sim.tiempo)
                 cola.extend(nuevos)
@@ -445,6 +469,7 @@ class TallerCilindros:
 
             elif ev_sim.tipo == "REPONER_CRC":
                 j_id = ev_sim.datos
+                self._reposicion_pendiente.discard(j_id)
                 # Solo repone (y genera snapshot) si el CRC sigue incompleto
                 if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
                     self.reponer_buffer_crc(j_id, ev_sim.tiempo)
@@ -502,12 +527,8 @@ class TallerCilindros:
                 # 3. Asignar trabajo a máquinas y snapshot con el CRC ya vaciado
                 nuevos = self.asignar_trabajo_maquinas(ev.tiempo)
                 cola.extend(nuevos)
-                # 4. Programar la reposición del CRC (tarda tiempo_traslado_crc_min)
-                cola.append(_EventoSim(
-                    "REPONER_CRC",
-                    ev.tiempo + timedelta(minutes=self.tiempo_traslado_crc_min),
-                    ev.jaula
-                ))
+                # 4. Programar la reposición del CRC (recurso único, secuencial)
+                self._programar_reposicion_crc(ev.jaula, ev.tiempo, cola)
                 cola.sort(key=lambda x: x.tiempo)
                 self.generar_snapshot(ev.tiempo)
 
