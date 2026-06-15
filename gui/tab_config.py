@@ -75,7 +75,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             cuerpo_r, text="+ Agregar jaula", width=140, height=30,
             fg_color="transparent", border_width=1, border_color=ACCENT,
             text_color=ACCENT, hover_color=BG_CARD,
-            command=lambda: self._agregar_fila_rango(),
+            command=self._agregar_fila_rango,
         ).pack(anchor="w", pady=(10, 0))
 
         # Sección 2: Prioridades de máquinas

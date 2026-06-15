@@ -9,6 +9,8 @@ from tkinter import filedialog, messagebox
 
 import matplotlib
 matplotlib.use("TkAgg")
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from config.tema import *
 from config.persistencia import cargar_config, guardar_config, obtener_rangos, obtener_prioridades
@@ -161,11 +163,8 @@ class App(ctk.CTk):
             for aviso in self.taller.avisos_carga:
                 self._log(aviso)
             self.cfg_widget.refrescar()
-            # Mostrar en Vista Real las rectificadoras y jaulas del Excel cargado
             self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
-            self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
-            self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))
-            self.vista_rt.set_estrategia(self.combo_est.get())
+            self._sincronizar_vista_con_taller()
             self._refrescar_combo_substocks()
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar el archivo: {e}")
@@ -197,9 +196,7 @@ class App(ctk.CTk):
         self.slider_progreso.set(0)
 
         # Reconstruir frames de jaulas y rectificadoras de la Vista Real
-        self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
-        self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))
-        self.vista_rt.set_estrategia(estrat)
+        self._sincronizar_vista_con_taller()
 
         # Actualizar otras pestañas
         llenar_tabla(self.tab_tabla, self.taller)
@@ -209,6 +206,13 @@ class App(ctk.CTk):
         self._render_dashboard()
         self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
         self._log("Simulación finalizada. Use los controles de reproducción para ver los resultados.")
+
+    def _sincronizar_vista_con_taller(self) -> None:
+        """Actualiza los frames de Vista Real con las jaulas y máquinas del taller cargado."""
+        estrat = self.combo_est.get()
+        self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
+        self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))
+        self.vista_rt.set_estrategia(estrat)
 
     def _refrescar_combo_substocks(self):
         """Actualiza las opciones del selector de SubStock del Dashboard."""
@@ -228,8 +232,6 @@ class App(ctk.CTk):
                         lambda t: crear_dashboard_principal(t, substock=substock))
 
     def _dash_into(self, container, key, func):
-        import matplotlib.pyplot as plt
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
         # Cerrar figura anterior para liberar memoria
         if key in self._figs:
             plt.close(self._figs[key])

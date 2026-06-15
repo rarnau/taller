@@ -420,7 +420,7 @@ class TallerCilindros:
 
         # Desplazar los CAMBIO que aún están en la cola (posteriores al inicio).
         for i, ev_s in enumerate(cola):
-            if ev_s.tipo == "CAMBIO" and inicio is not None and ev_s.tiempo > inicio:
+            if ev_s.tipo == "CAMBIO" and ev_s.tiempo > inicio:
                 cola[i] = _EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos)
 
         # Reintegrar los cambios diferidos durante la parada, ya desplazados.
@@ -532,10 +532,10 @@ class TallerCilindros:
     def asignar_trabajo_maquinas(self, tiempo: datetime) -> List[_EventoSim]:
         """Intenta asignar cilindros de la cola a máquinas libres."""
         nuevos_eventos: List[_EventoSim] = []
+        cola = self.obtener_cola_rectificado()
         for nombre, maq in self.maquinas.items():
             if maq.ocupada:
                 continue
-            cola = self.obtener_cola_rectificado()
             if not cola:
                 break
             cil = self.seleccionar_siguiente_de_cola(cola)
@@ -557,6 +557,7 @@ class TallerCilindros:
 
             maq.iniciar_rectificado(cil, tiempo, tipo, mm)
             nuevos_eventos.append(_EventoSim("FIN_RECT", maq.tiempo_fin_rectificado, nombre))
+            cola.remove(cil)
 
         return nuevos_eventos
 
@@ -740,9 +741,10 @@ class TallerCilindros:
                     maq.finalizar_rectificado(t_fin)
                     self._intentar_reactivar_jaulas(t_fin, _log, cola)
                     for j_id in range(1, self.cantidad_jaulas + 1):
-                        if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
-                            self.reponer_buffer_crc(j_id, t_fin + timedelta(minutes=self.tiempo_traslado_crc_min))
-                    self.asignar_trabajo_maquinas(t_fin)
+                        self._programar_reposicion_crc(j_id, t_fin, cola)
+                    nuevos = self.asignar_trabajo_maquinas(t_fin)
+                    cola.extend(nuevos)
+                    cola.sort(key=lambda x: x.tiempo)
                     self.generar_snapshot(t_fin)
             if not hay_actividad:
                 break
