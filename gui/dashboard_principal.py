@@ -17,7 +17,7 @@ def _style_ax(ax, title, bg=BG2, fontsize=13):
         sp.set_color(BG3)
         sp.set_linewidth(0.7)
 
-def crear_dashboard_principal(t):
+def crear_dashboard_principal(t, substock=None):
     # Usar fondo un poco más oscuro para que combine con CustomTkinter Dark
     fig = Figure(figsize=(18, 12), facecolor="#1A1A1A")
 
@@ -29,10 +29,14 @@ def crear_dashboard_principal(t):
 
     EN = t.ESTADOS_NOMBRES
 
-    # 1. Evolución Temporal Global
+    # 1. Evolución Temporal (global o filtrada por SubStock)
     ax = fig.add_subplot(gs[0, 0])
-    _style_ax(ax, "Evolución Temporal de Estados")
-    ds = {e: [s.conteo_por_estado.get(e, 0) for s in t.snapshots] for e in EN}
+    if substock:
+        _style_ax(ax, f"Evolución Temporal de Estados — {substock}")
+        ds = {e: [s.conteo_por_substock.get(substock, {}).get(e, 0) for s in t.snapshots] for e in EN}
+    else:
+        _style_ax(ax, "Evolución Temporal de Estados — Global")
+        ds = {e: [s.conteo_por_estado.get(e, 0) for s in t.snapshots] for e in EN}
     ax.stackplot(ti, np.array([ds[e] for e in EN]),
                  labels=EN, colors=[COLORES_ESTADO.get(e, "#999") for e in EN], alpha=0.85)
     ax.legend(loc="upper right", fontsize=7, ncol=3, facecolor="#333", edgecolor="#333", labelcolor=FG)
