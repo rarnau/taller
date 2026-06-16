@@ -22,6 +22,18 @@ _BUFFER_CRC_SIZE: int = 2
 _MAX_ITERACIONES_SIM: int = 10_000
 _MAX_ITER_FINALIZACION: int = 500
 
+# Estrategias de selección de la cola de rectificado.
+# Cada estrategia es una función que, dada una lista NO vacía de cilindros
+# candidatos, devuelve el que debe rectificarse a continuación. Para agregar una
+# estrategia nueva en el futuro, basta con sumar una entrada a este diccionario
+# (y exponerla en el combo de la GUI y en las choices del CLI).
+ESTRATEGIAS_SELECCION: Dict[str, Callable[[List["Cilindro"]], "Cilindro"]] = {
+    "mayor_diametro": lambda cola: max(cola, key=lambda c: c.diametro),
+    "menor_diametro": lambda cola: min(cola, key=lambda c: c.diametro),
+    "fifo": lambda cola: cola[0],
+}
+_ESTRATEGIA_DEFECTO = "fifo"
+
 # Nombres de hojas Excel
 _HOJA_CONFIG = "Configuración"
 _HOJA_MAQUINAS = "Máquinas"
@@ -477,15 +489,32 @@ class TallerCilindros:
         """Obtiene la lista de cilindros esperando rectificado."""
         return self.obtener_cilindros_por_estado(EstadoCilindro.A_RECTIFICAR)
 
-    def seleccionar_siguiente_de_cola(self, cola: List[Cilindro]) -> Optional[Cilindro]:
-        """Aplica la estrategia de selección sobre la cola de rectificado."""
+    def seleccionar_siguiente_de_cola(
+        self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora] = None
+    ) -> Optional[Cilindro]:
+        """Elige el siguiente cilindro a rectificar para una máquina.
+
+        Selección en dos pasos:
+          1. Filtro por prioridad: si se pasa una máquina, se consideran primero
+             los cilindros cuyo tipo de rectificado coincide con su
+             prioridad_defecto. Si ninguno coincide (o no se pasa máquina), se
+             consideran todos los de la cola.
+          2. Estrategia: sobre el subconjunto resultante se aplica la estrategia
+             de selección configurada (ver ESTRATEGIAS_SELECCION).
+        """
         if not cola:
             return None
-        if self.estrategia_seleccion == "mayor_diametro":
-            return max(cola, key=lambda c: c.diametro)
-        if self.estrategia_seleccion == "menor_diametro":
-            return min(cola, key=lambda c: c.diametro)
-        return cola[0]  # FIFO por defecto
+
+        candidatos = cola
+        if maquina is not None:
+            preferidos = [c for c in cola if c.tipo_rectificado_actual == maquina.prioridad_defecto]
+            if preferidos:
+                candidatos = preferidos
+
+        estrategia = ESTRATEGIAS_SELECCION.get(
+            self.estrategia_seleccion, ESTRATEGIAS_SELECCION[_ESTRATEGIA_DEFECTO]
+        )
+        return estrategia(candidatos)
 
     # ── Snapshot ────────────────────────────────────────────────────────────
 
@@ -543,7 +572,7 @@ class TallerCilindros:
                 continue
             if not cola:
                 break
-            cil = self.seleccionar_siguiente_de_cola(cola)
+            cil = self.seleccionar_siguiente_de_cola(cola, maq)
             if cil is None:
                 continue
 
