@@ -14,7 +14,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from config.tema import *
 from config.persistencia import cargar_config, guardar_config, obtener_rangos, obtener_prioridades
-from modelos.taller import TallerCilindros
+from modelos.taller import ESTRATEGIAS_SELECCION, TallerCilindros
 
 # Nota: Estos módulos se irán actualizando a CustomTkinter o eliminando si se integran
 # de forma diferente en la nueva GUI.
@@ -72,8 +72,11 @@ class App(ctk.CTk):
 
         self.label_estrat = ctk.CTkLabel(self.sidebar, text="Estrategia:", anchor="w")
         self.label_estrat.grid(row=2, column=0, padx=20, pady=(10, 0))
-        self.combo_est = ctk.CTkComboBox(self.sidebar, values=["mayor_diametro", "menor_diametro", "fifo"])
-        self.combo_est.set("mayor_diametro")
+        # El combo muestra etiquetas legibles; se mapean a la clave de estrategia
+        # que espera el motor. Ambas se derivan del registro ESTRATEGIAS_SELECCION.
+        self._estrat_por_etiqueta = {e.etiqueta: clave for clave, e in ESTRATEGIAS_SELECCION.items()}
+        self.combo_est = ctk.CTkComboBox(self.sidebar, values=list(self._estrat_por_etiqueta.keys()))
+        self.combo_est.set(ESTRATEGIAS_SELECCION["mayor_diametro"].etiqueta)
         self.combo_est.grid(row=3, column=0, padx=20, pady=10)
 
         self.btn_simular = ctk.CTkButton(self.sidebar, text="Ejecutar Simulación", fg_color=GREEN, hover_color="#2BB46B", command=self._simular)
@@ -186,7 +189,7 @@ class App(ctk.CTk):
         self.status_label.configure(text="Simulando...")
         self.update_idletasks()
 
-        estrat = self.combo_est.get()
+        estrat = self._estrat_por_etiqueta.get(self.combo_est.get(), "mayor_diametro")
         threading.Thread(target=self._simular_worker, args=(estrat,), daemon=True).start()
 
     def _simular_worker(self, estrat):
@@ -239,7 +242,7 @@ class App(ctk.CTk):
 
     def _sincronizar_vista_con_taller(self) -> None:
         """Actualiza los frames de Vista Real con las jaulas y máquinas del taller cargado."""
-        estrat = self.combo_est.get()
+        estrat = self._estrat_por_etiqueta.get(self.combo_est.get(), "mayor_diametro")
         self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
         self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))
         self.vista_rt.set_estrategia(estrat)
