@@ -173,21 +173,48 @@ class App(ctk.CTk):
         if not self.archivo_cargado:
             messagebox.showwarning("Atención", "Primero debe cargar un archivo Excel.")
             return
+        if getattr(self, "_simulando", False):
+            return
 
+        # La carga del Excel y la simulación corren en un hilo aparte para no
+        # bloquear el event loop de Tkinter (la ventana se congelaba mientras
+        # tanto). Los logs y la actualización de la UI se marshalan al hilo de
+        # Tk con self.after(); el taller solo se lee desde la UI una vez que el
+        # hilo termina (en _simular_finalizado).
+        self._simulando = True
+        self.btn_simular.configure(state="disabled")
         self.status_label.configure(text="Simulando...")
         self.update_idletasks()
 
-        # Resetear estado del taller cargando los datos de nuevo
-        self.taller.cargar_datos(self.archivo_cargado)
-        self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
-        prios = obtener_prioridades(self.user_cfg)
-        if prios:
-            self.taller.aplicar_prioridades_maquinas(prios)
-
-        # Ejecutar simulación
         estrat = self.combo_est.get()
-        self.taller.simular(estrategia=estrat, callback_log=self._log)
+        threading.Thread(target=self._simular_worker, args=(estrat,), daemon=True).start()
 
+    def _simular_worker(self, estrat):
+        """Corre carga + simulación fuera del hilo de Tk (no toca widgets)."""
+        try:
+            # Resetear estado del taller cargando los datos de nuevo
+            self.taller.cargar_datos(self.archivo_cargado)
+            self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
+            prios = obtener_prioridades(self.user_cfg)
+            if prios:
+                self.taller.aplicar_prioridades_maquinas(prios)
+            self.taller.simular(estrategia=estrat, callback_log=self._log_async)
+        except Exception as e:
+            self.after(0, lambda err=e: self._simular_error(err))
+            return
+        self.after(0, self._simular_finalizado)
+
+    def _log_async(self, m):
+        """Callback de log seguro para hilos: difiere el insert al hilo de Tk."""
+        self.after(0, lambda: self._log(m))
+
+    def _simular_error(self, e):
+        self._simulando = False
+        self.btn_simular.configure(state="normal")
+        self.status_label.configure(text="Error en la simulación")
+        messagebox.showerror("Error", f"No se pudo ejecutar la simulación: {e}")
+
+    def _simular_finalizado(self):
         self.snapshot_actual_idx = 0
         n_snaps = len(self.taller.snapshots)
         self.status_label.configure(text=f"Simulación completada. Snapshots: {n_snaps}")
@@ -206,6 +233,9 @@ class App(ctk.CTk):
         self._render_dashboard()
         self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
         self._log("Simulación finalizada. Use los controles de reproducción para ver los resultados.")
+
+        self.btn_simular.configure(state="normal")
+        self._simulando = False
 
     def _sincronizar_vista_con_taller(self) -> None:
         """Actualiza los frames de Vista Real con las jaulas y máquinas del taller cargado."""
