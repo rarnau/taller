@@ -14,7 +14,9 @@ from typing import Any, Callable, Dict, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config.persistencia import cargar_config, obtener_prioridades, obtener_rangos
+from config.persistencia import (cargar_config, obtener_max_iteraciones,
+                                  obtener_prioridades, obtener_rangos,
+                                  obtener_tiempo_enfriado)
 from modelos.kpis import calcular_kpis
 from modelos.estrategias import ESTRATEGIAS_SELECCION
 from modelos.taller import TallerCilindros
@@ -22,16 +24,23 @@ from modelos.taller import TallerCilindros
 
 def ejecutar_simulacion(ruta_excel: str, estrategia: str = "mayor_diametro",
                         config_path: Optional[str] = None,
-                        callback_log: Optional[Callable[[str], None]] = print) -> TallerCilindros:
+                        callback_log: Optional[Callable[[str], None]] = print,
+                        tiempo_enfriado: Optional[float] = None,
+                        max_iteraciones: Optional[int] = None) -> TallerCilindros:
     """Carga datos + configuración, ejecuta la simulación y devuelve el taller.
 
-    Replica la orquestación de ``App._simular()`` pero sin GUI.
+    Replica la orquestación de ``App._simular()`` pero sin GUI. ``tiempo_enfriado``
+    y ``max_iteraciones``, si se indican, tienen prioridad sobre el valor del JSON.
     """
     cfg = _cargar_config(config_path)
 
     taller = TallerCilindros()
     taller.cargar_datos(ruta_excel)
     taller.configurar_substocks(obtener_rangos(cfg))
+    taller.tiempo_enfriado_h = (tiempo_enfriado if tiempo_enfriado is not None
+                                else obtener_tiempo_enfriado(cfg))
+    taller.max_iteraciones = (max_iteraciones if max_iteraciones is not None
+                              else obtener_max_iteraciones(cfg))
     prioridades = obtener_prioridades(cfg)
     if prioridades:
         taller.aplicar_prioridades_maquinas(prioridades)
@@ -95,6 +104,11 @@ def main(argv: Optional[list] = None) -> int:
                         help="Escribe los KPIs como JSON en el archivo indicado.")
     parser.add_argument("--quiet", action="store_true",
                         help="Suprime los logs por-evento; deja solo el resumen.")
+    parser.add_argument("--tiempo-enfriado", type=float, metavar="HORAS",
+                        help="Horas de enfriado entre Trabajando y rectificado "
+                             "(0 saltea el estado; pisa la config).")
+    parser.add_argument("--max-iteraciones", type=int, metavar="N",
+                        help="Tope de iteraciones del bucle de simulación (pisa la config).")
     args = parser.parse_args(argv)
 
     if not os.path.isfile(args.excel):
@@ -104,7 +118,9 @@ def main(argv: Optional[list] = None) -> int:
     callback = None if args.quiet else print
     try:
         taller = ejecutar_simulacion(args.excel, estrategia=args.estrategia,
-                                     config_path=args.config, callback_log=callback)
+                                     config_path=args.config, callback_log=callback,
+                                     tiempo_enfriado=args.tiempo_enfriado,
+                                     max_iteraciones=args.max_iteraciones)
     except Exception as e:
         print(f"Error al ejecutar la simulación: {e}", file=sys.stderr)
         return 1

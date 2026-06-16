@@ -4,7 +4,7 @@ FG="#F5F7FA"; FG2="#8EA0B8"; FG_DIM="#66758A"
 ACCENT="#5AA9FF"; ACCENT_SOFT="#7DB8FF"; GREEN="#31C48D"; ORANGE="#F59E0B"; RED="#F87171"
 PURPLE="#A78BFA"; PINK="#F472B6"; CYAN="#22D3EE"; YELLOW="#FBBF24"
 COLORES_ESTADO={"Trabajando":"#388BFD","CRC":"#F59E0B","Disponible":"#31C48D",
-    "A rectificar":"#F87171","Rectificando":"#A78BFA","Baja":"#66758A"}
+    "Enfriando":"#22D3EE","A rectificar":"#F87171","Rectificando":"#A78BFA","Baja":"#66758A"}
 SS_COLORS=["#5AA9FF","#F59E0B","#31C48D","#F472B6"]
 JAULA_COLORS=["#5AA9FF","#F59E0B","#31C48D","#F472B6"]
 TIPO_RECT_COLORS={"produccion":"#31C48D","desbaste":"#F59E0B"}
@@ -13,4 +13,4 @@ FONT_SIZE_SM=9; FONT_SIZE=10; FONT_SIZE_MD=11; FONT_SIZE_LG=13; FONT_SIZE_XL=15;
 TAB_BG="#162133"; TAB_FG="#C7D2FE"; TAB_SEL_BG="#5AA9FF"; TAB_SEL_FG="#FFFFFF"; TAB_PADDING=[14,8]
 BTN_BG="#1F8F5F"; BTN_BG_HOVER="#2BB46B"; BTN_BLUE="#2563EB"; BTN_BLUE_HOVER="#3B82F6"
 TABLE_ROW_COLORS={"Trabajando":"#11253D","CRC":"#2A1E07","Disponible":"#11291D",
-    "A_rectificar":"#2A0D0D","Rectificando":"#241336","Baja":"#151A22"}
+    "Enfriando":"#0A2E33","A_rectificar":"#2A0D0D","Rectificando":"#241336","Baja":"#151A22"}

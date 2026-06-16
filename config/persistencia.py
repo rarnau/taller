@@ -14,6 +14,8 @@ DEFAULTS: Dict[str, Any] = {
         {"jaula": 4, "desde": 575.0, "hasta": 561.0},
     ],
     "prioridades_maquinas": {},
+    "tiempo_enfriado_h": 0.0,
+    "max_iteraciones": 10000,
 }
 
 
@@ -42,3 +44,13 @@ def obtener_rangos(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
 def obtener_prioridades(cfg: Dict[str, Any]) -> Dict[str, str]:
     """Devuelve las prioridades de rectificado por máquina desde la configuración."""
     return cfg.get("prioridades_maquinas", {})
+
+
+def obtener_tiempo_enfriado(cfg: Dict[str, Any]) -> float:
+    """Devuelve el tiempo de enfriado (horas) tras retirar un cilindro de la jaula."""
+    return float(cfg.get("tiempo_enfriado_h", DEFAULTS["tiempo_enfriado_h"]))
+
+
+def obtener_max_iteraciones(cfg: Dict[str, Any]) -> int:
+    """Devuelve el máximo de iteraciones del bucle de simulación."""
+    return int(cfg.get("max_iteraciones", DEFAULTS["max_iteraciones"]))

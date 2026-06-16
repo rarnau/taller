@@ -42,10 +42,11 @@ main.py
    - `Stock_Inicial` — cylinder inventory with initial states
    - `Programa_Cambios` — scheduled change events
 
-2. **Simulate** — `simular(callback)` runs a priority-queue DES loop. Internal event type `_EventoSim(tipo, tiempo, datos)` has three types:
+2. **Simulate** — `simular(callback)` runs a priority-queue DES loop. Internal event type `_EventoSim(tipo, tiempo, datos)` has four types:
    - `"CAMBIO"` — a scheduled jaula change (datos = `EventoCambio`)
    - `"FIN_RECT"` — a machine finishes rectification (datos = machine name str)
    - `"REPONER_CRC"` — a Disponible cylinder arrives at the CRC buffer (datos = jaula int)
+   - `"FIN_ENFRIADO"` — a cylinder finishes cooling and enters the rectification queue (datos = cylinder id str). Only generated when `tiempo_enfriado_h > 0`.
 
 3. **PARADA (line stoppage)** — if after a `CAMBIO` there is no stock to form a complete pair (`_BUFFER_CRC_SIZE = 2`) for a jaula:
    - `_parar_jaula()` marks the jaula `parada=True` and records `_linea_parada_desde`
@@ -58,14 +59,16 @@ main.py
 ### Cylinder lifecycle (states in `modelos/enums.py`)
 
 ```
-Trabajando ──cambio──> A rectificar ──maquina libre──> Rectificando ──fin──> Disponible
-                                                                                │
-CRC <──reponer_crc──────────────────────────────────────────────────────────────┘
+Trabajando ──cambio──> Enfriando ──fin_enfriado──> A rectificar ──maquina libre──> Rectificando ──fin──> Disponible
+                       (espera N h)                                                                        │
+CRC <──reponer_crc─────────────────────────────────────────────────────────────────────────────────────────┘
  │
  └──instalado──> Trabajando
 
 Cualquier estado ──diametro < minimo──> Baja
 ```
+
+The `Enfriando` step is only inserted when `tiempo_enfriado_h > 0`; with the default `0.0` the cylinder goes straight `Trabajando ──cambio──> A rectificar` (historical behavior, byte-for-byte identical KPIs).
 
 SubStock ranges: `hasta < diámetro <= desde` (hasta is the lower exclusive bound, desde is the upper inclusive bound). Each jaula has an associated SubStock; a cylinder can only replenish a jaula's CRC if its diameter falls in that SubStock's range.
 
@@ -74,8 +77,10 @@ SubStock ranges: `hasta < diámetro <= desde` (hasta is the lower exclusive boun
 `config/persistencia.py` loads/saves `config/user_config.json` with:
 - `rangos` — SubStock diameter ranges per jaula (overrides defaults)
 - `prioridades_maquinas` — preferred rectification type per machine
+- `tiempo_enfriado_h` — cooling hours between Trabajando and rectification (float, default `0.0`)
+- `max_iteraciones` — cap on the simulation loop (int, default `10000`)
 
-At startup, `App.__init__` calls `taller.configurar_substocks()` with these ranges. The `Configuración` tab in the GUI (`gui/tab_config.py`) allows editing and saving these at runtime.
+Getters: `obtener_rangos`, `obtener_prioridades`, `obtener_tiempo_enfriado`, `obtener_max_iteraciones`. At startup, `App.__init__` calls `taller.configurar_substocks()` with the ranges and `_aplicar_parametros_sim()` for the two scalar params (re-applied on file load and before each simulation). The `Configuración` tab in the GUI (`gui/tab_config.py`) edits all of these at runtime. The CLI exposes `--tiempo-enfriado` and `--max-iteraciones`, which override the JSON values.
 
 ### GUI structure — `gui/app.py`
 
@@ -88,7 +93,7 @@ Single `App(CTk)` window with a sidebar and a tabbed main area:
 | Detalle | `gui/dashboard_detalle.py` | Per-cylinder detail chart (click a cylinder in Vista Real) |
 | Inventario | `gui/tab_tabla.py` | Full cylinder table |
 | KPIs | `gui/tab_kpis.py` | Key performance indicators |
-| Configuración | `gui/tab_config.py` | Editable SubStock ranges and machine priorities |
+| Configuración | `gui/tab_config.py` | Two-column layout: SubStock ranges (left), machine priorities + simulation params (cooling time, max iterations) (right) |
 | Consola | `gui/tab_consola.py` | Simulation log and alerts |
 
 Playback is driven by a background thread in `App`; at each tick it calls `vista_rt.actualizar(snapshot)` on the Tk main thread via `self.after()`.
@@ -99,8 +104,10 @@ Dashboards are rendered with Matplotlib `Figure` objects embedded via `FigureCan
 
 ```python
 _BUFFER_CRC_SIZE = 2      # cylinders required to form a working pair
-_MAX_ITERACIONES_SIM = 10_000
+_MAX_ITERACIONES_SIM = 10_000   # only the DEFAULT for self.max_iteraciones
 ```
+
+`_MAX_ITERACIONES_SIM` is just the seed for the instance attribute `self.max_iteraciones`; the loop in `simular()` reads `self.max_iteraciones` (configurable). Likewise `self.tiempo_enfriado_h` (default `0.0`) controls the cooling step.
 
 ### Adding a new simulation dataset
 
@@ -116,6 +123,9 @@ These are non-obvious invariants that must be preserved when modifying the engin
 
 ### Machine selection: priority filter, then strategy
 When a free machine picks a cylinder in `asignar_trabajo_maquinas()`, `seleccionar_siguiente_de_cola(cola, maquina)` selects in two steps: (1) it first filters the queue to cylinders whose `tipo_rectificado_actual` matches the machine's `prioridad_defecto`; (2) it applies the configured strategy over that subset. If **no** cylinder matches the machine's priority, it falls back to the **whole** queue and applies the strategy there. The machine's priority therefore biases *which* job it takes, but the rectification `tipo` performed is still the cylinder's own type (or `prioridad_defecto` only when the cylinder has none). Strategies are `EstrategiaSeleccion` objects (`clave`, `etiqueta`, `seleccionar(cola, maquina)`) in the `ESTRATEGIAS_SELECCION` registry (`modelos/estrategias.py`); `seleccionar` receives the already priority-filtered queue and may inspect the machine (e.g. `_MenorMmDesbasteFifoProduccion` picks min mm when the machine prioritizes desbaste, FIFO otherwise). Add a new strategy by subclassing and registering it — the GUI combo (`gui/app.py`) and CLI `--estrategia` choices (`cli.py`) are derived from the registry, so no hardcoded list needs updating. The GUI shows `etiqueta` and maps it back to `clave`; `_SENTIDO_TOMA` in `gui/vista_realtime.py` should get a matching entry for the queue-direction hint.
+
+### Cooling (Enfriando) is opt-in and physical
+With `tiempo_enfriado_h == 0.0` (default) the cooling state does **not** exist: the CAMBIO handler sends retired cylinders straight to `A_RECTIFICAR`, exactly as before. With a positive value, each retired cylinder goes to `ENFRIANDO` and a `FIN_ENFRIADO` event is scheduled at `t + tiempo_enfriado_h`. Like `FIN_RECT`/`REPONER_CRC`, `FIN_ENFRIADO` **always executes** — it is never deferred during a PARADA and is **not** shifted by `_reanudar_linea` (cooling is a wall-clock physical process, not a scheduled change). `tipo_rectificado_actual`/`mm_a_rectificar` are stamped at CAMBIO time and survive the cooling step. Cooling cylinders are not in any jaula, the CRC, or a machine; they are tracked purely by state and surfaced via `Snapshot.detalle_enfriando` (the global "EN ENFRIAMIENTO" section in Vista Real). `generar_snapshot()` counts them automatically because it iterates the whole `EstadoCilindro` enum, so the stacked-area chart, the detail map (`ey` dict), and the table filter must all list `"Enfriando"`.
 
 ### PARADA is all-or-nothing
 `_instalar_pareja_o_parar()` never installs a partial pair. If there are fewer than `_BUFFER_CRC_SIZE` cylinders available in a jaula's range, it installs **none** and returns `False`. A jaula with only one cylinder working is not a valid state.

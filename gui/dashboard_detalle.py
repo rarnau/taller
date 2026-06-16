@@ -23,7 +23,7 @@ def crear_dashboard_detalle(t):
     # 1. Mapa de Cilindros (Estado x Diámetro)
     ax1 = fig.add_subplot(gs[0, :])
     _style_ax(ax1, "Mapa de Cilindros: Estado vs Diámetro")
-    ey = {"Trabajando": 5, "CRC": 4, "Disponible": 3, "A rectificar": 2, "Rectificando": 1, "Baja": 0}
+    ey = {"Trabajando": 6, "CRC": 5, "Disponible": 4, "Enfriando": 3, "A rectificar": 2, "Rectificando": 1, "Baja": 0}
     for en, yv in ey.items():
         cls = [c for c in t.cilindros.values() if c.estado.value == en]
         if cls:
@@ -33,7 +33,7 @@ def crear_dashboard_detalle(t):
     ax1.set_yticks(list(ey.values()))
     ax1.set_yticklabels(list(ey.keys()), color=FG, fontsize=9)
     ax1.set_xlim(t.diametro_minimo - 5, t.diametro_maximo + 5)
-    ax1.legend(fontsize=8, facecolor="#333", edgecolor="#333", labelcolor=FG, ncol=6, loc="upper center")
+    ax1.legend(fontsize=8, facecolor="#333", edgecolor="#333", labelcolor=FG, ncol=7, loc="upper center")
 
     # 2. Distribución de Diámetros
     ax2 = fig.add_subplot(gs[1, 0])

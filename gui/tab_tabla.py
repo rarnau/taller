@@ -14,7 +14,7 @@ def llenar_tabla(tab, taller):
 
     ctk.CTkLabel(toolbar, text="Filtrar estado:").pack(side="left", padx=10)
 
-    est = ["Todos", "Trabajando", "CRC", "Disponible", "A rectificar", "Rectificando", "Baja"]
+    est = ["Todos", "Trabajando", "CRC", "Disponible", "Enfriando", "A rectificar", "Rectificando", "Baja"]
     fv = tk.StringVar(value="Todos")
     fc = ctk.CTkComboBox(toolbar, variable=fv, values=est, state="readonly", command=lambda v: _fill(v))
     fc.pack(side="left", padx=10)

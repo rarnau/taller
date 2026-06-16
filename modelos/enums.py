@@ -10,6 +10,7 @@ class EstadoCilindro(Enum):
     TRABAJANDO = "Trabajando"
     CRC = "CRC"
     DISPONIBLE = "Disponible"
+    ENFRIANDO = "Enfriando"
     A_RECTIFICAR = "A rectificar"
     RECTIFICANDO = "Rectificando"
     BAJA = "Baja"
