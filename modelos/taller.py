@@ -110,6 +110,11 @@ class TallerCilindros:
         self.alertas.clear()
         self.snapshots.clear()
         self.avisos_carga.clear()
+        # Se limpian también los substocks: si no, al recargar otro archivo en
+        # la misma instancia (sin configurar_substocks de por medio) el fallback
+        # de derivación de la línea inferior no dispara y persistirían los rangos
+        # del archivo anterior, dejando invisibles los cilindros fuera de ellos.
+        self.lista_substocks.clear()
 
         try:
             xl = pd.ExcelFile(ruta_excel, engine="openpyxl")
