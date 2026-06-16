@@ -98,6 +98,13 @@ class MaquinaRectificadora:
         cilindro.estado = EstadoCilindro.DISPONIBLE
         cilindro.maquina_actual = None
 
+        # El rectificado ya fue aplicado arriba; se limpia el tipo/mm pendientes
+        # para que el cilindro DISPONIBLE no arrastre datos del pase previo. El
+        # próximo CAMBIO los reasigna antes de que vuelva a rectificarse, así que
+        # esto no altera ninguna lógica (es solo higiene de estado).
+        cilindro.tipo_rectificado_actual = None
+        cilindro.mm_a_rectificar = 0.0
+
         cilindro.registrar_evento(
             tiempo_actual,
             f"Fin rectificado en {self.nombre}",
