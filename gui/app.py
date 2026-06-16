@@ -13,7 +13,9 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from config.tema import *
-from config.persistencia import cargar_config, guardar_config, obtener_rangos, obtener_prioridades
+from config.persistencia import (cargar_config, guardar_config, obtener_rangos,
+                                  obtener_prioridades, obtener_tiempo_enfriado,
+                                  obtener_max_iteraciones)
 from modelos.estrategias import ESTRATEGIAS_SELECCION
 from modelos.taller import TallerCilindros
 
@@ -42,6 +44,7 @@ class App(ctk.CTk):
         self.taller = TallerCilindros()
         self.user_cfg = cargar_config()
         self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
+        self._aplicar_parametros_sim()
         self.archivo_cargado = None
 
         # Estado de reproducción
@@ -156,6 +159,11 @@ class App(ctk.CTk):
             self.log_w.insert("end", m + "\n")
             self.log_w.see("end")
 
+    def _aplicar_parametros_sim(self):
+        """Aplica al taller los parámetros de simulación del JSON (enfriado, máx. iteraciones)."""
+        self.taller.tiempo_enfriado_h = obtener_tiempo_enfriado(self.user_cfg)
+        self.taller.max_iteraciones = obtener_max_iteraciones(self.user_cfg)
+
     def _cargar(self):
         fp = filedialog.askopenfilename(title="Seleccionar Excel de Datos", filetypes=[("Excel", "*.xlsx *.xls")])
         if not fp: return
@@ -168,6 +176,7 @@ class App(ctk.CTk):
                 self._log(aviso)
             self.cfg_widget.refrescar()
             self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
+            self._aplicar_parametros_sim()
             self._sincronizar_vista_con_taller()
             self._refrescar_combo_substocks()
         except Exception as e:
@@ -199,6 +208,7 @@ class App(ctk.CTk):
             # Resetear estado del taller cargando los datos de nuevo
             self.taller.cargar_datos(self.archivo_cargado)
             self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
+            self._aplicar_parametros_sim()
             prios = obtener_prioridades(self.user_cfg)
             if prios:
                 self.taller.aplicar_prioridades_maquinas(prios)

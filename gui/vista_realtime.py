@@ -103,6 +103,7 @@ class VistaRealTime(ctk.CTkScrollableFrame):
         self.crc_frames: dict = {}
         self.maq_widgets: dict = {}
         self.cola_widgets: dict = {}
+        self.enfriando_widgets: dict = {}
 
         self._setup_ui()
 
@@ -127,6 +128,16 @@ class VistaRealTime(ctk.CTkScrollableFrame):
         self.main_container = ctk.CTkFrame(self.col_jaulas, fg_color="transparent")
         self.main_container.pack(fill="both", expand=True)
         self._crear_filas_jaulas(self.cantidad_jaulas)
+
+        # ── Sección global de cilindros en enfriado ──────────────────────
+        ctk.CTkLabel(self.col_jaulas, text="EN ENFRIAMIENTO",
+                     font=ctk.CTkFont(size=18, weight="bold"),
+                     text_color=COLORES_ESTADO["Enfriando"]).pack(pady=(20, 6))
+
+        self.enfriando_container = ctk.CTkScrollableFrame(
+            self.col_jaulas, fg_color="transparent", orientation="horizontal", height=70
+        )
+        self.enfriando_container.pack(fill="x")
 
         # ── Columna derecha: rectificadoras + cola ───────────────────────
         self.col_maqs = ctk.CTkFrame(self.columnas, fg_color="transparent")
@@ -249,6 +260,18 @@ class VistaRealTime(ctk.CTkScrollableFrame):
             )
             cg.pack(side="left", padx=5)
             self.cola_widgets[c["id"]] = cg
+
+        # Cilindros en enfriado: sección global, se reconstruye en cada snapshot.
+        for w in self.enfriando_widgets.values():
+            w.destroy()
+        self.enfriando_widgets.clear()
+        for c in getattr(snapshot, "detalle_enfriando", []):
+            cg = CilindroGrafico(
+                self.enfriando_container, c["id"], c["d"],
+                color=COLORES_ESTADO["Enfriando"], command=self.on_cilindro_click
+            )
+            cg.pack(side="left", padx=5)
+            self.enfriando_widgets[c["id"]] = cg
 
         # Máquinas
         for m_nombre, data in snapshot.detalle_maquinas.items():

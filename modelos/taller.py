@@ -32,9 +32,9 @@ _HOJA_CAMBIOS = "Programa_Cambios"
 
 class _EventoSim(NamedTuple):
     """Evento interno tipado para la cola de simulación."""
-    tipo: str       # "CAMBIO" | "FIN_RECT" | "REPONER_CRC"
+    tipo: str       # "CAMBIO" | "FIN_RECT" | "REPONER_CRC" | "FIN_ENFRIADO"
     tiempo: datetime
-    datos: Any      # EventoCambio (CAMBIO) | str nombre máquina (FIN_RECT) | int jaula (REPONER_CRC)
+    datos: Any      # EventoCambio (CAMBIO) | str máquina (FIN_RECT) | int jaula (REPONER_CRC) | str id cilindro (FIN_ENFRIADO)
 
 
 class TallerCilindros:
@@ -49,7 +49,7 @@ class TallerCilindros:
       - Exportación de resultados
     """
 
-    ESTADOS_NOMBRES = ["Trabajando", "CRC", "Disponible", "A rectificar", "Rectificando", "Baja"]
+    ESTADOS_NOMBRES = ["Trabajando", "CRC", "Disponible", "Enfriando", "A rectificar", "Rectificando", "Baja"]
 
     def __init__(self):
         self.cilindros: Dict[str, Cilindro] = {}
@@ -67,6 +67,12 @@ class TallerCilindros:
         self.tiempo_traslado_crc_min: float = 10.0
         self.cantidad_jaulas: int = 4
         self.estrategia_seleccion: str = "mayor_diametro"
+
+        # Tiempo de enfriado (horas) entre Trabajando y A rectificar. 0.0 = sin
+        # estado de enfriado (comportamiento histórico). Máximo de iteraciones
+        # del bucle de simulación (tope de seguridad configurable).
+        self.tiempo_enfriado_h: float = 0.0
+        self.max_iteraciones: int = _MAX_ITERACIONES_SIM
 
         # Recurso único de traslado Disponible→CRC (grúa/operario).
         # Las reposiciones se serializan: solo se mueve una pareja a la vez.
@@ -539,6 +545,8 @@ class TallerCilindros:
                 sn.detalle_maquinas[m_nombre] = None
 
         sn.detalle_cola_rectificado = [{"id": c.id, "d": c.diametro} for c in self.obtener_cola_rectificado()]
+        sn.detalle_enfriando = [{"id": c.id, "d": c.diametro}
+                                for c in self.obtener_cilindros_por_estado(EstadoCilindro.ENFRIANDO)]
 
         for ss in self.lista_substocks:
             conteo: Dict[str, int] = {}
@@ -661,7 +669,7 @@ class TallerCilindros:
 
         eventos_procesados: set = set()
         iteracion = 0
-        while cola and iteracion < _MAX_ITERACIONES_SIM:
+        while cola and iteracion < self.max_iteraciones:
             iteracion += 1
             ev_sim = cola.pop(0)
 
@@ -699,6 +707,19 @@ class TallerCilindros:
                     self._intentar_reactivar_jaulas(ev_sim.tiempo, _log, cola)
                     self.generar_snapshot(ev_sim.tiempo)
 
+            elif ev_sim.tipo == "FIN_ENFRIADO":
+                # El enfriado es un proceso físico: se completa siempre, también
+                # durante una PARADA (igual que FIN_RECT). Al terminar, el cilindro
+                # entra a la cola de rectificado y se intenta asignar a una máquina.
+                cil = self.cilindros.get(ev_sim.datos)
+                if cil and cil.estado == EstadoCilindro.ENFRIANDO:
+                    cil.estado = EstadoCilindro.A_RECTIFICAR
+                    cil.registrar_evento(ev_sim.tiempo, "Fin de enfriado, pasa a cola de rectificado")
+                    nuevos = self.asignar_trabajo_maquinas(ev_sim.tiempo)
+                    cola.extend(nuevos)
+                    cola.sort(key=lambda x: x.tiempo)
+                    self.generar_snapshot(ev_sim.tiempo)
+
             elif ev_sim.tipo == "CAMBIO":
                 ev = ev_sim.datos
                 if ev.id in eventos_procesados:
@@ -725,13 +746,23 @@ class TallerCilindros:
                 _log(f"  {t_proc.strftime('%m-%d %H:%M')} | Jaula {ev.jaula} | Cambio a {ev.tipo.value}"
                      f" | CRC={len(jaula.cilindros_crc)}{retraso_str}")
 
-                # 1. Los cilindros trabajando pasan a cola de rectificado
+                # 1. Los cilindros trabajando salen de la jaula. Si hay tiempo de
+                #    enfriado configurado, pasan a ENFRIANDO y entran a la cola de
+                #    rectificado recién al disparar FIN_ENFRIADO; si es 0, van
+                #    directo a A_RECTIFICAR (comportamiento histórico).
                 for cil in list(jaula.cilindros_trabajando):
-                    cil.estado = EstadoCilindro.A_RECTIFICAR
                     cil.jaula = None
                     cil.tipo_rectificado_actual = ev.tipo
                     cil.mm_a_rectificar = ev.mm_a_rectificar
-                    cil.registrar_evento(t_proc, f"Retirado de Jaula {ev.jaula} para rectificado")
+                    if self.tiempo_enfriado_h > 0:
+                        cil.estado = EstadoCilindro.ENFRIANDO
+                        fin_enfriado = t_proc + timedelta(hours=self.tiempo_enfriado_h)
+                        cil.registrar_evento(
+                            t_proc, f"En enfriado tras Jaula {ev.jaula} ({self.tiempo_enfriado_h:.1f} h)")
+                        cola.append(_EventoSim("FIN_ENFRIADO", fin_enfriado, cil.id))
+                    else:
+                        cil.estado = EstadoCilindro.A_RECTIFICAR
+                        cil.registrar_evento(t_proc, f"Retirado de Jaula {ev.jaula} para rectificado")
                 jaula.cilindros_trabajando.clear()
 
                 # 2. Subir una pareja completa a la jaula; si no hay stock, PARADA.
@@ -750,8 +781,8 @@ class TallerCilindros:
                 cola.sort(key=lambda x: x.tiempo)
                 self.generar_snapshot(t_proc)
 
-        if cola and iteracion >= _MAX_ITERACIONES_SIM:
-            msg = f"ADVERTENCIA: Límite de {_MAX_ITERACIONES_SIM} iteraciones alcanzado con {len(cola)} eventos pendientes."
+        if cola and iteracion >= self.max_iteraciones:
+            msg = f"ADVERTENCIA: Límite de {self.max_iteraciones} iteraciones alcanzado con {len(cola)} eventos pendientes."
             logger.warning(msg)
             _log(msg)
 
