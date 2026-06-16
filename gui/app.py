@@ -140,9 +140,10 @@ class App(ctk.CTk):
         self.dash_holder = ctk.CTkFrame(self.tab_dash, fg_color="transparent")
         self.dash_holder.pack(fill="both", expand=True)
 
-        # Placeholder para la vista real
+        # Placeholder para la vista real (se oculta al cargar un archivo).
+        # Va por encima de la vista (overlay) para no robarle altura al layout.
         self.label_real = ctk.CTkLabel(self.tab_visual, text="Cargue un archivo y simule para ver la vista en tiempo real", font=ctk.CTkFont(size=16))
-        self.label_real.pack(pady=100)
+        self.label_real.place(relx=0.5, rely=0.5, anchor="center")
 
         # Consola
         self.log_w = crear_consola(self.tab_log)
@@ -253,6 +254,7 @@ class App(ctk.CTk):
 
     def _sincronizar_vista_con_taller(self) -> None:
         """Actualiza los frames de Vista Real con las jaulas y máquinas del taller cargado."""
+        self.label_real.place_forget()  # ya hay datos: ocultar el placeholder
         estrat = self._estrat_por_etiqueta.get(self.combo_est.get(), "mayor_diametro")
         self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
         self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))

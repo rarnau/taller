@@ -40,7 +40,7 @@ class SeccionTaller(ctk.CTkFrame):
 
     # Tamaño fijo para que los recuadros no aparezcan enormes cuando están vacíos.
     ANCHO = 190
-    ALTO = 96
+    ALTO = 84
 
     def __init__(self, master, titulo: str, color_borde=ACCENT):
         super().__init__(master, border_width=2, border_color=color_borde,
@@ -110,11 +110,11 @@ class VistaRealTime(ctk.CTkScrollableFrame):
     def _setup_ui(self) -> None:
         self.title_label = ctk.CTkLabel(
             self, text="ESTADO DEL TALLER EN TIEMPO REAL",
-            font=ctk.CTkFont(size=20, weight="bold")
+            font=ctk.CTkFont(size=18, weight="bold")
         )
-        self.title_label.pack(pady=(20, 10))
+        self.title_label.pack(pady=(8, 6))
 
-        # Dos columnas: jaulas/buffer a la izquierda, rectificadoras/cola a la derecha.
+        # Dos columnas: jaulas/buffer a la izquierda, rectificadoras/cola/enfriado a la derecha.
         self.columnas = ctk.CTkFrame(self, fg_color="transparent")
         self.columnas.pack(fill="both", expand=True, padx=20)
 
@@ -123,66 +123,66 @@ class VistaRealTime(ctk.CTkScrollableFrame):
         self.col_jaulas.pack(side="left", anchor="n", padx=(0, 20))
 
         ctk.CTkLabel(self.col_jaulas, text="JAULAS",
-                     font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(0, 10))
+                     font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(0, 4))
 
         self.main_container = ctk.CTkFrame(self.col_jaulas, fg_color="transparent")
         self.main_container.pack(fill="both", expand=True)
         self._crear_filas_jaulas(self.cantidad_jaulas)
 
-        # ── Sección global de cilindros en enfriado ──────────────────────
-        ctk.CTkLabel(self.col_jaulas, text="EN ENFRIAMIENTO",
-                     font=ctk.CTkFont(size=18, weight="bold"),
-                     text_color=COLORES_ESTADO["Enfriando"]).pack(pady=(20, 6))
-
-        self.enfriando_container = ctk.CTkScrollableFrame(
-            self.col_jaulas, fg_color="transparent", orientation="horizontal", height=70
-        )
-        self.enfriando_container.pack(fill="x")
-
-        # ── Columna derecha: rectificadoras + cola ───────────────────────
+        # ── Columna derecha: rectificadoras + cola + enfriado ─────────────
         self.col_maqs = ctk.CTkFrame(self.columnas, fg_color="transparent")
         self.col_maqs.pack(side="left", anchor="n", fill="both", expand=True)
 
         self.maqs_title = ctk.CTkLabel(self.col_maqs, text="RECTIFICADORAS",
-                                       font=ctk.CTkFont(size=18, weight="bold"))
-        self.maqs_title.pack(pady=(0, 10))
+                                       font=ctk.CTkFont(size=16, weight="bold"))
+        self.maqs_title.pack(pady=(0, 4))
 
         self.maqs_container = ctk.CTkFrame(self.col_maqs, fg_color="transparent")
         self.maqs_container.pack(fill="x")
 
         self.cola_title = ctk.CTkLabel(
             self.col_maqs, text="COLA DE ESPERA RECTIFICADO",
-            font=ctk.CTkFont(size=18, weight="bold")
+            font=ctk.CTkFont(size=16, weight="bold")
         )
-        self.cola_title.pack(pady=(24, 2))
+        self.cola_title.pack(pady=(14, 2))
 
         self.cola_sentido = ctk.CTkLabel(
             self.col_maqs, text=_SENTIDO_TOMA.get(self.estrategia, ""),
             font=ctk.CTkFont(size=12), text_color=ACCENT
         )
-        self.cola_sentido.pack(pady=(0, 6))
+        self.cola_sentido.pack(pady=(0, 4))
 
         self.cola_container = ctk.CTkScrollableFrame(
-            self.col_maqs, fg_color="transparent", orientation="horizontal", height=100
+            self.col_maqs, fg_color="transparent", orientation="horizontal", height=90
         )
-        self.cola_container.pack(fill="x", pady=(0, 20))
+        self.cola_container.pack(fill="x", pady=(0, 6))
+
+        # ── Sección global de cilindros en enfriado ──────────────────────
+        ctk.CTkLabel(self.col_maqs, text="EN ENFRIAMIENTO",
+                     font=ctk.CTkFont(size=16, weight="bold"),
+                     text_color=COLORES_ESTADO["Enfriando"]).pack(pady=(14, 4))
+
+        self.enfriando_container = ctk.CTkScrollableFrame(
+            self.col_maqs, fg_color="transparent", orientation="horizontal", height=70
+        )
+        self.enfriando_container.pack(fill="x", pady=(0, 10))
 
     def _crear_filas_jaulas(self, n: int) -> None:
         """Crea N filas de jaula + CRC en el contenedor principal."""
         for i in range(1, n + 1):
             f = ctk.CTkFrame(self.main_container)
-            f.pack(fill="x", pady=8)
+            f.pack(fill="x", pady=4)
 
-            ctk.CTkLabel(f, text=f"J{i}", font=ctk.CTkFont(size=24, weight="bold"), width=40).pack(
-                side="left", padx=(12, 8)
+            ctk.CTkLabel(f, text=f"J{i}", font=ctk.CTkFont(size=22, weight="bold"), width=36).pack(
+                side="left", padx=(10, 6)
             )
 
             jf = SeccionTaller(f, "TRABAJANDO", color_borde=COLORES_ESTADO["Trabajando"])
-            jf.pack(side="left", padx=8, pady=8)
+            jf.pack(side="left", padx=6, pady=6)
             self.jaulas_frames[i] = jf
 
             cf = SeccionTaller(f, "BUFFER CRC", color_borde=COLORES_ESTADO["CRC"])
-            cf.pack(side="left", padx=8, pady=8)
+            cf.pack(side="left", padx=6, pady=6)
             self.crc_frames[i] = cf
 
     def ajustar_jaulas(self, cantidad_jaulas: int) -> None:
@@ -210,8 +210,8 @@ class VistaRealTime(ctk.CTkScrollableFrame):
             self._crear_maquina_widget(nombre)
 
     def _crear_maquina_widget(self, nombre: str) -> None:
-        f = ctk.CTkFrame(self.maqs_container, width=200, height=100)
-        f.pack(side="left", padx=10, pady=10)
+        f = ctk.CTkFrame(self.maqs_container, width=190, height=90)
+        f.pack(side="left", padx=8, pady=6)
         f.pack_propagate(False)
 
         ctk.CTkLabel(f, text=nombre, font=ctk.CTkFont(weight="bold")).pack()
