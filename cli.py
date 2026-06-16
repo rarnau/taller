@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config.persistencia import cargar_config, obtener_prioridades, obtener_rangos
 from modelos.kpis import calcular_kpis
+from modelos.estrategias import ESTRATEGIAS_SELECCION
 from modelos.taller import TallerCilindros
 
 
@@ -82,7 +83,7 @@ def main(argv: Optional[list] = None) -> int:
     )
     parser.add_argument("excel", help="Ruta al archivo .xlsx con los datos de la simulación.")
     parser.add_argument("--estrategia", default="mayor_diametro",
-                        choices=["mayor_diametro", "menor_diametro", "fifo"],
+                        choices=list(ESTRATEGIAS_SELECCION.keys()),
                         help="Estrategia de selección de la cola de rectificado (default: mayor_diametro).")
     parser.add_argument("--config", metavar="RUTA",
                         help="JSON de configuración (default: config/user_config.json).")

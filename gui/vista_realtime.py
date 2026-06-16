@@ -10,6 +10,7 @@ _SENTIDO_TOMA = {
     "mayor_diametro": "Sentido de toma:  mayor diámetro primero  →",
     "menor_diametro": "Sentido de toma:  menor diámetro primero  →",
     "fifo": "Sentido de toma:  orden de llegada (FIFO)  →",
+    "menor_mm_desb_fifo_prod": "Sentido de toma:  menor mm (desbaste) / FIFO (producción)  →",
 }
 
 

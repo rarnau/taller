@@ -12,6 +12,7 @@ from .substock import SubStock
 from .maquina import MaquinaRectificadora
 from .jaula import Jaula
 from .eventos import EventoCambio, Alerta, Snapshot
+from .estrategias import ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,11 @@ class TallerCilindros:
         self.alertas.clear()
         self.snapshots.clear()
         self.avisos_carga.clear()
+        # Se limpian también los substocks: si no, al recargar otro archivo en
+        # la misma instancia (sin configurar_substocks de por medio) el fallback
+        # de derivación de la línea inferior no dispara y persistirían los rangos
+        # del archivo anterior, dejando invisibles los cilindros fuera de ellos.
+        self.lista_substocks.clear()
 
         try:
             xl = pd.ExcelFile(ruta_excel, engine="openpyxl")
@@ -472,15 +478,32 @@ class TallerCilindros:
         """Obtiene la lista de cilindros esperando rectificado."""
         return self.obtener_cilindros_por_estado(EstadoCilindro.A_RECTIFICAR)
 
-    def seleccionar_siguiente_de_cola(self, cola: List[Cilindro]) -> Optional[Cilindro]:
-        """Aplica la estrategia de selección sobre la cola de rectificado."""
+    def seleccionar_siguiente_de_cola(
+        self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora] = None
+    ) -> Optional[Cilindro]:
+        """Elige el siguiente cilindro a rectificar para una máquina.
+
+        Selección en dos pasos:
+          1. Filtro por prioridad: si se pasa una máquina, se consideran primero
+             los cilindros cuyo tipo de rectificado coincide con su
+             prioridad_defecto. Si ninguno coincide (o no se pasa máquina), se
+             consideran todos los de la cola.
+          2. Estrategia: sobre el subconjunto resultante se aplica la estrategia
+             de selección configurada (ver ESTRATEGIAS_SELECCION).
+        """
         if not cola:
             return None
-        if self.estrategia_seleccion == "mayor_diametro":
-            return max(cola, key=lambda c: c.diametro)
-        if self.estrategia_seleccion == "menor_diametro":
-            return min(cola, key=lambda c: c.diametro)
-        return cola[0]  # FIFO por defecto
+
+        candidatos = cola
+        if maquina is not None:
+            preferidos = [c for c in cola if c.tipo_rectificado_actual == maquina.prioridad_defecto]
+            if preferidos:
+                candidatos = preferidos
+
+        estrategia = ESTRATEGIAS_SELECCION.get(
+            self.estrategia_seleccion, ESTRATEGIAS_SELECCION[ESTRATEGIA_DEFECTO]
+        )
+        return estrategia.seleccionar(candidatos, maquina)
 
     # ── Snapshot ────────────────────────────────────────────────────────────
 
@@ -538,7 +561,7 @@ class TallerCilindros:
                 continue
             if not cola:
                 break
-            cil = self.seleccionar_siguiente_de_cola(cola)
+            cil = self.seleccionar_siguiente_de_cola(cola, maq)
             if cil is None:
                 continue
 
