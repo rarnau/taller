@@ -553,6 +553,7 @@ class TallerCilindros:
                     f"Diámetro proyectado {nuevo_diam:.2f} < {self.diametro_minimo}"
                 )
                 self.alertas.append(Alerta(tiempo, "INFO", f"Cilindro {cil.id} dado de BAJA"))
+                cola.remove(cil)
                 continue
 
             maq.iniciar_rectificado(cil, tiempo, tipo, mm)
