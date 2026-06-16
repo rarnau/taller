@@ -206,13 +206,23 @@ class VistaRealTime(ctk.CTkScrollableFrame):
         for w in self.maqs_container.winfo_children():
             w.destroy()
         self.maq_widgets.clear()
+        # Columnas uniformes que se reparten el ancho disponible (responsive):
+        # las rectificadoras se achican/agrandan al mover la app de pantalla.
+        total = max(1, len(nombres))
+        for c in range(total):
+            self.maqs_container.grid_columnconfigure(c, weight=1, uniform="maq")
+        # Resetea pesos de columnas sobrantes de una carga previa con más máquinas.
+        for c in range(total, total + 8):
+            self.maqs_container.grid_columnconfigure(c, weight=0, uniform="")
         for nombre in nombres:
             self._crear_maquina_widget(nombre)
 
     def _crear_maquina_widget(self, nombre: str) -> None:
-        f = ctk.CTkFrame(self.maqs_container, width=190, height=90)
-        f.pack(side="left", padx=8, pady=6)
-        f.pack_propagate(False)
+        columna = len(self.maq_widgets)
+        self.maqs_container.grid_columnconfigure(columna, weight=1, uniform="maq")
+        f = ctk.CTkFrame(self.maqs_container, height=90)
+        f.grid(row=0, column=columna, padx=6, pady=6, sticky="ew")
+        f.grid_propagate(False)
 
         ctk.CTkLabel(f, text=nombre, font=ctk.CTkFont(weight="bold")).pack()
 
