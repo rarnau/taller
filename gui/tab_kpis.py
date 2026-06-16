@@ -1,7 +1,6 @@
 """KPIs adaptados."""
 import customtkinter as ctk
-import numpy as np
-from modelos.enums import EstadoCilindro
+from modelos.kpis import calcular_kpis
 from config.tema import *
 
 def _ct(p, l, v, co, r, c):
@@ -19,34 +18,23 @@ def llenar_kpis(tab, taller):
     container = ctk.CTkScrollableFrame(tab, fg_color="transparent")
     container.pack(fill="both", expand=True, padx=20, pady=20)
 
-    t2 = len(taller.cilindros)
-    act = len([c for c in taller.cilindros.values() if c.estado != EstadoCilindro.BAJA])
-    baj = t2 - act
-    nc = sum(1 for a in taller.alertas if a.tipo == "CRITICO")
-    nr = sum(len(mq.historial_trabajo) for mq in taller.maquinas.values())
-
-    th = 0
-    if taller.snapshots:
-        th = (taller.snapshots[-1].tiempo - taller.snapshots[0].tiempo).total_seconds() / 3600
-
-    da = np.mean([c.diametro for c in taller.cilindros.values() if c.estado != EstadoCilindro.BAJA]) if act else 0
-    dl = [c.diametro_original - c.diametro for c in taller.cilindros.values() if c.diametro_original != c.diametro]
-    dd = np.mean(dl) if dl else 0
+    k = calcular_kpis(taller)
+    baj = k["bajas"]
+    nc = k["alertas_criticas"]
 
     kpis = [
-        ("Cilindros Totales", str(t2), ACCENT),
-        ("Activos", str(act), GREEN),
+        ("Cilindros Totales", str(k["cilindros_totales"]), ACCENT),
+        ("Activos", str(k["activos"]), GREEN),
         ("Bajas", str(baj), RED if baj else GREEN),
         ("Alertas Críticas", str(nc), RED if nc else GREEN),
-        ("Cambios Programados", str(len(taller.eventos_programados)), ORANGE),
-        ("Rectificados Realizados", str(nr), PURPLE),
-        ("Horizonte Simulación (h)", f"{th:.1f}", CYAN),
-        ("Diámetro Promedio", f"{da:.1f} mm", YELLOW),
-        ("Desgaste Medio", f"{dd:.2f} mm", "#F97316")
+        ("Cambios Programados", str(k["cambios_programados"]), ORANGE),
+        ("Rectificados Realizados", str(k["rectificados_realizados"]), PURPLE),
+        ("Horizonte Simulación (h)", f"{k['horizonte_simulacion_h']:.1f}", CYAN),
+        ("Diámetro Promedio", f"{k['diametro_promedio_mm']:.1f} mm", YELLOW),
+        ("Desgaste Medio", f"{k['desgaste_medio_mm']:.2f} mm", "#F97316")
     ]
 
-    for mn, mq in taller.maquinas.items():
-        pct = (mq.tiempo_total_ocupada_min / 60) / th * 100 if th else 0
+    for mn, pct in k["utilizacion_maquinas_pct"].items():
         kpis.append((f"Utilización {mn}", f"{pct:.0f}%", GREEN if pct < 85 else ORANGE))
 
     cols = 3
