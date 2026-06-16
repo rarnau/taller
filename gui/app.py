@@ -14,7 +14,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from config.tema import *
 from config.persistencia import cargar_config, guardar_config, obtener_rangos, obtener_prioridades
-from modelos.taller import ESTRATEGIAS_SELECCION, TallerCilindros
+from modelos.estrategias import ESTRATEGIAS_SELECCION
+from modelos.taller import TallerCilindros
 
 # Nota: Estos módulos se irán actualizando a CustomTkinter o eliminando si se integran
 # de forma diferente en la nueva GUI.

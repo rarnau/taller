@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config.persistencia import cargar_config, obtener_prioridades, obtener_rangos
 from modelos.kpis import calcular_kpis
-from modelos.taller import ESTRATEGIAS_SELECCION, TallerCilindros
+from modelos.estrategias import ESTRATEGIAS_SELECCION
+from modelos.taller import TallerCilindros
 
 
 def ejecutar_simulacion(ruta_excel: str, estrategia: str = "mayor_diametro",

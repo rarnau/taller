@@ -12,6 +12,7 @@ from .substock import SubStock
 from .maquina import MaquinaRectificadora
 from .jaula import Jaula
 from .eventos import EventoCambio, Alerta, Snapshot
+from .estrategias import ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO
 
 logger = logging.getLogger(__name__)
 
@@ -21,67 +22,6 @@ _TIPO_RECTIFICADO_DEFECTO: str = "produccion"
 _BUFFER_CRC_SIZE: int = 2
 _MAX_ITERACIONES_SIM: int = 10_000
 _MAX_ITER_FINALIZACION: int = 500
-
-# Estrategias de selección de la cola de rectificado.
-# Cada estrategia es un objeto con: `clave` (id para GUI/CLI/persistencia),
-# `etiqueta` (texto a mostrar) y `seleccionar(cola, maquina)`, que recibe la
-# cola YA filtrada por prioridad de la máquina y devuelve el cilindro a
-# rectificar. Para agregar una estrategia nueva: subclasar EstrategiaSeleccion
-# y registrarla en ESTRATEGIAS_SELECCION; la GUI y el CLI la toman de ahí.
-
-
-class EstrategiaSeleccion:
-    """Estrategia de selección de un cilindro de la cola de rectificado."""
-
-    clave: str = ""
-    etiqueta: str = ""
-
-    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
-        raise NotImplementedError
-
-
-class _MayorDiametro(EstrategiaSeleccion):
-    clave, etiqueta = "mayor_diametro", "Mayor diámetro"
-
-    def seleccionar(self, cola, maquina):
-        return max(cola, key=lambda c: c.diametro)
-
-
-class _MenorDiametro(EstrategiaSeleccion):
-    clave, etiqueta = "menor_diametro", "Menor diámetro"
-
-    def seleccionar(self, cola, maquina):
-        return min(cola, key=lambda c: c.diametro)
-
-
-class _Fifo(EstrategiaSeleccion):
-    clave, etiqueta = "fifo", "FIFO (orden de llegada)"
-
-    def seleccionar(self, cola, maquina):
-        return cola[0]
-
-
-class _MenorMmDesbasteFifoProduccion(EstrategiaSeleccion):
-    """Menor mm a rectificar cuando la máquina prioriza desbaste; FIFO en otro caso."""
-
-    clave = "menor_mm_desb_fifo_prod"
-    etiqueta = "Menor mm desbaste / FIFO producción"
-
-    def seleccionar(self, cola, maquina):
-        if maquina is not None and maquina.prioridad_defecto == TipoRectificado.DESBASTE:
-            return min(cola, key=lambda c: c.mm_a_rectificar)
-        return cola[0]
-
-
-ESTRATEGIAS_SELECCION: Dict[str, EstrategiaSeleccion] = {
-    e.clave: e for e in (
-        _MayorDiametro(),
-        _MenorDiametro(),
-        _Fifo(),
-        _MenorMmDesbasteFifoProduccion(),
-    )
-}
-_ESTRATEGIA_DEFECTO = "fifo"
 
 # Nombres de hojas Excel
 _HOJA_CONFIG = "Configuración"
@@ -561,7 +501,7 @@ class TallerCilindros:
                 candidatos = preferidos
 
         estrategia = ESTRATEGIAS_SELECCION.get(
-            self.estrategia_seleccion, ESTRATEGIAS_SELECCION[_ESTRATEGIA_DEFECTO]
+            self.estrategia_seleccion, ESTRATEGIAS_SELECCION[ESTRATEGIA_DEFECTO]
         )
         return estrategia.seleccionar(candidatos, maquina)
 
