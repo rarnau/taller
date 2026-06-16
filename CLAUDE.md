@@ -117,6 +117,12 @@ Copy and adapt `datos/generar_caso_parada.py`. The Excel must have exactly four 
 
 All UI color constants are in `config/tema.py` and imported with `from config.tema import *`. The app uses CustomTkinter Dark mode. Do not hardcode color strings in GUI files.
 
+### GUI: DPI scaling and Vista Real layout
+
+`gui/app.py` calls `ctk.deactivate_automatic_dpi_awareness()` at module load, **before** the window is created. This is required: when the window is dragged between monitors with different DPI scaling, CustomTkinter's auto-rescaler tries to reconfigure the already-destroyed dropdown of a `CTkComboBox` and raises `TclError: invalid command name ...dropdownmenu`. Deactivating it pins the scale to 1 and removes that callback. **Tradeoff:** widgets are not auto-rescaled to per-monitor DPI. Do not re-enable without first solving the combobox-dropdown crash.
+
+In `gui/vista_realtime.py`, the machine widgets ("rectificadoras") use a `grid` of uniform weighted columns (`grid_columnconfigure(..., weight=1, uniform="maq")`, `sticky="ew"`) so they share the available width responsively — do **not** give them a fixed width. The "Cargue un archivo..." placeholder (`gui/app.py`) is a `place()` overlay (not packed) so it doesn't steal layout height, and is hidden with `place_forget()` in `_sincronizar_vista_con_taller()`. The "EN ENFRIAMIENTO" section lives in the **right** column (under the queue) to keep all jaulas visible in the left column.
+
 ## Key Design Decisions
 
 These are non-obvious invariants that must be preserved when modifying the engine.

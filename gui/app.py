@@ -32,6 +32,13 @@ from gui.tab_config import crear_tab_configuracion
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
+# Evita el crash de CustomTkinter al mover la ventana entre monitores con
+# distinto factor de escala (DPI): el re-escalado automático intenta reconfigurar
+# el dropdown de los CTkComboBox ya destruidos y lanza un TclError
+# ("invalid command name ...dropdownmenu"). Desactivarlo mantiene una escala fija
+# y elimina ese callback problemático. Debe ejecutarse antes de crear la ventana.
+ctk.deactivate_automatic_dpi_awareness()
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
