@@ -10,28 +10,15 @@ Escenario:
     al no haber reemplazo, la jaula queda PARADA.
   - El par retirado se rectifica 0.8 mm (sigue dentro de 561-575) y al
     terminar vuelve como DISPONIBLE, reactivando la jaula 4.
+
+El Excel solo contiene datos (Stock_Inicial + Programa_Cambios). La
+configuración del taller (parámetros globales, máquinas y rangos) vive en
+config/user_config.json y se gestiona desde la pantalla Configuración o el CLI.
 """
 import os
 import pandas as pd
 
 SALIDA = os.path.join(os.path.dirname(__file__), "simulacion_caso_parada.xlsx")
-
-configuracion = pd.DataFrame({
-    "Parámetro": [
-        "Diámetro Máximo (mm)",
-        "Diámetro Mínimo (mm)",
-        "Tiempo Disponible→CRC por pareja (min)",
-        "Cantidad de Jaulas",
-    ],
-    "Valor": [575, 520, 10, 4],
-})
-
-maquinas = pd.DataFrame([
-    {"Máquina": "M1", "Tipo_Rectificado": "produccion", "mm_removidos": 0.8, "Tiempo_min": 60},
-    {"Máquina": "M1", "Tipo_Rectificado": "desbaste",   "mm_removidos": 2.0, "Tiempo_min": 90},
-    {"Máquina": "M2", "Tipo_Rectificado": "produccion", "mm_removidos": 0.8, "Tiempo_min": 60},
-    {"Máquina": "M2", "Tipo_Rectificado": "desbaste",   "mm_removidos": 2.0, "Tiempo_min": 90},
-])
 
 stock = []
 
@@ -78,8 +65,6 @@ cambios = pd.DataFrame([
 ])
 
 with pd.ExcelWriter(SALIDA, engine="openpyxl") as xl:
-    configuracion.to_excel(xl, sheet_name="Configuración", index=False)
-    maquinas.to_excel(xl, sheet_name="Máquinas", index=False)
     stock_inicial.to_excel(xl, sheet_name="Stock_Inicial", index=False)
     cambios.to_excel(xl, sheet_name="Programa_Cambios", index=False)
 

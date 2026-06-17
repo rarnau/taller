@@ -106,56 +106,121 @@ class TallerCilindros:
                 except ValueError:
                     logger.warning("Tipo de prioridad inválido '%s' para máquina '%s', ignorado.", tipo, nombre)
 
+    def configurar(self, cfg: Dict[str, Any]) -> None:
+        """Aplica la configuración estructural persistente (el JSON de usuario).
+
+        Punto único de configuración del taller. DEBE llamarse **antes** de
+        ``cargar_datos()``: el stock necesita ``cantidad_jaulas`` y
+        ``diametro_minimo`` para inicializarse, y el programa de cambios valida
+        contra las jaulas ya creadas.
+
+        Acepta el dict completo de ``config/persistencia.py`` (claves
+        ``config_global``, ``maquinas``, ``rangos``, ``tiempo_enfriado_h`` y
+        ``max_iteraciones``); las que falten se ignoran sin error.
+        """
+        cg = cfg.get("config_global", {})
+        if "diametro_maximo" in cg:
+            self.diametro_maximo = float(cg["diametro_maximo"])
+        if "diametro_minimo" in cg:
+            self.diametro_minimo = float(cg["diametro_minimo"])
+        if "tiempo_traslado_crc_min" in cg:
+            self.tiempo_traslado_crc_min = float(cg["tiempo_traslado_crc_min"])
+        if "cantidad_jaulas" in cg:
+            self.cantidad_jaulas = int(cg["cantidad_jaulas"])
+
+        if "maquinas" in cfg:
+            self.configurar_maquinas(cfg["maquinas"])
+        if "rangos" in cfg:
+            self.configurar_substocks(cfg["rangos"])
+        if "tiempo_enfriado_h" in cfg:
+            self.tiempo_enfriado_h = float(cfg["tiempo_enfriado_h"])
+        if "max_iteraciones" in cfg:
+            self.max_iteraciones = int(cfg["max_iteraciones"])
+
+    def configurar_maquinas(self, maquinas_config: List[Dict[str, Any]]) -> None:
+        """Reconstruye el parque de máquinas desde la configuración persistente.
+
+        Cada entrada: ``{"nombre", "prioridad", "tasas": {tipo: {"mm", "tiempo_min"}}}``.
+        """
+        self.maquinas.clear()
+        for m in maquinas_config:
+            nombre = str(m["nombre"])
+            maq = MaquinaRectificadora(nombre)
+            for tipo_str, tasa in (m.get("tasas") or {}).items():
+                try:
+                    TipoRectificado(tipo_str)
+                except ValueError:
+                    logger.warning("Tipo de rectificado inválido '%s' para máquina '%s', ignorado.", tipo_str, nombre)
+                    continue
+                maq.configurar_tasa(tipo_str, float(tasa["mm"]), float(tasa["tiempo_min"]))
+            prioridad = m.get("prioridad")
+            if prioridad:
+                try:
+                    maq.prioridad_defecto = TipoRectificado(prioridad)
+                except ValueError:
+                    logger.warning("Prioridad inválida '%s' para máquina '%s', ignorada.", prioridad, nombre)
+            self.maquinas[nombre] = maq
+
     # ── Carga de datos desde Excel ──────────────────────────────────────────
 
     def cargar_datos(self, ruta_excel: str) -> None:
-        """Carga configuración e inventario inicial desde un archivo Excel."""
-        self.cilindros.clear()
-        self.maquinas.clear()
-        self.jaulas.clear()
-        self.eventos_programados.clear()
-        self.alertas.clear()
-        self.snapshots.clear()
-        self.avisos_carga.clear()
-        # Se limpian también los substocks: si no, al recargar otro archivo en
-        # la misma instancia (sin configurar_substocks de por medio) el fallback
-        # de derivación de la línea inferior no dispara y persistirían los rangos
-        # del archivo anterior, dejando invisibles los cilindros fuera de ellos.
-        self.lista_substocks.clear()
+        """Carga el inventario inicial y el programa de cambios desde un Excel.
 
+        El Excel solo contiene **datos variables**: las hojas ``Stock_Inicial``
+        y ``Programa_Cambios``. La configuración estructural (parámetros
+        globales, máquinas y rangos) vive en el JSON de usuario y debe aplicarse
+        antes con :meth:`configurar`. Si el archivo trae las hojas viejas
+        ``Configuración``/``Máquinas`` se ignoran (con un aviso).
+        """
         try:
             xl = pd.ExcelFile(ruta_excel, engine="openpyxl")
         except Exception as exc:
             raise IOError(f"No se pudo abrir el archivo Excel '{ruta_excel}': {exc}") from exc
 
-        hojas_requeridas = [_HOJA_CONFIG, _HOJA_MAQUINAS, _HOJA_STOCK, _HOJA_CAMBIOS]
+        hojas_requeridas = [_HOJA_STOCK, _HOJA_CAMBIOS]
         faltantes = [h for h in hojas_requeridas if h not in xl.sheet_names]
         if faltantes:
             raise ValueError(f"Hojas faltantes en el Excel: {faltantes}")
 
-        self._cargar_configuracion(xl.parse(_HOJA_CONFIG))
-        self._cargar_maquinas(xl.parse(_HOJA_MAQUINAS))
-        self._cargar_stock(xl.parse(_HOJA_STOCK))
-        self._cargar_cambios(xl.parse(_HOJA_CAMBIOS))
+        ignoradas = [h for h in (_HOJA_CONFIG, _HOJA_MAQUINAS) if h in xl.sheet_names]
 
-        # Si nadie llamó configurar_substocks() antes de cargar los datos,
-        # se derivan rangos iguales a partir del rango global y la cantidad
-        # de jaulas. Esto hace que cargar_datos() sea auto-suficiente cuando
-        # se usa fuera de la App (tests, scripts, verificaciones).
-        # La App siempre llama configurar_substocks() con user_config.json
-        # antes de cargar, por lo que este fallback no la afecta.
+        self.cargar_datos_desde_dataframes(xl.parse(_HOJA_STOCK), xl.parse(_HOJA_CAMBIOS))
+
+        if ignoradas:
+            msg = (
+                f"AVISO: el Excel trae hojas de configuración antiguas {ignoradas} que se "
+                f"ignoran. La configuración del taller se gestiona desde la pantalla "
+                f"Configuración o el CLI (config import-excel para volcarlas al JSON)."
+            )
+            logger.warning(msg)
+            self.avisos_carga.append(msg)
+
+    def cargar_datos_desde_dataframes(self, stock_df: pd.DataFrame,
+                                      cambios_df: pd.DataFrame) -> None:
+        """Carga stock y cambios desde DataFrames ya en memoria.
+
+        Separar esta lógica de la lectura del ``.xlsx`` permite que un futuro
+        runner de lotes ejecute miles de simulaciones independientes pasando los
+        DataFrames directamente, sin I/O de disco por corrida. Requiere que
+        :meth:`configurar` ya se haya aplicado (máquinas, rangos y globales).
+        """
+        # Solo se limpian los datos por-corrida; NO las máquinas, los substocks
+        # ni los parámetros globales, que los fija configurar() previamente.
+        self.cilindros.clear()
+        self.jaulas.clear()
+        self.eventos_programados.clear()
+        self.alertas.clear()
+        self.snapshots.clear()
+        self.avisos_carga.clear()
+
+        self._cargar_stock(stock_df)
+        self._cargar_cambios(cambios_df)
+
+        # Fallback: si nadie configuró substocks, se derivan rangos iguales a
+        # partir del rango global y la cantidad de jaulas, para que el motor
+        # funcione aun sin configurar() (tests, scripts, verificaciones).
         if not self.lista_substocks:
             self._derivar_substocks_por_defecto()
-
-    def _cargar_configuracion(self, df: pd.DataFrame) -> None:
-        """Aplica los parámetros generales de la hoja Configuración."""
-        cfg = dict(zip(df["Parámetro"], df["Valor"]))
-        self.diametro_maximo = float(cfg.get("Diámetro Máximo (mm)", self.diametro_maximo))
-        self.diametro_minimo = float(cfg.get("Diámetro Mínimo (mm)", self.diametro_minimo))
-        self.tiempo_traslado_crc_min = float(
-            cfg.get("Tiempo Disponible→CRC por pareja (min)", self.tiempo_traslado_crc_min)
-        )
-        self.cantidad_jaulas = int(cfg.get("Cantidad de Jaulas", self.cantidad_jaulas))
 
     def _derivar_substocks_por_defecto(self) -> None:
         """
@@ -178,21 +243,6 @@ class TallerCilindros:
             "SubStocks derivados automáticamente (%d bandas de %.2f mm cada una).",
             n, paso
         )
-
-    def _cargar_maquinas(self, df: pd.DataFrame) -> None:
-        """Carga las tasas de rectificado de cada máquina."""
-        for idx, row in df.iterrows():
-            nombre = str(row["Máquina"])
-            tipo_str = str(row["Tipo_Rectificado"])
-            try:
-                TipoRectificado(tipo_str)
-            except ValueError as exc:
-                raise ValueError(
-                    f"Tipo de rectificado inválido '{tipo_str}' en hoja Máquinas, fila {idx}"
-                ) from exc
-            if nombre not in self.maquinas:
-                self.maquinas[nombre] = MaquinaRectificadora(nombre)
-            self.maquinas[nombre].configurar_tasa(tipo_str, float(row["mm_removidos"]), float(row["Tiempo_min"]))
 
     def _cargar_stock(self, df: pd.DataFrame) -> None:
         """Carga el stock inicial de cilindros e inicializa las jaulas."""

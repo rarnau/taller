@@ -1,4 +1,11 @@
-"""Pestaña de Configuración: edición de rangos de jaulas y prioridades de máquinas."""
+"""Pestaña de Configuración: edición de la configuración persistente del taller.
+
+Edita y persiste (en ``config/user_config.json``) toda la configuración
+estructural: parámetros globales, parque de máquinas (CRUD completo), rangos de
+SubStock por jaula y parámetros de simulación. El Excel cargado solo aporta
+datos (stock + cambios), por lo que esta pantalla es la fuente de verdad de la
+configuración.
+"""
 import customtkinter as ctk
 
 from config.tema import (
@@ -6,7 +13,7 @@ from config.tema import (
     FONT_SIZE, FONT_SIZE_MD, FONT_SIZE_LG, BTN_BLUE, BTN_BLUE_HOVER,
 )
 from config.persistencia import (
-    guardar_config, obtener_rangos, obtener_prioridades,
+    guardar_config, obtener_rangos, obtener_maquinas, obtener_config_global,
     obtener_tiempo_enfriado, obtener_max_iteraciones,
 )
 from modelos.enums import TipoRectificado
@@ -37,16 +44,40 @@ def _card(parent, titulo, subtitulo=None):
     return cuerpo
 
 
+def _fila_param(parent, etiqueta, ayuda=None, ancho_entry=120):
+    """Crea una fila etiqueta + entry (+ ayuda opcional) y devuelve el entry."""
+    fila = ctk.CTkFrame(parent, fg_color="transparent")
+    fila.pack(fill="x", pady=3)
+    ctk.CTkLabel(
+        fila, text=etiqueta, width=220, anchor="w", text_color=FG,
+        font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
+    ).pack(side="left", padx=4)
+    entry = ctk.CTkEntry(fila, width=ancho_entry, justify="center")
+    entry.pack(side="left", padx=4)
+    if ayuda:
+        ctk.CTkLabel(
+            fila, text=ayuda, anchor="w", text_color=FG2,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE),
+        ).pack(side="left", padx=4)
+    return entry
+
+
 class TabConfiguracion(ctk.CTkScrollableFrame):
-    """Editor de configuración persistente (rangos por jaula y prioridades de máquinas)."""
+    """Editor de la configuración persistente del taller."""
 
     def __init__(self, parent, app):
         super().__init__(parent, fg_color="transparent")
         self.app = app
-        self._filas_rangos = []      # [(entry_jaula, entry_desde, entry_hasta, frame_fila)]
-        self._combos_prio = {}       # {nombre_maquina: CTkComboBox}
+        self._filas_rangos = []      # [(e_jaula, e_desde, e_hasta, frame_fila)]
+        self._filas_maquinas = []    # [(e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo_prio, frame_fila)]
         self._cont_rangos = None
-        self._cont_prio = None
+        self._cont_maquinas = None
+        # Entries de parámetros globales
+        self._e_diam_max = None
+        self._e_diam_min = None
+        self._e_crc = None
+        self._e_jaulas = None
+        # Entries de parámetros de simulación
         self._entry_enfriado = None
         self._entry_max_iter = None
         self._label_estado = None
@@ -57,8 +88,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
     # ── Construcción de la UI ────────────────────────────────────────────
 
     def _construir(self):
-        # Layout en dos columnas para aprovechar el ancho de la pestaña:
-        #   izquierda → rangos por jaula;  derecha → prioridades + parámetros.
+        # Dos columnas: izquierda → globales + rangos; derecha → máquinas + sim.
         cols = ctk.CTkFrame(self, fg_color="transparent")
         cols.pack(fill="both", expand=True)
 
@@ -68,7 +98,18 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         col_der = ctk.CTkFrame(cols, fg_color="transparent")
         col_der.pack(side="left", fill="both", expand=True, padx=(8, 0), anchor="n")
 
-        # Sección 1: Rangos de SubStock por jaula (columna izquierda)
+        # Sección 1: Parámetros globales del taller (columna izquierda)
+        cuerpo_g = _card(
+            col_izq,
+            "Parámetros Globales del Taller",
+            "Rango de diámetro útil, traslado al CRC y cantidad de jaulas.",
+        )
+        self._e_diam_max = _fila_param(cuerpo_g, "Diámetro máximo (mm)")
+        self._e_diam_min = _fila_param(cuerpo_g, "Diámetro mínimo (mm)", "bajo este, el cilindro es BAJA")
+        self._e_crc = _fila_param(cuerpo_g, "Traslado Disponible→CRC (min)")
+        self._e_jaulas = _fila_param(cuerpo_g, "Cantidad de jaulas")
+
+        # Sección 2: Rangos de SubStock por jaula (columna izquierda)
         cuerpo_r = _card(
             col_izq,
             "Rangos de SubStock por Jaula",
@@ -94,41 +135,41 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             command=self._agregar_fila_rango,
         ).pack(anchor="w", pady=(10, 0))
 
-        # Sección 2: Prioridades de máquinas (columna derecha)
-        self._cont_prio = _card(
+        # Sección 3: Máquinas (CRUD completo, columna derecha)
+        cuerpo_m = _card(
             col_der,
-            "Prioridades de Rectificado por Máquina",
-            "Tipo de rectificado por defecto cuando el cilindro no especifica uno.",
+            "Máquinas Rectificadoras",
+            "Tasas por tipo (mm removidos y minutos) y prioridad de rectificado.",
         )
 
-        # Sección 3: Parámetros de simulación (columna derecha)
+        cab_m = ctk.CTkFrame(cuerpo_m, fg_color="transparent")
+        cab_m.pack(fill="x", pady=(0, 6))
+        for txt, w in [("Nombre", 90), ("Prod mm", 64), ("Prod min", 64),
+                       ("Desb mm", 64), ("Desb min", 64), ("Prioridad", 120), ("", 36)]:
+            ctk.CTkLabel(
+                cab_m, text=txt, width=w, anchor="w",
+                font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold"),
+                text_color=FG2,
+            ).pack(side="left", padx=2)
+
+        self._cont_maquinas = ctk.CTkFrame(cuerpo_m, fg_color="transparent")
+        self._cont_maquinas.pack(fill="x")
+
+        ctk.CTkButton(
+            cuerpo_m, text="+ Agregar máquina", width=160, height=30,
+            fg_color="transparent", border_width=1, border_color=ACCENT,
+            text_color=ACCENT, hover_color=BG_CARD,
+            command=self._agregar_fila_maquina,
+        ).pack(anchor="w", pady=(10, 0))
+
+        # Sección 4: Parámetros de simulación (columna derecha)
         cuerpo_p = _card(
             col_der,
             "Parámetros de Simulación",
             "Tiempo de enfriado tras retirar un cilindro y tope de iteraciones del motor.",
         )
-
-        fila_enf = ctk.CTkFrame(cuerpo_p, fg_color="transparent")
-        fila_enf.pack(fill="x", pady=3)
-        ctk.CTkLabel(
-            fila_enf, text="Tiempo de enfriado (h)", width=200, anchor="w", text_color=FG,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
-        ).pack(side="left", padx=4)
-        self._entry_enfriado = ctk.CTkEntry(fila_enf, width=120, justify="center")
-        self._entry_enfriado.pack(side="left", padx=4)
-        ctk.CTkLabel(
-            fila_enf, text="0 = sin enfriado", anchor="w", text_color=FG2,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE),
-        ).pack(side="left", padx=4)
-
-        fila_iter = ctk.CTkFrame(cuerpo_p, fg_color="transparent")
-        fila_iter.pack(fill="x", pady=3)
-        ctk.CTkLabel(
-            fila_iter, text="Máximo de iteraciones", width=200, anchor="w", text_color=FG,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
-        ).pack(side="left", padx=4)
-        self._entry_max_iter = ctk.CTkEntry(fila_iter, width=120, justify="center")
-        self._entry_max_iter.pack(side="left", padx=4)
+        self._entry_enfriado = _fila_param(cuerpo_p, "Tiempo de enfriado (h)", "0 = sin enfriado")
+        self._entry_max_iter = _fila_param(cuerpo_p, "Máximo de iteraciones")
 
         # Footer: guardar + estado
         footer = ctk.CTkFrame(self, fg_color="transparent")
@@ -179,86 +220,141 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         registro[3].destroy()
         self._filas_rangos.remove(registro)
 
-    # ── Refresco desde el estado actual ──────────────────────────────────
+    # ── Filas de máquinas ────────────────────────────────────────────────
+
+    def _agregar_fila_maquina(self, nombre="", prod_mm="", prod_min="",
+                              desb_mm="", desb_min="", prioridad=_TIPOS_RECT[0]):
+        fila = ctk.CTkFrame(self._cont_maquinas, fg_color="transparent")
+        fila.pack(fill="x", pady=3)
+
+        def _entry(width, valor):
+            e = ctk.CTkEntry(fila, width=width, justify="center")
+            e.insert(0, str(valor))
+            e.pack(side="left", padx=2)
+            return e
+
+        e_nom = _entry(90, nombre)
+        e_pmm = _entry(64, prod_mm)
+        e_pmin = _entry(64, prod_min)
+        e_dmm = _entry(64, desb_mm)
+        e_dmin = _entry(64, desb_min)
+
+        combo = ctk.CTkComboBox(fila, values=_TIPOS_RECT, width=120, state="readonly")
+        combo.set(prioridad if prioridad in _TIPOS_RECT else _TIPOS_RECT[0])
+        combo.pack(side="left", padx=2)
+
+        registro = (e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo, fila)
+
+        ctk.CTkButton(
+            fila, text="🗑", width=36, fg_color="transparent",
+            text_color=RED, hover_color=BG_CARD,
+            command=lambda: self._quitar_fila_maquina(registro),
+        ).pack(side="left", padx=2)
+
+        self._filas_maquinas.append(registro)
+
+    def _quitar_fila_maquina(self, registro):
+        registro[6].destroy()
+        self._filas_maquinas.remove(registro)
+
+    # ── Refresco desde la configuración actual ───────────────────────────
 
     def refrescar(self):
-        """Rellena la UI con los valores actuales de configuración y máquinas cargadas."""
+        """Rellena la UI con los valores actuales de la configuración."""
+        cfg = self.app.user_cfg
+
+        # Parámetros globales
+        cg = obtener_config_global(cfg)
+        for entry, clave, fmt in (
+            (self._e_diam_max, "diametro_maximo", "{:.1f}"),
+            (self._e_diam_min, "diametro_minimo", "{:.1f}"),
+            (self._e_crc, "tiempo_traslado_crc_min", "{:.1f}"),
+            (self._e_jaulas, "cantidad_jaulas", "{:d}"),
+        ):
+            entry.delete(0, "end")
+            try:
+                entry.insert(0, fmt.format(cg[clave]))
+            except (KeyError, ValueError):
+                entry.insert(0, str(cg.get(clave, "")))
+
         # Rangos
         for *_, fila in self._filas_rangos:
             fila.destroy()
         self._filas_rangos.clear()
-
-        for r in obtener_rangos(self.app.user_cfg):
+        for r in obtener_rangos(cfg):
             self._agregar_fila_rango(r.get("jaula", ""), r.get("desde", ""), r.get("hasta", ""))
+
+        # Máquinas
+        for *_, fila in self._filas_maquinas:
+            fila.destroy()
+        self._filas_maquinas.clear()
+        for m in obtener_maquinas(cfg):
+            tasas = m.get("tasas", {})
+            prod = tasas.get("produccion", {})
+            desb = tasas.get("desbaste", {})
+            self._agregar_fila_maquina(
+                m.get("nombre", ""),
+                prod.get("mm", ""), prod.get("tiempo_min", ""),
+                desb.get("mm", ""), desb.get("tiempo_min", ""),
+                m.get("prioridad", _TIPOS_RECT[0]),
+            )
 
         # Parámetros de simulación
         self._entry_enfriado.delete(0, "end")
-        self._entry_enfriado.insert(0, f"{obtener_tiempo_enfriado(self.app.user_cfg):.1f}")
+        self._entry_enfriado.insert(0, f"{obtener_tiempo_enfriado(cfg):.1f}")
         self._entry_max_iter.delete(0, "end")
-        self._entry_max_iter.insert(0, str(obtener_max_iteraciones(self.app.user_cfg)))
-
-        # Prioridades de máquinas
-        for w in self._cont_prio.winfo_children():
-            w.destroy()
-        self._combos_prio.clear()
-
-        maquinas = sorted(self.app.taller.maquinas.keys())
-        prio_guardadas = obtener_prioridades(self.app.user_cfg)
-
-        if not maquinas:
-            ctk.CTkLabel(
-                self._cont_prio,
-                text="Cargue un archivo Excel para listar las máquinas disponibles.",
-                anchor="w", text_color=FG2,
-                font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE),
-            ).pack(fill="x", pady=4)
-            return
-
-        for nombre in maquinas:
-            fila = ctk.CTkFrame(self._cont_prio, fg_color="transparent")
-            fila.pack(fill="x", pady=3)
-
-            ctk.CTkLabel(
-                fila, text=nombre, width=200, anchor="w", text_color=FG,
-                font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
-            ).pack(side="left", padx=4)
-
-            combo = ctk.CTkComboBox(fila, values=_TIPOS_RECT, width=180, state="readonly")
-            actual = prio_guardadas.get(nombre, self.app.taller.maquinas[nombre].prioridad_defecto.value)
-            combo.set(actual if actual in _TIPOS_RECT else _TIPOS_RECT[0])
-            combo.pack(side="left", padx=4)
-
-            self._combos_prio[nombre] = combo
+        self._entry_max_iter.insert(0, str(obtener_max_iteraciones(cfg)))
 
     # ── Guardado ─────────────────────────────────────────────────────────
 
     def _guardar(self):
         try:
+            config_global = self._recoger_globales()
             rangos = self._recoger_rangos()
+            maquinas = self._recoger_maquinas()
             tiempo_enfriado, max_iter = self._recoger_parametros()
         except ValueError as exc:
             self._feedback(str(exc), error=True)
             return
 
-        prioridades = {n: c.get() for n, c in self._combos_prio.items()}
-
+        self.app.user_cfg["config_global"] = config_global
+        self.app.user_cfg["maquinas"] = maquinas
         self.app.user_cfg["rangos"] = rangos
-        self.app.user_cfg["prioridades_maquinas"] = prioridades
         self.app.user_cfg["tiempo_enfriado_h"] = tiempo_enfriado
         self.app.user_cfg["max_iteraciones"] = max_iter
+        self.app.user_cfg.pop("prioridades_maquinas", None)  # esquema viejo, ya migrado
         guardar_config(self.app.user_cfg)
 
-        # Aplicar en caliente al taller
-        self.app.taller.configurar_substocks(rangos)
-        if prioridades:
-            self.app.taller.aplicar_prioridades_maquinas(prioridades)
-        self.app.taller.tiempo_enfriado_h = tiempo_enfriado
-        self.app.taller.max_iteraciones = max_iter
+        # Aplicar en caliente al taller (reconstruye máquinas, rangos y globales)
+        self.app.taller.configurar(self.app.user_cfg)
 
-        self._feedback("✓ Configuración guardada y aplicada.", error=False)
+        self._feedback("✓ Configuración guardada y aplicada. Recargue/simule para verla en la vista.", error=False)
+
+    def _recoger_globales(self):
+        def _num(entry, etiqueta, entero=False):
+            txt = entry.get().strip()
+            try:
+                return int(float(txt)) if entero else float(txt)
+            except ValueError:
+                raise ValueError(f"Valor inválido en '{etiqueta}'.")
+
+        diam_max = _num(self._e_diam_max, "Diámetro máximo")
+        diam_min = _num(self._e_diam_min, "Diámetro mínimo")
+        crc = _num(self._e_crc, "Traslado Disponible→CRC")
+        jaulas = _num(self._e_jaulas, "Cantidad de jaulas", entero=True)
+        if diam_max <= diam_min:
+            raise ValueError("El diámetro máximo debe ser mayor que el mínimo.")
+        if jaulas <= 0:
+            raise ValueError("La cantidad de jaulas debe ser mayor que 0.")
+        if crc < 0:
+            raise ValueError("El tiempo de traslado al CRC no puede ser negativo.")
+        return {
+            "diametro_maximo": diam_max, "diametro_minimo": diam_min,
+            "tiempo_traslado_crc_min": crc, "cantidad_jaulas": jaulas,
+        }
 
     def _recoger_parametros(self):
-        """Lee y valida el tiempo de enfriado (float ≥ 0, 1 decimal) y el máx. de iteraciones (int > 0)."""
+        """Lee y valida el tiempo de enfriado (float ≥ 0) y el máx. de iteraciones (int > 0)."""
         try:
             tiempo_enfriado = round(float(self._entry_enfriado.get().strip()), 1)
         except ValueError:
@@ -296,6 +392,35 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         if not rangos:
             raise ValueError("Debe definir al menos un rango de jaula.")
         return rangos
+
+    def _recoger_maquinas(self):
+        maquinas = []
+        nombres = set()
+        for e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo, _ in self._filas_maquinas:
+            nombre = e_nom.get().strip()
+            campos = [e_pmm.get().strip(), e_pmin.get().strip(), e_dmm.get().strip(), e_dmin.get().strip()]
+            if not nombre and not any(campos):
+                continue  # fila vacía, se ignora
+            if not nombre:
+                raise ValueError("Hay una máquina sin nombre.")
+            if nombre in nombres:
+                raise ValueError(f"Nombre de máquina repetido: '{nombre}'.")
+            nombres.add(nombre)
+            try:
+                pmm, pmin, dmm, dmin = (float(c) for c in campos)
+            except ValueError:
+                raise ValueError(f"Tasas inválidas en la máquina '{nombre}' (deben ser números).")
+            maquinas.append({
+                "nombre": nombre,
+                "prioridad": combo.get(),
+                "tasas": {
+                    "produccion": {"mm": pmm, "tiempo_min": pmin},
+                    "desbaste": {"mm": dmm, "tiempo_min": dmin},
+                },
+            })
+        if not maquinas:
+            raise ValueError("Debe definir al menos una máquina.")
+        return maquinas
 
     def _feedback(self, mensaje, error):
         self._label_estado.configure(text=mensaje, text_color=RED if error else GREEN)
