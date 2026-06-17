@@ -38,6 +38,12 @@ def test_fingerprint_coincide_con_golden(nombre, golden):
     assert actual["n_alertas"] == esperado["n_alertas"], f"{nombre}: nº de alertas divergen"
     assert actual["alertas"] == esperado["alertas"], f"{nombre}: alertas divergen"
     assert actual["cilindros"] == esperado["cilindros"], f"{nombre}: estado final de cilindros diverge"
+    # Contenido completo de los snapshots = datos que consume la GUI para el
+    # playback. Si este hash diverge pero todo lo demás coincide, cambió algún
+    # campo interno de los snapshots (detalle_*, conteo_por_substock, ...); si
+    # es intencional, regenerar el golden con tests/_generar_golden.py.
+    assert actual["snapshots_sha256"] == esperado["snapshots_sha256"], (
+        f"{nombre}: el contenido de los snapshots (datos que consume la GUI) diverge")
 
 
 def test_golden_cubre_todos_los_escenarios(golden):
