@@ -2,10 +2,12 @@
 Motor de simulación del taller de cilindros.
 Coordina cilindros, máquinas, jaulas y eventos de cambio.
 """
+import heapq
+import itertools
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Callable, Any, NamedTuple
+from typing import List, Dict, Optional, Callable, Any, NamedTuple, Tuple
 from .enums import EstadoCilindro, TipoRectificado
 from .cilindro import Cilindro
 from .substock import SubStock
@@ -35,6 +37,12 @@ class _EventoSim(NamedTuple):
     tipo: str       # "CAMBIO" | "FIN_RECT" | "REPONER_CRC" | "FIN_ENFRIADO"
     tiempo: datetime
     datos: Any      # EventoCambio (CAMBIO) | str máquina (FIN_RECT) | int jaula (REPONER_CRC) | str id cilindro (FIN_ENFRIADO)
+
+
+# Item de la cola de prioridad (heap): (tiempo, secuencia, evento). El contador
+# de secuencia rompe los empates de tiempo en orden FIFO de inserción y evita
+# comparar los _EventoSim entre sí.
+_ItemCola = Tuple[datetime, int, _EventoSim]
 
 
 class TallerCilindros:
@@ -440,7 +448,7 @@ class TallerCilindros:
             log(f"  >>> LÍNEA DETENIDA desde {tiempo.strftime('%m-%d %H:%M')} "
                 "(se difieren los cambios posteriores) <<<")
 
-    def _intentar_reactivar_jaulas(self, tiempo: datetime, log, cola: list) -> bool:
+    def _intentar_reactivar_jaulas(self, tiempo: datetime, log, cola: List[_ItemCola]) -> bool:
         """
         Intenta rearmar las jaulas en PARADA si ya hay stock para una pareja.
 
@@ -472,7 +480,7 @@ class TallerCilindros:
 
         return reactivo
 
-    def _reanudar_linea(self, tiempo: datetime, log, cola: list) -> None:
+    def _reanudar_linea(self, tiempo: datetime, log, cola: List[_ItemCola]) -> None:
         """
         Reanuda la línea tras una parada: desplaza por la duración total de la
         parada todos los CAMBIO pendientes (los diferidos y los que siguen en la
@@ -482,18 +490,28 @@ class TallerCilindros:
         dur = (tiempo - inicio).total_seconds() / 60 if inicio else 0.0
         retraso = timedelta(minutes=dur)
 
-        # Desplazar los CAMBIO que aún están en la cola (posteriores al inicio).
-        for i, ev_s in enumerate(cola):
+        # Partir del orden canónico de la cola (= orden de extracción del heap,
+        # idéntico a la lista ordenada del esquema anterior) antes de desplazar.
+        eventos = [ev for _, _, ev in sorted(cola)]
+
+        # Desplazar in situ los CAMBIO que aún están en la cola (posteriores al
+        # inicio), conservando su posición relativa como hacía el sort anterior.
+        for i, ev_s in enumerate(eventos):
             if ev_s.tipo == "CAMBIO" and ev_s.tiempo > inicio:
-                cola[i] = _EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos)
+                eventos[i] = _EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos)
 
         # Reintegrar los cambios diferidos durante la parada, ya desplazados.
         for ev_s in self._cambios_diferidos:
-            cola.append(_EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos))
+            eventos.append(_EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos))
         n_dif = len(self._cambios_diferidos)
         self._cambios_diferidos = []
 
-        cola.sort(key=lambda x: x.tiempo)
+        # Sort estable por tiempo (igual que antes) y reconstrucción del heap
+        # reasignando la secuencia en ese orden: preserva el desempate exacto y
+        # deja los eventos que se inserten después (seq mayor) detrás ante empate.
+        eventos.sort(key=lambda x: x.tiempo)
+        cola[:] = [(ev.tiempo, next(self._seq_cola), ev) for ev in eventos]
+        heapq.heapify(cola)
         self._linea_parada_desde = None
 
         self.alertas.append(Alerta(
@@ -684,7 +702,16 @@ class TallerCilindros:
 
         return completados >= necesarios
 
-    def _programar_reposicion_crc(self, jaula_id: int, tiempo_solicitud: datetime, cola: List["_EventoSim"]) -> None:
+    def _push_evento(self, cola: List[_ItemCola], evento: _EventoSim) -> None:
+        """Inserta un evento en la cola de prioridad (heap) por (tiempo, secuencia).
+
+        El contador de secuencia rompe los empates de tiempo en orden FIFO de
+        inserción, reproduciendo exactamente el orden que daba el list.sort()
+        estable por tiempo del esquema anterior (y evita comparar _EventoSim).
+        """
+        heapq.heappush(cola, (evento.tiempo, next(self._seq_cola), evento))
+
+    def _programar_reposicion_crc(self, jaula_id: int, tiempo_solicitud: datetime, cola: List[_ItemCola]) -> None:
         """
         Encola una reposición del CRC respetando el recurso único de traslado.
 
@@ -704,12 +731,12 @@ class TallerCilindros:
         fin = inicio + timedelta(minutes=self.tiempo_traslado_crc_min)
         self._recurso_crc_libre_en = fin
         self._reposicion_pendiente.add(jaula_id)
-        cola.append(_EventoSim("REPONER_CRC", fin, jaula_id))
+        self._push_evento(cola, _EventoSim("REPONER_CRC", fin, jaula_id))
 
     # ── Manejadores de eventos de simulación ────────────────────────────────
 
     def _finalizar_y_continuar(self, maquina: MaquinaRectificadora, tiempo: datetime,
-                               cola: List["_EventoSim"], log: Callable[[str], None]) -> None:
+                               cola: List[_ItemCola], log: Callable[[str], None]) -> None:
         """Cierra un rectificado y reactiva el flujo dependiente.
 
         Tras liberar la máquina: rearma jaulas paradas con el nuevo stock,
@@ -723,11 +750,11 @@ class TallerCilindros:
             self._intentar_reactivar_jaulas(tiempo, log, cola)
             for j_id in range(1, self.cantidad_jaulas + 1):
                 self._programar_reposicion_crc(j_id, tiempo, cola)
-        cola.extend(self.asignar_trabajo_maquinas(tiempo))
-        cola.sort(key=lambda x: x.tiempo)
+        for ev in self.asignar_trabajo_maquinas(tiempo):
+            self._push_evento(cola, ev)
         self.generar_snapshot(tiempo)
 
-    def _handle_fin_rect(self, ev_sim: "_EventoSim", cola: List["_EventoSim"],
+    def _handle_fin_rect(self, ev_sim: "_EventoSim", cola: List[_ItemCola],
                          log: Callable[[str], None]) -> None:
         """FIN_RECT: una máquina termina un rectificado.
 
@@ -744,7 +771,7 @@ class TallerCilindros:
             return
         self._finalizar_y_continuar(maquina, ev_sim.tiempo, cola, log)
 
-    def _handle_reponer_crc(self, ev_sim: "_EventoSim", cola: List["_EventoSim"],
+    def _handle_reponer_crc(self, ev_sim: "_EventoSim", cola: List[_ItemCola],
                             log: Callable[[str], None]) -> None:
         """REPONER_CRC: llega una pareja al buffer CRC (siempre se ejecuta, aun en PARADA)."""
         j_id = ev_sim.datos
@@ -755,7 +782,7 @@ class TallerCilindros:
             self._intentar_reactivar_jaulas(ev_sim.tiempo, log, cola)
             self.generar_snapshot(ev_sim.tiempo)
 
-    def _handle_fin_enfriado(self, ev_sim: "_EventoSim", cola: List["_EventoSim"],
+    def _handle_fin_enfriado(self, ev_sim: "_EventoSim", cola: List[_ItemCola],
                              log: Callable[[str], None]) -> None:
         """FIN_ENFRIADO: un cilindro termina de enfriarse y entra a la cola de rectificado.
 
@@ -766,11 +793,11 @@ class TallerCilindros:
         if cil and cil.estado == EstadoCilindro.ENFRIANDO:
             cil.estado = EstadoCilindro.A_RECTIFICAR
             cil.registrar_evento(ev_sim.tiempo, "Fin de enfriado, pasa a cola de rectificado")
-            cola.extend(self.asignar_trabajo_maquinas(ev_sim.tiempo))
-            cola.sort(key=lambda x: x.tiempo)
+            for ev in self.asignar_trabajo_maquinas(ev_sim.tiempo):
+                self._push_evento(cola, ev)
             self.generar_snapshot(ev_sim.tiempo)
 
-    def _handle_cambio(self, ev_sim: "_EventoSim", cola: List["_EventoSim"],
+    def _handle_cambio(self, ev_sim: "_EventoSim", cola: List[_ItemCola],
                        log: Callable[[str], None]) -> None:
         """CAMBIO: cambio de jaula programado. Único evento que una PARADA difiere."""
         ev = ev_sim.datos
@@ -809,7 +836,7 @@ class TallerCilindros:
                 fin_enfriado = t_proc + timedelta(hours=self.tiempo_enfriado_h)
                 cil.registrar_evento(
                     t_proc, f"En enfriado tras Jaula {ev.jaula} ({self.tiempo_enfriado_h:.1f} h)")
-                cola.append(_EventoSim("FIN_ENFRIADO", fin_enfriado, cil.id))
+                self._push_evento(cola, _EventoSim("FIN_ENFRIADO", fin_enfriado, cil.id))
             else:
                 cil.estado = EstadoCilindro.A_RECTIFICAR
                 cil.registrar_evento(t_proc, f"Retirado de Jaula {ev.jaula} para rectificado")
@@ -824,10 +851,11 @@ class TallerCilindros:
             self._parar_jaula(ev.jaula, t_proc, log)
 
         # 3. Asignar trabajo a máquinas y 4. programar reposición del CRC con el
-        #    CRC ya vaciado; luego snapshot.
-        cola.extend(self.asignar_trabajo_maquinas(t_proc))
+        #    CRC ya vaciado; luego snapshot. El orden de inserción (asignaciones
+        #    antes que la reposición) fija el desempate ante igual tiempo.
+        for ev_nuevo in self.asignar_trabajo_maquinas(t_proc):
+            self._push_evento(cola, ev_nuevo)
         self._programar_reposicion_crc(ev.jaula, t_proc, cola)
-        cola.sort(key=lambda x: x.tiempo)
         self.generar_snapshot(t_proc)
 
     # ── Simulación ──────────────────────────────────────────────────────────
@@ -854,11 +882,18 @@ class TallerCilindros:
         self._linea_parada_desde = None
         self._cambios_diferidos = []
         self._eventos_procesados: set = set()
+        self._seq_cola = itertools.count()
         self.generar_snapshot(t_actual)
 
-        cola: List[_EventoSim] = [_EventoSim("CAMBIO", ev.tiempo, ev) for ev in self.eventos_programados]
-        cola.extend(self.asignar_trabajo_maquinas(t_actual))
-        cola.sort(key=lambda x: x.tiempo)
+        # Cola de prioridad (heap) por (tiempo, secuencia): push/pop en O(log n)
+        # en lugar del list.sort() O(n log n) por evento del esquema anterior.
+        # El orden de inserción inicial (todos los CAMBIO y luego las asignaciones
+        # a máquinas) fija el desempate ante igual tiempo, igual que antes.
+        cola: List[_ItemCola] = []
+        for ev in self.eventos_programados:
+            self._push_evento(cola, _EventoSim("CAMBIO", ev.tiempo, ev))
+        for ev in self.asignar_trabajo_maquinas(t_actual):
+            self._push_evento(cola, ev)
 
         # Despacho por tipo de evento. Una PARADA de línea solo difiere los CAMBIO
         # (ver _handle_cambio); FIN_RECT/REPONER_CRC/FIN_ENFRIADO siempre se
@@ -873,7 +908,7 @@ class TallerCilindros:
         iteracion = 0
         while cola and iteracion < self.max_iteraciones:
             iteracion += 1
-            ev_sim = cola.pop(0)
+            _, _, ev_sim = heapq.heappop(cola)
             handler = handlers.get(ev_sim.tipo)
             if handler:
                 handler(ev_sim, cola, _log)
@@ -898,7 +933,8 @@ class TallerCilindros:
         self.generar_snapshot(t_final)
 
         # Cambios que nunca se ejecutaron por una parada de línea sin reanudar.
-        sin_ejecutar = list(self._cambios_diferidos) + [e for e in cola if e.tipo == "CAMBIO"]
+        sin_ejecutar = (list(self._cambios_diferidos)
+                        + [ev for _, _, ev in cola if ev.tipo == "CAMBIO"])
         if sin_ejecutar:
             ids = ", ".join(e.datos.id for e in sin_ejecutar)
             msg = (f"ADVERTENCIA: {len(sin_ejecutar)} cambio(s) no se ejecutaron por parada "
