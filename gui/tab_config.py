@@ -68,7 +68,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
     def __init__(self, parent, app):
         super().__init__(parent, fg_color="transparent")
         self.app = app
-        self._filas_rangos = []      # [(e_jaula, e_desde, e_hasta, frame_fila)]
+        self._filas_rangos = []      # [(e_jaula, e_min, e_max, frame_fila)]
         self._filas_maquinas = []    # [(e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo_prio, frame_fila)]
         self._cont_rangos = None
         self._cont_maquinas = None
@@ -99,7 +99,10 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._col_der = ctk.CTkFrame(cols, fg_color="transparent")
         self._layout_mode = None
         self._aplicar_layout("ancho")  # layout inicial; <Configure> lo ajusta
-        self.bind("<Configure>", self._on_resize)
+        # Escuchamos el resize en el frame interno (no en el CTkScrollableFrame):
+        # bindear <Configure> sobre self pisaría el binding interno de CTk que
+        # recalcula la scrollregion y rompería el scroll vertical.
+        cols.bind("<Configure>", self._on_resize)
         col_izq, col_der = self._col_izq, self._col_der
 
         # Sección 1: Parámetros globales del taller (columna izquierda)
@@ -117,12 +120,12 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         cuerpo_r = _card(
             col_izq,
             "Rangos de SubStock por Jaula",
-            "Cada jaula admite cilindros cuyo diámetro cumpla  Hasta (mín) < diámetro ≤ Desde (máx).",
+            "Cada jaula admite cilindros cuyo diámetro cumpla  Desde (mín) < diámetro ≤ Hasta (máx).",
         )
 
         cab = ctk.CTkFrame(cuerpo_r, fg_color="transparent")
         cab.pack(fill="x", pady=(0, 6))
-        for txt, w in [("Jaula", 70), ("Desde (máx, mm)", 140), ("Hasta (mín, mm)", 140), ("", 40)]:
+        for txt, w in [("Jaula", 70), ("Desde (mín, mm)", 140), ("Hasta (máx, mm)", 140), ("", 40)]:
             ctk.CTkLabel(
                 cab, text=txt, width=w, anchor="w",
                 font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold"),
@@ -200,7 +203,9 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
     _UMBRAL_APILADO = 1300
 
     def _on_resize(self, event=None):
-        modo = "ancho" if self.winfo_width() >= self._UMBRAL_APILADO else "estrecho"
+        # event.width es el ancho del frame interno (≈ viewport visible).
+        ancho = event.width if event is not None else self.winfo_width()
+        modo = "ancho" if ancho >= self._UMBRAL_APILADO else "estrecho"
         if modo != self._layout_mode:
             self._aplicar_layout(modo)
 
@@ -218,7 +223,12 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
     # ── Filas de rangos ──────────────────────────────────────────────────
 
-    def _agregar_fila_rango(self, jaula="", desde="", hasta=""):
+    def _agregar_fila_rango(self, jaula="", minimo="", maximo=""):
+        """Crea fila: Jaula | Desde (mín) | Hasta (máx).
+
+        ``minimo`` es el límite inferior (interno: ``hasta``),
+        ``maximo`` es el límite superior (interno: ``desde``).
+        """
         fila = ctk.CTkFrame(self._cont_rangos, fg_color="transparent")
         fila.pack(fill="x", pady=3)
 
@@ -226,15 +236,16 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         e_jaula.insert(0, str(jaula))
         e_jaula.pack(side="left", padx=4)
 
-        e_desde = ctk.CTkEntry(fila, width=140, justify="center")
-        e_desde.insert(0, str(desde))
-        e_desde.pack(side="left", padx=4)
+        e_min = ctk.CTkEntry(fila, width=140, justify="center")
+        e_min.insert(0, str(minimo))
+        e_min.pack(side="left", padx=4)
 
-        e_hasta = ctk.CTkEntry(fila, width=140, justify="center")
-        e_hasta.insert(0, str(hasta))
-        e_hasta.pack(side="left", padx=4)
+        e_max = ctk.CTkEntry(fila, width=140, justify="center")
+        e_max.insert(0, str(maximo))
+        e_max.pack(side="left", padx=4)
 
-        registro = (e_jaula, e_desde, e_hasta, fila)
+        # e_min = hasta (lower bound), e_max = desde (upper bound) internamente
+        registro = (e_jaula, e_min, e_max, fila)
 
         ctk.CTkButton(
             fila, text="🗑", width=40, fg_color="transparent",
@@ -310,7 +321,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             fila.destroy()
         self._filas_rangos.clear()
         for r in obtener_rangos(cfg):
-            self._agregar_fila_rango(r.get("jaula", ""), r.get("desde", ""), r.get("hasta", ""))
+            self._agregar_fila_rango(r.get("jaula", ""), r.get("hasta", ""), r.get("desde", ""))
 
         # Máquinas
         for *_, fila in self._filas_maquinas:
@@ -401,19 +412,24 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
     def _recoger_rangos(self):
         rangos = []
-        for e_jaula, e_desde, e_hasta, _ in self._filas_rangos:
-            j_txt, d_txt, h_txt = e_jaula.get().strip(), e_desde.get().strip(), e_hasta.get().strip()
-            if not (j_txt or d_txt or h_txt):
-                continue  # fila vacía, se ignora
+        # Tuple: (e_jaula, e_min, e_max, fila)
+        # e_min = "Desde (mín)" en UI = hasta interno (lower bound)
+        # e_max = "Hasta (máx)" en UI = desde interno (upper bound)
+        for e_jaula, e_min, e_max, _ in self._filas_rangos:
+            j_txt = e_jaula.get().strip()
+            min_txt = e_min.get().strip()
+            max_txt = e_max.get().strip()
+            if not (j_txt or min_txt or max_txt):
+                continue
             try:
                 jaula = int(float(j_txt))
-                desde = float(d_txt)
-                hasta = float(h_txt)
+                hasta = float(min_txt)
+                desde = float(max_txt)
             except ValueError:
                 raise ValueError(f"Valores inválidos en la jaula '{j_txt or '?'}'.")
             if desde <= hasta:
                 raise ValueError(
-                    f"Jaula {jaula}: 'Desde (máx)' ({desde}) debe ser mayor que 'Hasta (mín)' ({hasta})."
+                    f"Jaula {jaula}: 'Hasta (máx)' ({desde}) debe ser mayor que 'Desde (mín)' ({hasta})."
                 )
             rangos.append({"jaula": jaula, "desde": desde, "hasta": hasta})
 
