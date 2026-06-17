@@ -5,12 +5,16 @@ Este módulo es la fuente de verdad compartida entre:
   - ``test_regresion.py`` (compara la corrida actual contra ese JSON).
 
 Un *fingerprint* es un dict 100% serializable y determinista que resume el
-resultado de una simulación (KPIs, nº de snapshots, alertas y estado final de
-cada cilindro). Si una refactorización del motor preserva el comportamiento,
-todos los fingerprints deben quedar idénticos.
+resultado de una simulación (KPIs, nº de snapshots, alertas, estado final de
+cada cilindro y un hash del contenido completo de todos los snapshots). Si una
+refactorización del motor preserva el comportamiento, todos los fingerprints
+deben quedar idénticos.
 """
+import hashlib
+import json
 import os
 import sys
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -52,6 +56,33 @@ def ejecutar_escenario(esc: dict) -> TallerCilindros:
     return taller
 
 
+def serializar_snapshots(taller: TallerCilindros) -> list:
+    """Serialización canónica y completa de TODOS los snapshots de la corrida.
+
+    Vuelca *todos* los campos de cada ``Snapshot`` —exactamente los datos que la
+    GUI consume para el playback: conteos por estado y por SubStock, detalle de
+    jaulas, CRC, máquinas, cola de rectificado y enfriando—. Usa ``__dict__``
+    para que cualquier campo nuevo del Snapshot quede cubierto automáticamente.
+    """
+    out = []
+    for sn in taller.snapshots:
+        out.append({k: (v.isoformat() if isinstance(v, datetime) else v)
+                    for k, v in sn.__dict__.items()})
+    return out
+
+
+def digest_snapshots(taller: TallerCilindros) -> str:
+    """Hash sha256 de la serialización canónica de los snapshots.
+
+    Es la red de seguridad de los datos que ve la GUI: cualquier cambio en
+    cualquier campo de cualquier snapshot (orden incluido en las listas de
+    detalle) mueve el hash. ``sort_keys`` normaliza el orden de claves de los
+    dicts (la GUI accede por clave); el orden de las listas sí se preserva.
+    """
+    data = json.dumps(serializar_snapshots(taller), sort_keys=True, default=str)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
 def fingerprint(taller: TallerCilindros) -> dict:
     """Resumen determinista y serializable del resultado de una simulación."""
     k = calcular_kpis(taller)
@@ -79,6 +110,8 @@ def fingerprint(taller: TallerCilindros) -> dict:
         "cilindros": sorted(
             [c.id, c.estado.value, round(c.diametro, 2)] for c in taller.cilindros.values()
         ),
+        # Hash del contenido completo de todos los snapshots (datos de la GUI).
+        "snapshots_sha256": digest_snapshots(taller),
     }
 
 

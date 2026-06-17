@@ -61,13 +61,15 @@ main.py
    - `"REPONER_CRC"` — a Disponible cylinder arrives at the CRC buffer (datos = jaula int)
    - `"FIN_ENFRIADO"` — a cylinder finishes cooling and enters the rectification queue (datos = cylinder id str). Only generated when `tiempo_enfriado_h > 0`.
 
+   The queue is a **`heapq`** of tuples `(tiempo, secuencia, evento)` — `_ItemCola`. Push (`_push_evento`) and pop (`heapq.heappop`) are `O(log n)`. The `secuencia` field (an `itertools.count()` per run, `self._seq_cola`) breaks `tiempo` ties in **FIFO insertion order** and keeps `_EventoSim`s from ever being compared. This reproduces the exact ordering of the old `list` + stable `sort(key=tiempo)`; preserve the insertion order at each call site (see the queue-ordering note under Key Design Decisions).
+
 3. **PARADA (line stoppage)** — if after a `CAMBIO` there is no stock to form a complete pair (`_BUFFER_CRC_SIZE = 2`) for a jaula:
    - `_parar_jaula()` marks the jaula `parada=True` and records `_linea_parada_desde`
    - All subsequent `CAMBIO` events with `tiempo > _linea_parada_desde` are moved to `_cambios_diferidos` (not executed)
    - `FIN_RECT` and `REPONER_CRC` always execute — machines keep running and CRC can be replenished
    - When `_intentar_reactivar_jaulas()` succeeds (called from `FIN_RECT` handler), `_reanudar_linea()` shifts all deferred and remaining-in-queue CAMBIO events by the stoppage duration
 
-4. **Snapshot** — `generar_snapshot(tiempo)` is called after every event and records full taller state into `self.snapshots`. The GUI uses snapshots for playback; `Snapshot.jaulas_paradas` is a list of jaula IDs currently stopped.
+4. **Snapshot** — `generar_snapshot(tiempo)` is called after every event and records full taller state into `self.snapshots`. The GUI uses snapshots for playback; `Snapshot.jaulas_paradas` is a list of jaula IDs currently stopped. It traverses `self.cilindros` **once** to accumulate the per-state counts, the rectification/cooling detail lists and the per-SubStock counts together (it used to make ~9 full passes per snapshot, one per `EstadoCilindro` plus one per SubStock). Two structural invariants the single pass keeps: `conteo_por_estado` carries **every** enum state as a key (even with value 0), while `conteo_por_substock` carries **only present** states.
 
 ### Cylinder lifecycle (states in `modelos/enums.py`)
 
@@ -175,6 +177,9 @@ In the `FIN_RECT` handler, `_intentar_reactivar_jaulas()` is called **before** `
 ### Two-layer time: `ev_sim.tiempo` vs `ev.tiempo`
 `_EventoSim.tiempo` is the actual processing time (may be shifted during line resumption). `ev_sim.datos.tiempo` (the original `EventoCambio.tiempo`) is the time from the Excel file. All simulation logic (cylinder events, snapshots, machine assignment) must use `ev_sim.tiempo`, never `ev.tiempo`.
 
+### Event queue ordering: `heapq` keyed by `(tiempo, secuencia)`
+The event queue is a `heapq` of `_ItemCola = (tiempo, secuencia, evento)`. **Always push via `_push_evento(cola, evento)`** — never `heapq.heappush` directly — so the `secuencia` counter (`self._seq_cola`, an `itertools.count()` reset at the top of `simular()`) is assigned in insertion order. That counter is what makes the order deterministic: at equal `tiempo`, events fire in **FIFO insertion order**, exactly reproducing the old `list` + stable `sort(key=tiempo)`. Two consequences to respect when editing handlers: (1) at a given timestamp, the **order in which you push matters** — e.g. `_handle_cambio` pushes the machine assignments *before* the CRC reposition, so assignments win ties; keep that order if you touch it. (2) `_reanudar_linea` can't just shift tiempos in place (the heap array isn't fully sorted): it rebuilds from `sorted(cola)` (canonical pop order), shifts the deferred/remaining CAMBIO events, stable-sorts by `tiempo`, then **re-stamps `secuencia`** in that order and `heapq.heapify`s. This keeps the post-resume order identical to the old code and leaves any later-pushed event (higher seq) after equal-`tiempo` ones.
+
 ### SubStock boundary convention
 `hasta < diámetro <= desde` — `hasta` is exclusive (lower bound), `desde` is inclusive (upper bound). This is the opposite of what the variable names suggest at first glance.
 
@@ -188,4 +193,4 @@ The simulation does **not** change their state — the Excel is the source of tr
 Only one pair of cylinders can be in transit to CRC at a time, serialized via `_recurso_crc_libre_en` and `_reposicion_pendiente`. Do not add parallel CRC transport logic.
 
 ### Snapshot granularity
-A snapshot is generated after **every** event (CAMBIO, FIN_RECT, REPONER_CRC). Do not skip snapshots for performance — the GUI seekbar depends on having a snapshot at each simulation step.
+A snapshot is generated after **every** event (CAMBIO, FIN_RECT, REPONER_CRC, FIN_ENFRIADO). Do not skip snapshots for performance — the GUI seekbar depends on having a snapshot at each simulation step. The cost of each snapshot was instead cut by making `generar_snapshot()` a single pass over `self.cilindros` (see step 4 of the simulation flow); that is where snapshot performance work belongs.

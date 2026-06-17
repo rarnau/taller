@@ -119,7 +119,8 @@
         "Trabajando",
         567.2
       ]
-    ]
+    ],
+    "snapshots_sha256": "b6856603e224a6afec76444809effbb3f601efb7a54dcf2d437f313a6e51ab9d"
   },
   "parada_fifo": {
     "kpis": {
@@ -241,7 +242,8 @@
         "Trabajando",
         567.2
       ]
-    ]
+    ],
+    "snapshots_sha256": "b6856603e224a6afec76444809effbb3f601efb7a54dcf2d437f313a6e51ab9d"
   },
   "parada_enfriado_8h": {
     "kpis": {
@@ -363,7 +365,8 @@
         "Trabajando",
         567.2
       ]
-    ]
+    ],
+    "snapshots_sha256": "5050e1de59792d1d7475aa4045619678c85c09b8b212556b10ce248eee21b082"
   },
   "cils140_mayor_diametro": {
     "kpis": {
@@ -1086,7 +1089,8 @@
         "Baja",
         561.74
       ]
-    ]
+    ],
+    "snapshots_sha256": "0aca673ec7f05516dd1932da83182bd235d6598eb775377f3e6ef0aafc136607"
   },
   "cils140_menor_mm_desb": {
     "kpis": {
@@ -1809,6 +1813,7 @@
         "Baja",
         561.74
       ]
-    ]
+    ],
+    "snapshots_sha256": "c6db482cb29df6aa68166b1abaa7ea13d1595bc9b596e3883579f8fba1f855ac"
   }
 }
