@@ -89,14 +89,18 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
     def _construir(self):
         # Dos columnas: izquierda → globales + rangos; derecha → máquinas + sim.
+        # El reparto es responsive: en pantallas anchas van lado a lado; en
+        # estrechas se apilan a ancho completo (ver _aplicar_layout) para que la
+        # tabla de máquinas no recorte la columna "Prioridad".
         cols = ctk.CTkFrame(self, fg_color="transparent")
         cols.pack(fill="both", expand=True)
 
-        col_izq = ctk.CTkFrame(cols, fg_color="transparent")
-        col_izq.pack(side="left", fill="both", expand=True, padx=(0, 8), anchor="n")
-
-        col_der = ctk.CTkFrame(cols, fg_color="transparent")
-        col_der.pack(side="left", fill="both", expand=True, padx=(8, 0), anchor="n")
+        self._col_izq = ctk.CTkFrame(cols, fg_color="transparent")
+        self._col_der = ctk.CTkFrame(cols, fg_color="transparent")
+        self._layout_mode = None
+        self._aplicar_layout("ancho")  # layout inicial; <Configure> lo ajusta
+        self.bind("<Configure>", self._on_resize)
+        col_izq, col_der = self._col_izq, self._col_der
 
         # Sección 1: Parámetros globales del taller (columna izquierda)
         cuerpo_g = _card(
@@ -144,8 +148,8 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
         cab_m = ctk.CTkFrame(cuerpo_m, fg_color="transparent")
         cab_m.pack(fill="x", pady=(0, 6))
-        for txt, w in [("Nombre", 90), ("Prod mm", 64), ("Prod min", 64),
-                       ("Desb mm", 64), ("Desb min", 64), ("Prioridad", 120), ("", 36)]:
+        for txt, w in [("Nombre", 84), ("Prod mm", 58), ("Prod min", 58),
+                       ("Desb mm", 58), ("Desb min", 58), ("Prioridad", 110), ("", 36)]:
             ctk.CTkLabel(
                 cab_m, text=txt, width=w, anchor="w",
                 font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold"),
@@ -187,6 +191,30 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
         )
         self._label_estado.pack(side="left", padx=16)
+
+    # ── Layout responsive ────────────────────────────────────────────────
+
+    # Ancho (px) por debajo del cual las dos columnas se apilan a ancho completo.
+    # Dos columnas lado a lado necesitan ~1300 px para que la tabla de máquinas
+    # (incluida la columna "Prioridad") quepa sin recortarse.
+    _UMBRAL_APILADO = 1300
+
+    def _on_resize(self, event=None):
+        modo = "ancho" if self.winfo_width() >= self._UMBRAL_APILADO else "estrecho"
+        if modo != self._layout_mode:
+            self._aplicar_layout(modo)
+
+    def _aplicar_layout(self, modo):
+        """Reparte las dos columnas lado a lado ('ancho') o apiladas ('estrecho')."""
+        self._layout_mode = modo
+        self._col_izq.pack_forget()
+        self._col_der.pack_forget()
+        if modo == "ancho":
+            self._col_izq.pack(side="left", fill="both", expand=True, padx=(0, 8), anchor="n")
+            self._col_der.pack(side="left", fill="both", expand=True, padx=(8, 0), anchor="n")
+        else:
+            self._col_izq.pack(side="top", fill="x", anchor="n")
+            self._col_der.pack(side="top", fill="x", anchor="n", pady=(16, 0))
 
     # ── Filas de rangos ──────────────────────────────────────────────────
 
@@ -233,13 +261,13 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             e.pack(side="left", padx=2)
             return e
 
-        e_nom = _entry(90, nombre)
-        e_pmm = _entry(64, prod_mm)
-        e_pmin = _entry(64, prod_min)
-        e_dmm = _entry(64, desb_mm)
-        e_dmin = _entry(64, desb_min)
+        e_nom = _entry(84, nombre)
+        e_pmm = _entry(58, prod_mm)
+        e_pmin = _entry(58, prod_min)
+        e_dmm = _entry(58, desb_mm)
+        e_dmin = _entry(58, desb_min)
 
-        combo = ctk.CTkComboBox(fila, values=_TIPOS_RECT, width=120, state="readonly")
+        combo = ctk.CTkComboBox(fila, values=_TIPOS_RECT, width=110, state="readonly")
         combo.set(prioridad if prioridad in _TIPOS_RECT else _TIPOS_RECT[0])
         combo.pack(side="left", padx=2)
 
