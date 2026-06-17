@@ -566,11 +566,35 @@ class TallerCilindros:
     # ── Snapshot ────────────────────────────────────────────────────────────
 
     def generar_snapshot(self, tiempo: datetime) -> None:
-        """Captura el estado completo del taller para reproducción y gráficos."""
+        """Captura el estado completo del taller para reproducción y gráficos.
+
+        Recorre ``self.cilindros`` **una sola vez** acumulando a la vez el conteo
+        por estado, el detalle de la cola de rectificado y de enfriando, y los
+        conteos por SubStock (antes eran ~9 pasadas completas sobre el dict por
+        snapshot, y se genera un snapshot por evento). El resultado es idéntico.
+        """
         sn = Snapshot(tiempo)
 
-        for est in EstadoCilindro:
-            sn.conteo_por_estado[est.value] = len(self.obtener_cilindros_por_estado(est))
+        # Todos los estados presentes como clave (incluso con valor 0), igual que
+        # antes: la GUI y los gráficos esperan la clave aunque no haya cilindros.
+        sn.conteo_por_estado = {est.value: 0 for est in EstadoCilindro}
+        # Solo estados presentes por SubStock (no se siembran ceros), como antes.
+        conteo_substock: Dict[str, Dict[str, int]] = {ss.nombre: {} for ss in self.lista_substocks}
+
+        for c in self.cilindros.values():
+            estado_val = c.estado.value
+            sn.conteo_por_estado[estado_val] += 1
+            # El orden de estas listas sigue el de self.cilindros.values(), igual
+            # que obtener_cola_rectificado()/obtener_cilindros_por_estado() antes.
+            if c.estado == EstadoCilindro.A_RECTIFICAR:
+                sn.detalle_cola_rectificado.append({"id": c.id, "d": c.diametro})
+            elif c.estado == EstadoCilindro.ENFRIANDO:
+                sn.detalle_enfriando.append({"id": c.id, "d": c.diametro})
+            if c.estado != EstadoCilindro.BAJA:
+                for ss in self.lista_substocks:
+                    if ss.contiene_diametro(c.diametro):
+                        cs = conteo_substock[ss.nombre]
+                        cs[estado_val] = cs.get(estado_val, 0) + 1
 
         sn.cantidad_disponibles = sn.conteo_por_estado.get(EstadoCilindro.DISPONIBLE.value, 0)
         sn.cantidad_crc_total = sn.conteo_por_estado.get(EstadoCilindro.CRC.value, 0)
@@ -596,15 +620,8 @@ class TallerCilindros:
             else:
                 sn.detalle_maquinas[m_nombre] = None
 
-        sn.detalle_cola_rectificado = [{"id": c.id, "d": c.diametro} for c in self.obtener_cola_rectificado()]
-        sn.detalle_enfriando = [{"id": c.id, "d": c.diametro}
-                                for c in self.obtener_cilindros_por_estado(EstadoCilindro.ENFRIANDO)]
-
         for ss in self.lista_substocks:
-            conteo: Dict[str, int] = {}
-            for c in self.cilindros.values():
-                if c.estado != EstadoCilindro.BAJA and ss.contiene_diametro(c.diametro):
-                    conteo[c.estado.value] = conteo.get(c.estado.value, 0) + 1
+            conteo = conteo_substock[ss.nombre]
             sn.conteo_por_substock[ss.nombre] = conteo
             sn.disponibles_por_substock[ss.nombre] = conteo.get(EstadoCilindro.DISPONIBLE.value, 0)
 
