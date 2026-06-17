@@ -99,7 +99,10 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._col_der = ctk.CTkFrame(cols, fg_color="transparent")
         self._layout_mode = None
         self._aplicar_layout("ancho")  # layout inicial; <Configure> lo ajusta
-        self.bind("<Configure>", self._on_resize)
+        # Escuchamos el resize en el frame interno (no en el CTkScrollableFrame):
+        # bindear <Configure> sobre self pisaría el binding interno de CTk que
+        # recalcula la scrollregion y rompería el scroll vertical.
+        cols.bind("<Configure>", self._on_resize)
         col_izq, col_der = self._col_izq, self._col_der
 
         # Sección 1: Parámetros globales del taller (columna izquierda)
@@ -200,7 +203,9 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
     _UMBRAL_APILADO = 1300
 
     def _on_resize(self, event=None):
-        modo = "ancho" if self.winfo_width() >= self._UMBRAL_APILADO else "estrecho"
+        # event.width es el ancho del frame interno (≈ viewport visible).
+        ancho = event.width if event is not None else self.winfo_width()
+        modo = "ancho" if ancho >= self._UMBRAL_APILADO else "estrecho"
         if modo != self._layout_mode:
             self._aplicar_layout(modo)
 
