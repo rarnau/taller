@@ -17,8 +17,8 @@ from config.persistencia import cargar_config
 from modelos.estrategias import ESTRATEGIAS_SELECCION
 from modelos.taller import TallerCilindros
 
-# Nota: Estos módulos se irán actualizando a CustomTkinter o eliminando si se integran
-# de forma diferente en la nueva GUI.
+# Cada pestaña es un componente de display puro; App es el único que conoce
+# tanto el modelo (TallerCilindros) como la UI y los conecta.
 from gui.tab_consola import crear_consola
 from gui.vista_realtime import VistaRealTime
 from gui.dashboard_principal import crear_dashboard_principal
@@ -131,7 +131,7 @@ class App(ctk.CTk):
         self.tab_cfg = self.tabview.add("Configuración")
         self.tab_log = self.tabview.add("Consola")
 
-        # Pestaña de configuración (rangos por jaula y prioridades de máquinas)
+        # Pestaña de configuración (globales + máquinas + rangos + sim, CRUD completo)
         self.cfg_widget = crear_tab_configuracion(self.tab_cfg, self)
 
         # Dashboard: barra de control con selector de SubStock para la evolución temporal
