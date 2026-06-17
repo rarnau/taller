@@ -24,7 +24,7 @@ _CAMPOS_GUI = {
     "detalle_cola_rectificado", "detalle_enfriando",
 }
 
-_ESTADOS = [e.value for e in EstadoCilindro]
+_ESTADOS = frozenset(e.value for e in EstadoCilindro)
 
 
 @pytest.mark.parametrize("nombre", list(ESCENARIOS.keys()))
@@ -42,7 +42,7 @@ def test_snapshots_consistentes(nombre):
 
         # 2. conteo_por_estado lleva TODAS las claves del enum (incluso con 0),
         #    invariante explícito de generar_snapshot que la GUI da por hecho.
-        assert set(sn.conteo_por_estado) == set(_ESTADOS), f"{ctx}: claves de conteo_por_estado != estados del enum"
+        assert set(sn.conteo_por_estado) == _ESTADOS, f"{ctx}: claves de conteo_por_estado != estados del enum"
 
         # 3. La suma del conteo por estado == total de cilindros (ninguno se
         #    pierde ni se cuenta dos veces en la pasada única).
@@ -60,7 +60,7 @@ def test_snapshots_consistentes(nombre):
         # 6. conteo_por_substock: solo estados conocidos, sin ceros colados, y
         #    disponibles_por_substock derivado de forma coherente.
         for ss, conteo in sn.conteo_por_substock.items():
-            assert set(conteo).issubset(set(_ESTADOS)), f"{ctx}: estado desconocido en SubStock {ss}"
+            assert set(conteo).issubset(_ESTADOS), f"{ctx}: estado desconocido en SubStock {ss}"
             assert all(v > 0 for v in conteo.values()), f"{ctx}: SubStock {ss} tiene un estado con conteo 0"
             assert sn.disponibles_por_substock[ss] == conteo.get(EstadoCilindro.DISPONIBLE.value, 0), f"{ctx}: disponibles_por_substock incoherente en SubStock {ss}"
 

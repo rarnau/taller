@@ -95,6 +95,11 @@ class TallerCilindros:
         self._linea_parada_desde: Optional[datetime] = None
         self._cambios_diferidos: List["_EventoSim"] = []
 
+        # Contador de secuencia de la cola de eventos (heap). Se reinicia al
+        # inicio de cada simulación; declarado aquí para que _push_evento no
+        # dependa de un atributo que solo existe a mitad de corrida.
+        self._seq_cola = itertools.count()
+
     # ── Configuración externa ───────────────────────────────────────────────
 
     def configurar_substocks(self, rangos_config: List[Dict[str, Any]]) -> None:
