@@ -31,6 +31,16 @@ class MaquinaRectificadora:
         self.historial_trabajo: List[Dict[str, Any]] = []
         self.tiempo_total_ocupada_min: float = 0.0
 
+        # Esquema de trabajo: grilla horaria semanal 7×24 de booleanos
+        # (grilla[weekday][hora]). None = siempre operativa (24/7), que reproduce
+        # exactamente el comportamiento histórico. Ver modelos/turnos.py.
+        self.grilla_operativa: Optional[List[List[bool]]] = None
+        # Minutos de trabajo (tiempo operativo) del rectificado en curso; sirve
+        # de denominador para el progreso del snapshot.
+        self.minutos_trabajo_actual: float = 0.0
+        # Flag para no duplicar eventos de despertar (REANUDAR_MAQUINA).
+        self._despertar_programado: bool = False
+
     def configurar_tasa(self, tipo: str, mm_removidos: float, tiempo_minutos: float) -> None:
         """Registra la velocidad de rectificado para un tipo de pase."""
         tasa = mm_removidos / tiempo_minutos if tiempo_minutos > 0 else 0.0
@@ -52,6 +62,72 @@ class MaquinaRectificadora:
             return float("inf")
         return mm_a_rectificar / cfg["rate"]
 
+    # ── Esquema de trabajo (turnos) ─────────────────────────────────────────
+
+    def esta_operativa(self, dt: datetime) -> bool:
+        """Indica si la máquina está en un turno operativo en el instante dado."""
+        if self.grilla_operativa is None:
+            return True
+        return self.grilla_operativa[dt.weekday()][dt.hour]
+
+    def minutos_operativos_entre(self, t0: datetime, t1: datetime) -> float:
+        """Minutos de tiempo operativo acumulados en el intervalo [t0, t1).
+
+        Con grilla None (24/7) devuelve los minutos de reloj, idéntico al
+        comportamiento histórico.
+        """
+        if t1 <= t0:
+            return 0.0
+        if self.grilla_operativa is None:
+            return (t1 - t0).total_seconds() / 60.0
+
+        total = 0.0
+        t = t0
+        while t < t1:
+            fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            tramo_fin = min(fin_hora, t1)
+            if self.grilla_operativa[t.weekday()][t.hour]:
+                total += (tramo_fin - t).total_seconds() / 60.0
+            t = tramo_fin
+        return total
+
+    def calcular_fin_operativo(self, inicio: datetime, minutos_op: float) -> datetime:
+        """Instante de reloj en que se completan ``minutos_op`` de tiempo operativo.
+
+        Avanza desde ``inicio`` consumiendo solo las horas operativas y saltando
+        los huecos no operativos (el cilindro queda montado y retoma donde quedó).
+        Con grilla None devuelve ``inicio + minutos_op`` (comportamiento histórico).
+        Se asume que la máquina está operativa en ``inicio`` (solo se asigna
+        trabajo en ese caso), por lo que siempre progresa.
+        """
+        if self.grilla_operativa is None or minutos_op <= 0:
+            return inicio + timedelta(minutes=minutos_op)
+
+        restante = minutos_op
+        t = inicio
+        limite = inicio + timedelta(days=366)  # cota de seguridad anti-bucle
+        while restante > 0 and t < limite:
+            fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            if self.grilla_operativa[t.weekday()][t.hour]:
+                disp = (fin_hora - t).total_seconds() / 60.0
+                if disp >= restante:
+                    return t + timedelta(minutes=restante)
+                restante -= disp
+            t = fin_hora
+        return t
+
+    def proxima_apertura(self, desde: datetime) -> Optional[datetime]:
+        """Próximo instante operativo a partir de ``desde`` (None si nunca lo está)."""
+        if self.grilla_operativa is None or self.esta_operativa(desde):
+            return desde
+        t = desde.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        limite = desde + timedelta(days=8)  # una semana basta para cubrir el ciclo
+        while t < limite:
+            if self.grilla_operativa[t.weekday()][t.hour]:
+                return t
+            t += timedelta(hours=1)
+        return None
+
     def iniciar_rectificado(
         self,
         cilindro: Cilindro,
@@ -63,7 +139,10 @@ class MaquinaRectificadora:
         duracion_minutos = self.calcular_tiempo_proceso(mm, tipo.value)
         self.ocupada = True
         self.cilindro_actual = cilindro
-        self.tiempo_fin_rectificado = tiempo_actual + timedelta(minutes=duracion_minutos)
+        self.minutos_trabajo_actual = duracion_minutos
+        # El fin contempla los turnos no operativos: si la máquina para en medio
+        # del trabajo, el cilindro retoma donde quedó al reabrir el turno.
+        self.tiempo_fin_rectificado = self.calcular_fin_operativo(tiempo_actual, duracion_minutos)
 
         cilindro.estado = EstadoCilindro.RECTIFICANDO
         cilindro.maquina_actual = self.nombre

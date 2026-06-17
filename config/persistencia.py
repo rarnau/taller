@@ -188,27 +188,39 @@ def _buscar_maquina(cfg: Dict[str, Any], nombre: str) -> Optional[Dict[str, Any]
 
 
 def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: float,
-                desb_mm: float, desb_min: float, prioridad: str = "produccion") -> Dict[str, Any]:
-    """Agrega una máquina nueva. Lanza ValueError si el nombre ya existe."""
+                desb_mm: float, desb_min: float, prioridad: str = "produccion",
+                turnos: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Agrega una máquina nueva. Lanza ValueError si el nombre ya existe.
+
+    ``turnos`` (esquema de trabajo) es opcional; si se omite, la máquina opera
+    24/7 (no se persiste la clave).
+    """
     nombre = str(nombre).strip()
     if not nombre:
         raise ValueError("El nombre de la máquina no puede estar vacío.")
     if _buscar_maquina(cfg, nombre):
         raise ValueError(f"Ya existe una máquina llamada '{nombre}'.")
-    cfg.setdefault("maquinas", []).append({
+    maq: Dict[str, Any] = {
         "nombre": nombre,
         "prioridad": prioridad,
         "tasas": {
             "produccion": {"mm": float(prod_mm), "tiempo_min": float(prod_min)},
             "desbaste": {"mm": float(desb_mm), "tiempo_min": float(desb_min)},
         },
-    })
+    }
+    if turnos is not None:
+        maq["turnos"] = turnos
+    cfg.setdefault("maquinas", []).append(maq)
     return cfg
 
 
 def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None,
-                desb_mm=None, desb_min=None, prioridad=None) -> Dict[str, Any]:
-    """Modifica los campos indicados de una máquina existente."""
+                desb_mm=None, desb_min=None, prioridad=None,
+                turnos: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Modifica los campos indicados de una máquina existente.
+
+    ``turnos`` reemplaza el esquema de trabajo cuando no es None.
+    """
     maq = _buscar_maquina(cfg, nombre)
     if not maq:
         raise ValueError(f"No existe una máquina llamada '{nombre}'.")
@@ -225,7 +237,15 @@ def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None
         desb["tiempo_min"] = float(desb_min)
     if prioridad is not None:
         maq["prioridad"] = prioridad
+    if turnos is not None:
+        maq["turnos"] = turnos
     return cfg
+
+
+def obtener_turnos(cfg: Dict[str, Any], nombre: str) -> Optional[Dict[str, Any]]:
+    """Devuelve el esquema de turnos de una máquina (None = 24/7 o inexistente)."""
+    maq = _buscar_maquina(cfg, nombre)
+    return maq.get("turnos") if maq else None
 
 
 def remove_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:

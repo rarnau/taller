@@ -15,6 +15,7 @@ from .maquina import MaquinaRectificadora
 from .jaula import Jaula
 from .eventos import EventoCambio, Alerta, Snapshot
 from .estrategias import ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO
+from . import turnos as turnos_mod
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,10 @@ class TallerCilindros:
                     maq.prioridad_defecto = TipoRectificado(prioridad)
                 except ValueError:
                     logger.warning("Prioridad inválida '%s' para máquina '%s', ignorada.", prioridad, nombre)
+            # Esquema de trabajo (turnos): si está configurado, se expande a la
+            # grilla horaria 7×24; si no, queda None (siempre operativa, 24/7).
+            esquema = m.get("turnos")
+            maq.grilla_operativa = turnos_mod.expandir(esquema) if esquema else None
             self.maquinas[nombre] = maq
 
     # ── Carga de datos desde Excel ──────────────────────────────────────────
@@ -635,10 +640,11 @@ class TallerCilindros:
             if maq.ocupada and maq.cilindro_actual:
                 c = maq.cilindro_actual
                 progreso = 0.0
-                if maq.tiempo_fin_rectificado and c.rectificado_inicio:
-                    total = (maq.tiempo_fin_rectificado - c.rectificado_inicio).total_seconds()
-                    transcurrido = (tiempo - c.rectificado_inicio).total_seconds()
-                    progreso = min(100.0, max(0.0, (transcurrido / total) * 100)) if total > 0 else 0.0
+                # Progreso por tiempo operativo: no avanza durante los turnos en
+                # que la máquina está parada. Con grilla None equivale al reloj.
+                if maq.minutos_trabajo_actual > 0 and c.rectificado_inicio:
+                    consumido = maq.minutos_operativos_entre(c.rectificado_inicio, tiempo)
+                    progreso = min(100.0, max(0.0, (consumido / maq.minutos_trabajo_actual) * 100))
                 sn.detalle_maquinas[m_nombre] = {"id": c.id, "d": c.diametro, "progreso": progreso}
             else:
                 sn.detalle_maquinas[m_nombre] = None
@@ -653,11 +659,26 @@ class TallerCilindros:
     # ── Lógica de asignación ────────────────────────────────────────────────
 
     def asignar_trabajo_maquinas(self, tiempo: datetime) -> List[_EventoSim]:
-        """Intenta asignar cilindros de la cola a máquinas libres."""
+        """Intenta asignar cilindros de la cola a máquinas libres.
+
+        Una máquina solo toma trabajo si está en un turno operativo (ver
+        esquema de trabajo en modelos/turnos.py). Las máquinas libres fuera de
+        turno con cola pendiente se "despiertan" con un evento REANUDAR_MAQUINA
+        al comienzo de su próximo turno.
+        """
         nuevos_eventos: List[_EventoSim] = []
         cola = self.obtener_cola_rectificado()
         for nombre, maq in self.maquinas.items():
             if maq.ocupada:
+                continue
+            # Fuera de turno: no rectifica. Si hay cola, programar un despertar
+            # en la próxima apertura (sin duplicar) y seguir con otras máquinas.
+            if not maq.esta_operativa(tiempo):
+                if cola and not maq._despertar_programado:
+                    apertura = maq.proxima_apertura(tiempo)
+                    if apertura is not None:
+                        maq._despertar_programado = True
+                        nuevos_eventos.append(_EventoSim("REANUDAR_MAQUINA", apertura, nombre))
                 continue
             if not cola:
                 break
@@ -802,6 +823,21 @@ class TallerCilindros:
                 self._push_evento(cola, ev)
             self.generar_snapshot(ev_sim.tiempo)
 
+    def _handle_reanudar_maquina(self, ev_sim: "_EventoSim", cola: List[_ItemCola],
+                                 log: Callable[[str], None]) -> None:
+        """REANUDAR_MAQUINA: una máquina reabre su turno y reintenta tomar trabajo.
+
+        Es un proceso de reloj (turnos): siempre se ejecuta, también durante una
+        PARADA, y _reanudar_linea no lo desplaza (igual que FIN_RECT/FIN_ENFRIADO).
+        """
+        maquina = self.maquinas.get(ev_sim.datos)
+        if not maquina:
+            return
+        maquina._despertar_programado = False
+        for ev in self.asignar_trabajo_maquinas(ev_sim.tiempo):
+            self._push_evento(cola, ev)
+        self.generar_snapshot(ev_sim.tiempo)
+
     def _handle_cambio(self, ev_sim: "_EventoSim", cola: List[_ItemCola],
                        log: Callable[[str], None]) -> None:
         """CAMBIO: cambio de jaula programado. Único evento que una PARADA difiere."""
@@ -907,6 +943,7 @@ class TallerCilindros:
             "FIN_RECT": self._handle_fin_rect,
             "REPONER_CRC": self._handle_reponer_crc,
             "FIN_ENFRIADO": self._handle_fin_enfriado,
+            "REANUDAR_MAQUINA": self._handle_reanudar_maquina,
             "CAMBIO": self._handle_cambio,
         }
 

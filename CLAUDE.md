@@ -55,11 +55,12 @@ main.py
 
    It clears only per-run data (cylinders, jaulas, events, alerts, snapshots), **not** the machines/substocks/global params set by `configurar()`. If the Excel still carries the old `Configuración`/`Máquinas` sheets they are **ignored** (with an aviso). `cargar_datos()` delegates to `cargar_datos_desde_dataframes(stock_df, cambios_df)`, which a future batch runner can call directly with in-memory DataFrames (no disk I/O per run).
 
-2. **Simulate** — `simular(callback)` runs a priority-queue DES loop. Internal event type `_EventoSim(tipo, tiempo, datos)` has four types:
+2. **Simulate** — `simular(callback)` runs a priority-queue DES loop. Internal event type `_EventoSim(tipo, tiempo, datos)` has five types:
    - `"CAMBIO"` — a scheduled jaula change (datos = `EventoCambio`)
    - `"FIN_RECT"` — a machine finishes rectification (datos = machine name str)
    - `"REPONER_CRC"` — a Disponible cylinder arrives at the CRC buffer (datos = jaula int)
    - `"FIN_ENFRIADO"` — a cylinder finishes cooling and enters the rectification queue (datos = cylinder id str). Only generated when `tiempo_enfriado_h > 0`.
+   - `"REANUDAR_MAQUINA"` — a machine reopens its shift and retries taking work (datos = machine name str). Only generated when a free machine is **out of shift** with a non-empty queue. Like `FIN_RECT`/`FIN_ENFRIADO` it **always executes** (never deferred by a PARADA) and is **not** shifted by `_reanudar_linea` (it is wall-clock). See the work-shift design decision below.
 
    The queue is a **`heapq`** of tuples `(tiempo, secuencia, evento)` — `_ItemCola`. Push (`_push_evento`) and pop (`heapq.heappop`) are `O(log n)`. The `secuencia` field (an `itertools.count()` per run, `self._seq_cola`) breaks `tiempo` ties in **FIFO insertion order** and keeps `_EventoSim`s from ever being compared. This reproduces the exact ordering of the old `list` + stable `sort(key=tiempo)`; preserve the insertion order at each call site (see the queue-ordering note under Key Design Decisions).
 
@@ -91,14 +92,14 @@ SubStock ranges: `hasta < diámetro <= desde` (hasta is the lower exclusive boun
 
 `config/persistencia.py` loads/saves `config/user_config.json`, which is the source of truth for the taller's structural config:
 - `config_global` — `diametro_maximo`, `diametro_minimo`, `tiempo_traslado_crc_min`, `cantidad_jaulas`
-- `maquinas` — list of `{nombre, prioridad, tasas: {produccion|desbaste: {mm, tiempo_min}}}`
+- `maquinas` — list of `{nombre, prioridad, tasas: {produccion|desbaste: {mm, tiempo_min}}, turnos?}`. The optional `turnos` is the per-machine work schedule (see the work-shift design decision); **absent ⇒ 24/7** (no key persisted for that case).
 - `rangos` — SubStock diameter ranges per jaula
 - `tiempo_enfriado_h` — cooling hours between Trabajando and rectification (float, default `0.0`)
 - `max_iteraciones` — cap on the simulation loop (int, default `10000`)
 
 `DEFAULTS` is seeded from the reference Excel `datos/simulacion_140cils_1semana.xlsx` (machines G36/F36/F60). `cargar_config()` **migrates** old configs: it fills missing keys from defaults and folds the old loose `prioridades_maquinas` dict into each machine's `prioridad`.
 
-Getters: `obtener_config_global`, `obtener_maquinas`, `obtener_rangos`, `obtener_prioridades` (derived from `maquinas`), `obtener_tiempo_enfriado`, `obtener_max_iteraciones`. Mutators (single CRUD layer shared by CLI and GUI): `set_config_global`, `add_maquina`/`set_maquina`/`remove_maquina`, `set_rango`/`remove_rango`, `set_sim`, plus `cfg_desde_excel(excel)` to seed/migrate from an old 4-sheet Excel.
+Getters: `obtener_config_global`, `obtener_maquinas`, `obtener_rangos`, `obtener_prioridades` (derived from `maquinas`), `obtener_tiempo_enfriado`, `obtener_max_iteraciones`, `obtener_turnos(cfg, nombre)`. Mutators (single CRUD layer shared by CLI and GUI): `set_config_global`, `add_maquina`/`set_maquina`/`remove_maquina` (both take an optional `turnos` dict), `set_rango`/`remove_rango`, `set_sim`, plus `cfg_desde_excel(excel)` to seed/migrate from an old 4-sheet Excel.
 
 At startup, `App.__init__` calls `taller.configurar(self.user_cfg)` (one call that builds machines, globals, ranges and sim params); it is re-applied before each file load and simulation. The `Configuración` tab (`gui/tab_config.py`) edits all of these at runtime and writes them back. The CLI manages them via `cli.py config ...` subcommands; `--tiempo-enfriado`/`--max-iteraciones` on `cli.py simular` still override the JSON for a single run.
 
@@ -106,7 +107,7 @@ At startup, `App.__init__` calls `taller.configurar(self.user_cfg)` (one call th
 - `simular <excel> [--estrategia --config --export --json --json-out --quiet --tiempo-enfriado --max-iteraciones]`
 - `config show | export <json> | import <json> | import-excel <excel>`
 - `config global [--diametro-max --diametro-min --crc-min --jaulas]`
-- `config maquina list|add|remove|set` and `config jaula list|set|remove`
+- `config maquina list|add|remove|set` (set/add accept `--turnos "<compacto>"` or `--turnos-preset {24x7,off,lv3}`) and `config jaula list|set|remove`
 - `config sim [--tiempo-enfriado --max-iteraciones]`
 
 `construir_taller(cfg, excel)` and `ejecutar_simulacion(...)` in `cli.py` are GUI-free entry points; `construir_taller` (configurar + cargar_datos) is the intended base for a future batch runner of many independent parallel simulations.
@@ -161,6 +162,11 @@ When a free machine picks a cylinder in `asignar_trabajo_maquinas()`, `seleccion
 
 ### Cooling (Enfriando) is opt-in and physical
 With `tiempo_enfriado_h == 0.0` (default) the cooling state does **not** exist: the CAMBIO handler sends retired cylinders straight to `A_RECTIFICAR`, exactly as before. With a positive value, each retired cylinder goes to `ENFRIANDO` and a `FIN_ENFRIADO` event is scheduled at `t + tiempo_enfriado_h`. Like `FIN_RECT`/`REPONER_CRC`, `FIN_ENFRIADO` **always executes** — it is never deferred during a PARADA and is **not** shifted by `_reanudar_linea` (cooling is a wall-clock physical process, not a scheduled change). `tipo_rectificado_actual`/`mm_a_rectificar` are stamped at CAMBIO time and survive the cooling step. Cooling cylinders are not in any jaula, the CRC, or a machine; they are tracked purely by state and surfaced via `Snapshot.detalle_enfriando` (the global "EN ENFRIAMIENTO" section in Vista Real). `generar_snapshot()` counts them automatically because it iterates the whole `EstadoCilindro` enum. The stacked-area chart (`TallerCilindros.ESTADOS_NOMBRES`), the detail map (`ey` dict in `dashboard_detalle.py`), and the table filter (`tab_tabla.py`) all **derive** their state lists from `EstadoCilindro` (no hardcoded `"Enfriando"`), so a new state added to the enum surfaces in all three automatically.
+
+### Work shifts (esquema de trabajo) gate machine rectification, not the line
+Each `MaquinaRectificadora` carries an optional weekly operative calendar `grilla_operativa` — a **7×24 boolean grid** (`grid[weekday][hour]`, `weekday` from `datetime.weekday()`, 0 = Monday). `None` ⇒ **always operative (24/7)**, which reproduces the historical behavior byte-for-byte (so the golden master is unchanged by default). The user-facing config is 3 daily shifts (T1 06–14, T2 14–22, **T3 22–06 next day**) per day-of-week; `modelos/turnos.py` (pure domain, no GUI/engine state) is the single source of truth for shift hours, presets, compact-string parse/format, `resumen()`, and `expandir(turnos) → grid`. **T3 belongs to the day it starts**: its hours 22–23 land on day `d` and 00–05 on day `d+1` (week wraparound). The grid is built per `TallerCilindros` instance in `configurar_maquinas()` — no module-level mutable state, so thousands of parallel sims are safe. The grid is also the hook for a future random machine-failure feature (turn off a random % of hours).
+
+Only **machine rectification** is gated by the calendar; the rolling line never stops for shifts — `CAMBIO` and `FIN_ENFRIADO` fire as usual. `iniciar_rectificado` computes `tiempo_fin_rectificado` via `calcular_fin_operativo(inicio, minutos)`, which walks the grid hour-by-hour consuming only operative minutes and **bakes non-operative gaps into the finish time** — so a half-done cylinder stays mounted (machine remains `ocupada`) and "resumes where it stopped" with no preemption logic. `asignar_trabajo_maquinas` skips a machine that is not `esta_operativa(tiempo)`; if such a free machine has queued work, it schedules **one** `REANUDAR_MAQUINA` event at `proxima_apertura(tiempo)` (deduped via `maq._despertar_programado`) to wake it when its shift reopens. Snapshot progress uses `minutos_operativos_entre(inicio, tiempo) / minutos_trabajo_actual` (not wall-clock), so the progress bar doesn't advance during a closed shift. With `grilla_operativa is None` all these helpers collapse to the old wall-clock arithmetic.
 
 ### PARADA is all-or-nothing
 `_instalar_pareja_o_parar()` never installs a partial pair. If there are fewer than `_BUFFER_CRC_SIZE` cylinders available in a jaula's range, it installs **none** and returns `False`. A jaula with only one cylinder working is not a valid state.
