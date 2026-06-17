@@ -15,7 +15,16 @@ python main.py
 python datos/generar_caso_parada.py
 ```
 
-There are no automated tests or linters configured. Validation is done by running the application and loading an Excel file.
+### Tests
+
+A golden-master regression suite guards the simulation engine (`modelos/taller.py`):
+
+```bash
+pip install -r requirements-dev.txt   # adds pytest
+python -m pytest                       # runs tests/
+```
+
+`tests/_escenarios.py` defines scenarios (PARADA, cooling, the 140-cylinder week, several strategies) and a deterministic `fingerprint()` (KPIs + snapshot count + alerts + final per-cylinder state). `tests/test_regresion.py` compares each run against `tests/golden_master.json`. When a behavior change is **intended**, regenerate the baseline on purpose with `python tests/_generar_golden.py`; otherwise a failing test means the engine changed behavior. There are no linters configured.
 
 ## Architecture Overview
 
