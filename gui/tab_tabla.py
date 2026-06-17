@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk
 import customtkinter as ctk
 from config.tema import BG, BG2, BG3, FG, FG2, ACCENT, FONT_FAMILY, FONT_SIZE, TABLE_ROW_COLORS
+from modelos.enums import EstadoCilindro
 
 
 def llenar_tabla(tab, taller):
@@ -14,7 +15,8 @@ def llenar_tabla(tab, taller):
 
     ctk.CTkLabel(toolbar, text="Filtrar estado:").pack(side="left", padx=10)
 
-    est = ["Todos", "Trabajando", "CRC", "Disponible", "Enfriando", "A rectificar", "Rectificando", "Baja"]
+    # Derivado del enum para no duplicar la lista de estados (auto-incluye nuevos).
+    est = ["Todos"] + [e.value for e in EstadoCilindro]
     fv = tk.StringVar(value="Todos")
     fc = ctk.CTkComboBox(toolbar, variable=fv, values=est, state="readonly", command=lambda v: _fill(v))
     fc.pack(side="left", padx=10)

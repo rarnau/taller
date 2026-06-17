@@ -49,7 +49,9 @@ class TallerCilindros:
       - Exportación de resultados
     """
 
-    ESTADOS_NOMBRES = ["Trabajando", "CRC", "Disponible", "Enfriando", "A rectificar", "Rectificando", "Baja"]
+    # Derivado del enum (en su orden de definición) para no duplicar la lista de
+    # estados: al agregar un estado a EstadoCilindro, los gráficos lo recogen solos.
+    ESTADOS_NOMBRES = [e.value for e in EstadoCilindro]
 
     def __init__(self):
         self.cilindros: Dict[str, Cilindro] = {}
