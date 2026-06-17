@@ -73,7 +73,7 @@ class App(ctk.CTk):
     def _create_sidebar(self):
         self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(10, weight=1)
+        self.sidebar.grid_rowconfigure(11, weight=1)
 
         self.logo_label = ctk.CTkLabel(self.sidebar, text="SIMULADOR\nCILINDROS", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
@@ -96,9 +96,20 @@ class App(ctk.CTk):
         self.btn_exportar = ctk.CTkButton(self.sidebar, text="Exportar Resultados", command=self._exportar)
         self.btn_exportar.grid(row=5, column=0, padx=20, pady=10)
 
+        # Hint guía cuando aún no hay datos: acompaña a los botones de acción en
+        # lugar de un overlay sobre la Vista Real. Se oculta al cargar/simular.
+        self.hint_inicio = ctk.CTkLabel(
+            self.sidebar,
+            text="Cargue un Excel y ejecute la\nsimulación para comenzar.",
+            font=ctk.CTkFont(size=FONT_SIZE_SM),
+            text_color=FG_DIM,
+            justify="center",
+        )
+        self.hint_inicio.grid(row=6, column=0, padx=20, pady=(0, 10))
+
         # Controles de Reproducción
         self.repro_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.repro_frame.grid(row=6, column=0, padx=20, pady=20)
+        self.repro_frame.grid(row=7, column=0, padx=20, pady=20)
 
         self.btn_play = ctk.CTkButton(self.repro_frame, text="▶ Play", width=60, command=self._toggle_playback)
         self.btn_play.grid(row=0, column=0, padx=5)
@@ -108,13 +119,13 @@ class App(ctk.CTk):
 
         self.slider_progreso = ctk.CTkSlider(self.sidebar, from_=0, to=100, command=self._seek_simulation)
         self.slider_progreso.set(0)
-        self.slider_progreso.grid(row=9, column=0, padx=20, pady=10)
+        self.slider_progreso.grid(row=10, column=0, padx=20, pady=10)
 
         self.label_vel = ctk.CTkLabel(self.sidebar, text="Velocidad: 1x")
-        self.label_vel.grid(row=7, column=0, padx=20, pady=0)
+        self.label_vel.grid(row=8, column=0, padx=20, pady=0)
         self.slider_vel = ctk.CTkSlider(self.sidebar, from_=1, to=100, number_of_steps=99, command=self._change_speed)
         self.slider_vel.set(10)  # 10/10 = 1.0x
-        self.slider_vel.grid(row=8, column=0, padx=20, pady=10)
+        self.slider_vel.grid(row=9, column=0, padx=20, pady=10)
 
     def _create_main_content(self):
         self.tabview = ctk.CTkTabview(self)
@@ -146,11 +157,6 @@ class App(ctk.CTk):
         self.combo_dash_ss.pack(side="left")
         self.dash_holder = ctk.CTkFrame(self.tab_dash, fg_color="transparent")
         self.dash_holder.pack(fill="both", expand=True)
-
-        # Placeholder para la vista real (se oculta al cargar un archivo).
-        # Va por encima de la vista (overlay) para no robarle altura al layout.
-        self.label_real = ctk.CTkLabel(self.tab_visual, text="Cargue un archivo y simule para ver la vista en tiempo real", font=ctk.CTkFont(size=16))
-        self.label_real.place(relx=0.5, rely=0.5, anchor="center")
 
         # Consola
         self.log_w = crear_consola(self.tab_log)
@@ -254,7 +260,7 @@ class App(ctk.CTk):
 
     def _sincronizar_vista_con_taller(self) -> None:
         """Actualiza los frames de Vista Real con las jaulas y máquinas del taller cargado."""
-        self.label_real.place_forget()  # ya hay datos: ocultar el placeholder
+        self.hint_inicio.grid_remove()  # ya hay datos: ocultar el hint guía del sidebar
         estrat = self._estrat_por_etiqueta.get(self.combo_est.get(), "mayor_diametro")
         self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
         self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))
