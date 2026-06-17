@@ -122,7 +122,7 @@ Single `App(CTk)` window with a sidebar and a tabbed main area:
 | Detalle | `gui/dashboard_detalle.py` | Per-cylinder detail chart (click a cylinder in Vista Real) |
 | Inventario | `gui/tab_tabla.py` | Full cylinder table |
 | KPIs | `gui/tab_kpis.py` | Key performance indicators |
-| Configuración | `gui/tab_config.py` | Two-column layout: global params + SubStock ranges (left); machine park CRUD + simulation params (cooling time, max iterations) (right). Saves to `user_config.json` and applies via `taller.configurar()` |
+| Configuración | `gui/tab_config.py` | Responsive two-column layout: global params + SubStock ranges (left); machine park CRUD + simulation params (cooling time, max iterations) (right). Below `_UMBRAL_APILADO` px wide the columns stack to full width (`_on_resize`/`_aplicar_layout`) so the machine table's "Prioridad" column isn't clipped on narrow screens. Saves to `user_config.json` and applies via `taller.configurar()` |
 | Consola | `gui/tab_consola.py` | Simulation log and alerts |
 
 Playback is driven by a background thread in `App`; at each tick it calls `vista_rt.actualizar(snapshot)` on the Tk main thread via `self.after()`.
