@@ -689,6 +689,130 @@ class TallerCilindros:
         self._reposicion_pendiente.add(jaula_id)
         cola.append(_EventoSim("REPONER_CRC", fin, jaula_id))
 
+    # ── Manejadores de eventos de simulación ────────────────────────────────
+
+    def _finalizar_y_continuar(self, maquina: MaquinaRectificadora, tiempo: datetime,
+                               cola: List["_EventoSim"], log: Callable[[str], None]) -> None:
+        """Cierra un rectificado y reactiva el flujo dependiente.
+
+        Tras liberar la máquina: rearma jaulas paradas con el nuevo stock,
+        repone el CRC, reasigna trabajo a las máquinas libres y toma snapshot.
+        Compartido por el manejador de FIN_RECT y por el drenaje final de la
+        simulación (ambos cierran rectificados en curso de idéntica forma).
+        """
+        cil_terminado = maquina.finalizar_rectificado(tiempo)
+        if cil_terminado:
+            # Prioridad: rearmar jaulas paradas antes de reponer el CRC.
+            self._intentar_reactivar_jaulas(tiempo, log, cola)
+            for j_id in range(1, self.cantidad_jaulas + 1):
+                self._programar_reposicion_crc(j_id, tiempo, cola)
+        cola.extend(self.asignar_trabajo_maquinas(tiempo))
+        cola.sort(key=lambda x: x.tiempo)
+        self.generar_snapshot(tiempo)
+
+    def _handle_fin_rect(self, ev_sim: "_EventoSim", cola: List["_EventoSim"],
+                         log: Callable[[str], None]) -> None:
+        """FIN_RECT: una máquina termina un rectificado.
+
+        Nunca se difiere durante una PARADA: es justo lo que produce el stock
+        que permite reanudar la línea.
+        """
+        maquina = self.maquinas.get(ev_sim.datos)
+        if not maquina or not maquina.ocupada:
+            return
+        # Descarta FIN_RECT obsoletos (la máquina ya fue reasignada): el fin
+        # registrado debe coincidir con el del evento.
+        if (maquina.tiempo_fin_rectificado
+                and abs((maquina.tiempo_fin_rectificado - ev_sim.tiempo).total_seconds()) > 2):
+            return
+        self._finalizar_y_continuar(maquina, ev_sim.tiempo, cola, log)
+
+    def _handle_reponer_crc(self, ev_sim: "_EventoSim", cola: List["_EventoSim"],
+                            log: Callable[[str], None]) -> None:
+        """REPONER_CRC: llega una pareja al buffer CRC (siempre se ejecuta, aun en PARADA)."""
+        j_id = ev_sim.datos
+        self._reposicion_pendiente.discard(j_id)
+        # Solo repone (y genera snapshot) si el CRC sigue incompleto.
+        if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
+            self.reponer_buffer_crc(j_id, ev_sim.tiempo)
+            self._intentar_reactivar_jaulas(ev_sim.tiempo, log, cola)
+            self.generar_snapshot(ev_sim.tiempo)
+
+    def _handle_fin_enfriado(self, ev_sim: "_EventoSim", cola: List["_EventoSim"],
+                             log: Callable[[str], None]) -> None:
+        """FIN_ENFRIADO: un cilindro termina de enfriarse y entra a la cola de rectificado.
+
+        El enfriado es un proceso físico: se completa siempre, también durante
+        una PARADA (igual que FIN_RECT).
+        """
+        cil = self.cilindros.get(ev_sim.datos)
+        if cil and cil.estado == EstadoCilindro.ENFRIANDO:
+            cil.estado = EstadoCilindro.A_RECTIFICAR
+            cil.registrar_evento(ev_sim.tiempo, "Fin de enfriado, pasa a cola de rectificado")
+            cola.extend(self.asignar_trabajo_maquinas(ev_sim.tiempo))
+            cola.sort(key=lambda x: x.tiempo)
+            self.generar_snapshot(ev_sim.tiempo)
+
+    def _handle_cambio(self, ev_sim: "_EventoSim", cola: List["_EventoSim"],
+                       log: Callable[[str], None]) -> None:
+        """CAMBIO: cambio de jaula programado. Único evento que una PARADA difiere."""
+        ev = ev_sim.datos
+        if ev.id in self._eventos_procesados:
+            return
+
+        # Línea detenida: se difieren los cambios posteriores al inicio de la
+        # parada (los simultáneos a la parada sí se ejecutan). Se reprograman al
+        # reanudarse la línea, desplazados por la duración total de la parada.
+        if (self._linea_parada_desde is not None
+                and ev_sim.tiempo > self._linea_parada_desde):
+            self._cambios_diferidos.append(ev_sim)
+            return
+
+        self._eventos_procesados.add(ev.id)
+        jaula = self.jaulas[ev.jaula]
+
+        # ev_sim.tiempo es el tiempo real de procesamiento (puede estar desplazado
+        # respecto al ev.tiempo original si hubo una PARADA).
+        t_proc = ev_sim.tiempo
+        retraso_str = (f" [orig {ev.tiempo.strftime('%H:%M')}, retr "
+                       f"{int((t_proc - ev.tiempo).total_seconds() / 60)} min]"
+                       if t_proc != ev.tiempo else "")
+        log(f"  {t_proc.strftime('%m-%d %H:%M')} | Jaula {ev.jaula} | Cambio a {ev.tipo.value}"
+            f" | CRC={len(jaula.cilindros_crc)}{retraso_str}")
+
+        # 1. Los cilindros trabajando salen de la jaula. Con enfriado configurado
+        #    pasan a ENFRIANDO (entran a rectificado al disparar FIN_ENFRIADO);
+        #    si es 0, van directo a A_RECTIFICAR (comportamiento histórico).
+        for cil in list(jaula.cilindros_trabajando):
+            cil.jaula = None
+            cil.tipo_rectificado_actual = ev.tipo
+            cil.mm_a_rectificar = ev.mm_a_rectificar
+            if self.tiempo_enfriado_h > 0:
+                cil.estado = EstadoCilindro.ENFRIANDO
+                fin_enfriado = t_proc + timedelta(hours=self.tiempo_enfriado_h)
+                cil.registrar_evento(
+                    t_proc, f"En enfriado tras Jaula {ev.jaula} ({self.tiempo_enfriado_h:.1f} h)")
+                cola.append(_EventoSim("FIN_ENFRIADO", fin_enfriado, cil.id))
+            else:
+                cil.estado = EstadoCilindro.A_RECTIFICAR
+                cil.registrar_evento(t_proc, f"Retirado de Jaula {ev.jaula} para rectificado")
+        jaula.cilindros_trabajando.clear()
+
+        # 2. Subir una pareja completa a la jaula; si no hay stock, PARADA.
+        #    La jaula no puede operar con menos de _BUFFER_CRC_SIZE cilindros.
+        if self._instalar_pareja_o_parar(ev.jaula, t_proc):
+            jaula.parada = False
+            jaula.parada_desde = None
+        else:
+            self._parar_jaula(ev.jaula, t_proc, log)
+
+        # 3. Asignar trabajo a máquinas y 4. programar reposición del CRC con el
+        #    CRC ya vaciado; luego snapshot.
+        cola.extend(self.asignar_trabajo_maquinas(t_proc))
+        self._programar_reposicion_crc(ev.jaula, t_proc, cola)
+        cola.sort(key=lambda x: x.tiempo)
+        self.generar_snapshot(t_proc)
+
     # ── Simulación ──────────────────────────────────────────────────────────
 
     def simular(self, estrategia: str = "mayor_diametro", callback_log: Optional[Callable[[str], None]] = None) -> None:
@@ -712,147 +836,44 @@ class TallerCilindros:
         self._reposicion_pendiente = set()
         self._linea_parada_desde = None
         self._cambios_diferidos = []
+        self._eventos_procesados: set = set()
         self.generar_snapshot(t_actual)
 
         cola: List[_EventoSim] = [_EventoSim("CAMBIO", ev.tiempo, ev) for ev in self.eventos_programados]
-        nuevos = self.asignar_trabajo_maquinas(t_actual)
-        cola.extend(nuevos)
+        cola.extend(self.asignar_trabajo_maquinas(t_actual))
         cola.sort(key=lambda x: x.tiempo)
 
-        eventos_procesados: set = set()
+        # Despacho por tipo de evento. Una PARADA de línea solo difiere los CAMBIO
+        # (ver _handle_cambio); FIN_RECT/REPONER_CRC/FIN_ENFRIADO siempre se
+        # ejecutan: las máquinas siguen produciendo el stock que reanuda la línea.
+        handlers = {
+            "FIN_RECT": self._handle_fin_rect,
+            "REPONER_CRC": self._handle_reponer_crc,
+            "FIN_ENFRIADO": self._handle_fin_enfriado,
+            "CAMBIO": self._handle_cambio,
+        }
+
         iteracion = 0
         while cola and iteracion < self.max_iteraciones:
             iteracion += 1
             ev_sim = cola.pop(0)
-
-            # Una PARADA de línea solo afecta a los CAMBIO (ver handler de CAMBIO).
-            # El rectificado (FIN_RECT) y la carga del buffer (REPONER_CRC) NUNCA
-            # se detienen: las máquinas siguen trabajando durante la parada y son,
-            # de hecho, las que generan el stock que permite reanudar la línea.
-            if ev_sim.tipo == "FIN_RECT":
-                maq_nombre = ev_sim.datos
-                maq = self.maquinas.get(maq_nombre)
-                if not maq or not maq.ocupada:
-                    continue
-                if maq.tiempo_fin_rectificado and abs((maq.tiempo_fin_rectificado - ev_sim.tiempo).total_seconds()) > 2:
-                    continue
-
-                cil_terminado = maq.finalizar_rectificado(ev_sim.tiempo)
-                if cil_terminado:
-                    # Prioridad: rearmar jaulas paradas con el nuevo stock disponible
-                    self._intentar_reactivar_jaulas(ev_sim.tiempo, _log, cola)
-                    # Programar reposición del CRC (recurso único, secuencial)
-                    for j_id in range(1, self.cantidad_jaulas + 1):
-                        self._programar_reposicion_crc(j_id, ev_sim.tiempo, cola)
-
-                nuevos = self.asignar_trabajo_maquinas(ev_sim.tiempo)
-                cola.extend(nuevos)
-                cola.sort(key=lambda x: x.tiempo)
-                self.generar_snapshot(ev_sim.tiempo)
-
-            elif ev_sim.tipo == "REPONER_CRC":
-                j_id = ev_sim.datos
-                self._reposicion_pendiente.discard(j_id)
-                # Solo repone (y genera snapshot) si el CRC sigue incompleto
-                if len(self.jaulas[j_id].cilindros_crc) < _BUFFER_CRC_SIZE:
-                    self.reponer_buffer_crc(j_id, ev_sim.tiempo)
-                    self._intentar_reactivar_jaulas(ev_sim.tiempo, _log, cola)
-                    self.generar_snapshot(ev_sim.tiempo)
-
-            elif ev_sim.tipo == "FIN_ENFRIADO":
-                # El enfriado es un proceso físico: se completa siempre, también
-                # durante una PARADA (igual que FIN_RECT). Al terminar, el cilindro
-                # entra a la cola de rectificado y se intenta asignar a una máquina.
-                cil = self.cilindros.get(ev_sim.datos)
-                if cil and cil.estado == EstadoCilindro.ENFRIANDO:
-                    cil.estado = EstadoCilindro.A_RECTIFICAR
-                    cil.registrar_evento(ev_sim.tiempo, "Fin de enfriado, pasa a cola de rectificado")
-                    nuevos = self.asignar_trabajo_maquinas(ev_sim.tiempo)
-                    cola.extend(nuevos)
-                    cola.sort(key=lambda x: x.tiempo)
-                    self.generar_snapshot(ev_sim.tiempo)
-
-            elif ev_sim.tipo == "CAMBIO":
-                ev = ev_sim.datos
-                if ev.id in eventos_procesados:
-                    continue
-
-                # Línea detenida: se difieren los cambios posteriores al inicio
-                # de la parada (los simultáneos a la parada sí se ejecutan).
-                # Se reprograman al reanudarse la línea, desplazados por la
-                # duración total de la parada.
-                if (self._linea_parada_desde is not None
-                        and ev_sim.tiempo > self._linea_parada_desde):
-                    self._cambios_diferidos.append(ev_sim)
-                    continue
-
-                eventos_procesados.add(ev.id)
-                jaula = self.jaulas[ev.jaula]
-
-                # ev_sim.tiempo es el tiempo real de procesamiento (puede estar
-                # desplazado respecto al ev.tiempo original si hubo una PARADA).
-                t_proc = ev_sim.tiempo
-                retraso_str = (f" [orig {ev.tiempo.strftime('%H:%M')}, retr "
-                               f"{int((t_proc - ev.tiempo).total_seconds() / 60)} min]"
-                               if t_proc != ev.tiempo else "")
-                _log(f"  {t_proc.strftime('%m-%d %H:%M')} | Jaula {ev.jaula} | Cambio a {ev.tipo.value}"
-                     f" | CRC={len(jaula.cilindros_crc)}{retraso_str}")
-
-                # 1. Los cilindros trabajando salen de la jaula. Si hay tiempo de
-                #    enfriado configurado, pasan a ENFRIANDO y entran a la cola de
-                #    rectificado recién al disparar FIN_ENFRIADO; si es 0, van
-                #    directo a A_RECTIFICAR (comportamiento histórico).
-                for cil in list(jaula.cilindros_trabajando):
-                    cil.jaula = None
-                    cil.tipo_rectificado_actual = ev.tipo
-                    cil.mm_a_rectificar = ev.mm_a_rectificar
-                    if self.tiempo_enfriado_h > 0:
-                        cil.estado = EstadoCilindro.ENFRIANDO
-                        fin_enfriado = t_proc + timedelta(hours=self.tiempo_enfriado_h)
-                        cil.registrar_evento(
-                            t_proc, f"En enfriado tras Jaula {ev.jaula} ({self.tiempo_enfriado_h:.1f} h)")
-                        cola.append(_EventoSim("FIN_ENFRIADO", fin_enfriado, cil.id))
-                    else:
-                        cil.estado = EstadoCilindro.A_RECTIFICAR
-                        cil.registrar_evento(t_proc, f"Retirado de Jaula {ev.jaula} para rectificado")
-                jaula.cilindros_trabajando.clear()
-
-                # 2. Subir una pareja completa a la jaula; si no hay stock, PARADA.
-                #    La jaula no puede operar con menos de _BUFFER_CRC_SIZE cilindros.
-                if self._instalar_pareja_o_parar(ev.jaula, t_proc):
-                    jaula.parada = False
-                    jaula.parada_desde = None
-                else:
-                    self._parar_jaula(ev.jaula, t_proc, _log)
-
-                # 3. Asignar trabajo a máquinas y snapshot con el CRC ya vaciado
-                nuevos = self.asignar_trabajo_maquinas(t_proc)
-                cola.extend(nuevos)
-                # 4. Programar la reposición del CRC (recurso único, secuencial)
-                self._programar_reposicion_crc(ev.jaula, t_proc, cola)
-                cola.sort(key=lambda x: x.tiempo)
-                self.generar_snapshot(t_proc)
+            handler = handlers.get(ev_sim.tipo)
+            if handler:
+                handler(ev_sim, cola, _log)
 
         if cola and iteracion >= self.max_iteraciones:
             msg = f"ADVERTENCIA: Límite de {self.max_iteraciones} iteraciones alcanzado con {len(cola)} eventos pendientes."
             logger.warning(msg)
             _log(msg)
 
-        # Finalizar rectificados en curso al terminar los eventos programados
+        # Finalizar rectificados en curso al terminar los eventos programados,
+        # con la misma lógica que FIN_RECT (vía _finalizar_y_continuar).
         for _ in range(_MAX_ITER_FINALIZACION):
             hay_actividad = False
-            for maq in self.maquinas.values():
-                if maq.ocupada and maq.tiempo_fin_rectificado:
+            for maquina in self.maquinas.values():
+                if maquina.ocupada and maquina.tiempo_fin_rectificado:
                     hay_actividad = True
-                    t_fin = maq.tiempo_fin_rectificado
-                    maq.finalizar_rectificado(t_fin)
-                    self._intentar_reactivar_jaulas(t_fin, _log, cola)
-                    for j_id in range(1, self.cantidad_jaulas + 1):
-                        self._programar_reposicion_crc(j_id, t_fin, cola)
-                    nuevos = self.asignar_trabajo_maquinas(t_fin)
-                    cola.extend(nuevos)
-                    cola.sort(key=lambda x: x.tiempo)
-                    self.generar_snapshot(t_fin)
+                    self._finalizar_y_continuar(maquina, maquina.tiempo_fin_rectificado, cola, _log)
             if not hay_actividad:
                 break
 
