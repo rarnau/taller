@@ -82,8 +82,14 @@ def _cargar_config(config_path: Optional[str]) -> Dict[str, Any]:
     """Carga la configuración del JSON indicado, o la de usuario por defecto."""
     if config_path:
         with open(config_path, "r", encoding="utf-8") as f:
-            return cfgmod._migrar(json.load(f))
+            return cfgmod.migrar(json.load(f))
     return cargar_config()
+
+
+def _escribir_json(obj: Any, ruta: str) -> None:
+    """Vuelca ``obj`` a ``ruta`` como JSON UTF-8 indentado."""
+    with open(ruta, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
 
 
 # ── Formato de salida ────────────────────────────────────────────────────────
@@ -135,8 +141,7 @@ def _cmd_simular(args) -> int:
     if args.json:
         print(json.dumps(kpis, ensure_ascii=False, indent=2))
     if args.json_out:
-        with open(args.json_out, "w", encoding="utf-8") as f:
-            json.dump(kpis, f, ensure_ascii=False, indent=2)
+        _escribir_json(kpis, args.json_out)
         print(f"KPIs escritos en: {args.json_out}")
     if args.export:
         taller.exportar_resultados(args.export)
@@ -158,15 +163,13 @@ def _cmd_config(args) -> int:
         return 0
 
     if sub == "export":
-        cfg = cargar_config()
-        with open(args.ruta, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        _escribir_json(cargar_config(), args.ruta)
         print(f"Configuración exportada en: {args.ruta}")
         return 0
 
     if sub == "import":
         with open(args.ruta, "r", encoding="utf-8") as f:
-            cfg = cfgmod._migrar(json.load(f))
+            cfg = cfgmod.migrar(json.load(f))
         guardar_config(cfg)
         print(f"Configuración importada desde: {args.ruta}")
         return 0

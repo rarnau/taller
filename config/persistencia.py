@@ -23,7 +23,7 @@ Esquemas viejos (sin ``config_global``/``maquinas`` y con el dict suelto
 """
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(_DIR, "user_config.json")
@@ -71,7 +71,7 @@ def cargar_config() -> Dict[str, Any]:
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                return _migrar(json.load(f))
+                return migrar(json.load(f))
         except (json.JSONDecodeError, IOError):
             pass
     return _copia_defaults()
@@ -88,7 +88,7 @@ def _copia_defaults() -> Dict[str, Any]:
     return json.loads(json.dumps(DEFAULTS))
 
 
-def _migrar(cfg: Dict[str, Any]) -> Dict[str, Any]:
+def migrar(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Completa claves faltantes desde DEFAULTS y migra el esquema viejo.
 
     - Rellena ``config_global``, ``maquinas`` y ``rangos`` si faltan.
@@ -128,13 +128,23 @@ def obtener_config_global(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def obtener_maquinas(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Devuelve la lista de máquinas con sus tasas y prioridad."""
-    return cfg.get("maquinas", DEFAULTS["maquinas"])
+    """Devuelve la lista de máquinas con sus tasas y prioridad.
+
+    Si la clave falta, devuelve una **copia** de los defaults (nunca la
+    referencia compartida del módulo, para no mutar ``DEFAULTS``).
+    """
+    maquinas = cfg.get("maquinas")
+    return maquinas if maquinas is not None else _copia_defaults()["maquinas"]
 
 
 def obtener_rangos(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Devuelve los rangos de diámetros por jaula desde la configuración."""
-    return cfg.get("rangos", DEFAULTS["rangos"])
+    """Devuelve los rangos de diámetros por jaula desde la configuración.
+
+    Si la clave falta, devuelve una **copia** de los defaults (nunca la
+    referencia compartida del módulo, para no mutar ``DEFAULTS``).
+    """
+    rangos = cfg.get("rangos")
+    return rangos if rangos is not None else _copia_defaults()["rangos"]
 
 
 def obtener_prioridades(cfg: Dict[str, Any]) -> Dict[str, str]:
@@ -170,7 +180,7 @@ def set_config_global(cfg: Dict[str, Any], *, diametro_maximo=None, diametro_min
     return cfg
 
 
-def _buscar_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:
+def _buscar_maquina(cfg: Dict[str, Any], nombre: str) -> Optional[Dict[str, Any]]:
     for m in cfg.setdefault("maquinas", []):
         if m["nombre"] == nombre:
             return m
@@ -283,7 +293,6 @@ def cfg_desde_excel(ruta_excel: str) -> Dict[str, Any]:
 
     xl = pd.ExcelFile(ruta_excel, engine="openpyxl")
     cfg = _copia_defaults()
-    cfg.pop("prioridades_maquinas", None)
 
     if "Configuración" in xl.sheet_names:
         df = xl.parse("Configuración")
