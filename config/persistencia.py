@@ -1,33 +1,80 @@
-"""Persistencia de configuración de usuario en JSON."""
+"""Persistencia de configuración de usuario en JSON.
+
+A partir de v4.1 el JSON es la fuente de verdad de la configuración estructural
+del taller (parámetros globales + máquinas + rangos por jaula + parámetros de
+simulación). El Excel cargado pasa a contener únicamente los datos variables
+(stock inicial y programa de cambios).
+
+Esquema actual::
+
+    {
+      "config_global": {"diametro_maximo", "diametro_minimo",
+                        "tiempo_traslado_crc_min", "cantidad_jaulas"},
+      "maquinas": [{"nombre", "prioridad",
+                    "tasas": {"produccion": {"mm", "tiempo_min"},
+                              "desbaste":   {"mm", "tiempo_min"}}}],
+      "rangos": [{"jaula", "desde", "hasta"}],
+      "tiempo_enfriado_h": float,
+      "max_iteraciones": int
+    }
+
+Esquemas viejos (sin ``config_global``/``maquinas`` y con el dict suelto
+``prioridades_maquinas``) se migran al cargar.
+"""
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(_DIR, "user_config.json")
 
+# Tasa de rectificado por máquina, una entrada por tipo. Sembrado desde la hoja
+# "Máquinas" del Excel de referencia (datos/simulacion_140cils_1semana.xlsx).
+_TASAS_DEFECTO = {
+    "produccion": {"mm": 0.8, "tiempo_min": 60},
+    "desbaste": {"mm": 5.0, "tiempo_min": 480},
+}
+
 DEFAULTS: Dict[str, Any] = {
+    "config_global": {
+        "diametro_maximo": 575.0,
+        "diametro_minimo": 520.0,
+        "tiempo_traslado_crc_min": 10.0,
+        "cantidad_jaulas": 4,
+    },
+    "maquinas": [
+        {"nombre": "G36", "prioridad": "produccion",
+         "tasas": {k: dict(v) for k, v in _TASAS_DEFECTO.items()}},
+        {"nombre": "F36", "prioridad": "produccion",
+         "tasas": {k: dict(v) for k, v in _TASAS_DEFECTO.items()}},
+        {"nombre": "F60", "prioridad": "desbaste",
+         "tasas": {k: dict(v) for k, v in _TASAS_DEFECTO.items()}},
+    ],
     "rangos": [
         {"jaula": 1, "desde": 533.0, "hasta": 520.0},
         {"jaula": 2, "desde": 547.0, "hasta": 533.0},
         {"jaula": 3, "desde": 561.0, "hasta": 547.0},
         {"jaula": 4, "desde": 575.0, "hasta": 561.0},
     ],
-    "prioridades_maquinas": {},
     "tiempo_enfriado_h": 0.0,
     "max_iteraciones": 10000,
 }
 
 
+# ── Carga / guardado ─────────────────────────────────────────────────────────
+
 def cargar_config() -> Dict[str, Any]:
-    """Carga la configuración de usuario; devuelve los valores por defecto si no existe o es inválida."""
+    """Carga la configuración de usuario, migrando esquemas viejos.
+
+    Devuelve los valores por defecto si el archivo no existe o es inválido.
+    """
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+                return migrar(json.load(f))
         except (json.JSONDecodeError, IOError):
             pass
-    return DEFAULTS.copy()
+    return _copia_defaults()
 
 
 def guardar_config(cfg: Dict[str, Any]) -> None:
@@ -36,14 +83,73 @@ def guardar_config(cfg: Dict[str, Any]) -> None:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
 
 
+def _copia_defaults() -> Dict[str, Any]:
+    """Copia profunda de los valores por defecto (para no mutar el módulo)."""
+    return json.loads(json.dumps(DEFAULTS))
+
+
+def migrar(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Completa claves faltantes desde DEFAULTS y migra el esquema viejo.
+
+    - Rellena ``config_global``, ``maquinas`` y ``rangos`` si faltan.
+    - Fusiona el dict suelto ``prioridades_maquinas`` (esquema viejo) dentro de
+      cada máquina por nombre.
+    """
+    base = _copia_defaults()
+    base.update(cfg)
+
+    # config_global: completar campos sueltos faltantes
+    cg = dict(DEFAULTS["config_global"])
+    cg.update(cfg.get("config_global", {}))
+    base["config_global"] = cg
+
+    # maquinas: si no vienen, usar las de DEFAULTS
+    if not cfg.get("maquinas"):
+        base["maquinas"] = _copia_defaults()["maquinas"]
+
+    # Migrar prioridades del esquema viejo a las máquinas por nombre
+    prio_viejas = cfg.get("prioridades_maquinas") or {}
+    if prio_viejas:
+        for maq in base["maquinas"]:
+            if maq["nombre"] in prio_viejas:
+                maq["prioridad"] = prio_viejas[maq["nombre"]]
+
+    base.pop("prioridades_maquinas", None)  # clave del esquema viejo, ya migrada
+    return base
+
+
+# ── Getters ──────────────────────────────────────────────────────────────────
+
+def obtener_config_global(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Devuelve los parámetros globales del taller."""
+    cg = dict(DEFAULTS["config_global"])
+    cg.update(cfg.get("config_global", {}))
+    return cg
+
+
+def obtener_maquinas(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Devuelve la lista de máquinas con sus tasas y prioridad.
+
+    Si la clave falta, devuelve una **copia** de los defaults (nunca la
+    referencia compartida del módulo, para no mutar ``DEFAULTS``).
+    """
+    maquinas = cfg.get("maquinas")
+    return maquinas if maquinas is not None else _copia_defaults()["maquinas"]
+
+
 def obtener_rangos(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Devuelve los rangos de diámetros por jaula desde la configuración."""
-    return cfg.get("rangos", DEFAULTS["rangos"])
+    """Devuelve los rangos de diámetros por jaula desde la configuración.
+
+    Si la clave falta, devuelve una **copia** de los defaults (nunca la
+    referencia compartida del módulo, para no mutar ``DEFAULTS``).
+    """
+    rangos = cfg.get("rangos")
+    return rangos if rangos is not None else _copia_defaults()["rangos"]
 
 
 def obtener_prioridades(cfg: Dict[str, Any]) -> Dict[str, str]:
-    """Devuelve las prioridades de rectificado por máquina desde la configuración."""
-    return cfg.get("prioridades_maquinas", {})
+    """Devuelve las prioridades por máquina (derivadas de la lista de máquinas)."""
+    return {m["nombre"]: m.get("prioridad", "produccion") for m in obtener_maquinas(cfg)}
 
 
 def obtener_tiempo_enfriado(cfg: Dict[str, Any]) -> float:
@@ -54,3 +160,159 @@ def obtener_tiempo_enfriado(cfg: Dict[str, Any]) -> float:
 def obtener_max_iteraciones(cfg: Dict[str, Any]) -> int:
     """Devuelve el máximo de iteraciones del bucle de simulación."""
     return int(cfg.get("max_iteraciones", DEFAULTS["max_iteraciones"]))
+
+
+# ── Mutadores (capa única de CRUD usada por el CLI y la GUI) ──────────────────
+
+def set_config_global(cfg: Dict[str, Any], *, diametro_maximo=None, diametro_minimo=None,
+                      tiempo_traslado_crc_min=None, cantidad_jaulas=None) -> Dict[str, Any]:
+    """Actualiza los campos indicados de ``config_global`` (los None se ignoran)."""
+    cg = obtener_config_global(cfg)
+    if diametro_maximo is not None:
+        cg["diametro_maximo"] = float(diametro_maximo)
+    if diametro_minimo is not None:
+        cg["diametro_minimo"] = float(diametro_minimo)
+    if tiempo_traslado_crc_min is not None:
+        cg["tiempo_traslado_crc_min"] = float(tiempo_traslado_crc_min)
+    if cantidad_jaulas is not None:
+        cg["cantidad_jaulas"] = int(cantidad_jaulas)
+    cfg["config_global"] = cg
+    return cfg
+
+
+def _buscar_maquina(cfg: Dict[str, Any], nombre: str) -> Optional[Dict[str, Any]]:
+    for m in cfg.setdefault("maquinas", []):
+        if m["nombre"] == nombre:
+            return m
+    return None
+
+
+def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: float,
+                desb_mm: float, desb_min: float, prioridad: str = "produccion") -> Dict[str, Any]:
+    """Agrega una máquina nueva. Lanza ValueError si el nombre ya existe."""
+    nombre = str(nombre).strip()
+    if not nombre:
+        raise ValueError("El nombre de la máquina no puede estar vacío.")
+    if _buscar_maquina(cfg, nombre):
+        raise ValueError(f"Ya existe una máquina llamada '{nombre}'.")
+    cfg.setdefault("maquinas", []).append({
+        "nombre": nombre,
+        "prioridad": prioridad,
+        "tasas": {
+            "produccion": {"mm": float(prod_mm), "tiempo_min": float(prod_min)},
+            "desbaste": {"mm": float(desb_mm), "tiempo_min": float(desb_min)},
+        },
+    })
+    return cfg
+
+
+def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None,
+                desb_mm=None, desb_min=None, prioridad=None) -> Dict[str, Any]:
+    """Modifica los campos indicados de una máquina existente."""
+    maq = _buscar_maquina(cfg, nombre)
+    if not maq:
+        raise ValueError(f"No existe una máquina llamada '{nombre}'.")
+    tasas = maq.setdefault("tasas", {})
+    prod = tasas.setdefault("produccion", {"mm": 0.0, "tiempo_min": 0.0})
+    desb = tasas.setdefault("desbaste", {"mm": 0.0, "tiempo_min": 0.0})
+    if prod_mm is not None:
+        prod["mm"] = float(prod_mm)
+    if prod_min is not None:
+        prod["tiempo_min"] = float(prod_min)
+    if desb_mm is not None:
+        desb["mm"] = float(desb_mm)
+    if desb_min is not None:
+        desb["tiempo_min"] = float(desb_min)
+    if prioridad is not None:
+        maq["prioridad"] = prioridad
+    return cfg
+
+
+def remove_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:
+    """Elimina una máquina por nombre. Lanza ValueError si no existe."""
+    maqs = cfg.setdefault("maquinas", [])
+    nuevas = [m for m in maqs if m["nombre"] != nombre]
+    if len(nuevas) == len(maqs):
+        raise ValueError(f"No existe una máquina llamada '{nombre}'.")
+    cfg["maquinas"] = nuevas
+    return cfg
+
+
+def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float) -> Dict[str, Any]:
+    """Crea o actualiza el rango de una jaula. Valida ``desde > hasta``."""
+    jaula = int(jaula)
+    desde, hasta = float(desde), float(hasta)
+    if desde <= hasta:
+        raise ValueError(f"Jaula {jaula}: 'desde' ({desde}) debe ser mayor que 'hasta' ({hasta}).")
+    rangos = cfg.setdefault("rangos", [])
+    for r in rangos:
+        if int(r["jaula"]) == jaula:
+            r["desde"], r["hasta"] = desde, hasta
+            return cfg
+    rangos.append({"jaula": jaula, "desde": desde, "hasta": hasta})
+    rangos.sort(key=lambda r: int(r["jaula"]))
+    return cfg
+
+
+def remove_rango(cfg: Dict[str, Any], jaula: int) -> Dict[str, Any]:
+    """Elimina el rango de una jaula por número."""
+    jaula = int(jaula)
+    rangos = cfg.setdefault("rangos", [])
+    nuevos = [r for r in rangos if int(r["jaula"]) != jaula]
+    if len(nuevos) == len(rangos):
+        raise ValueError(f"No existe un rango para la jaula {jaula}.")
+    cfg["rangos"] = nuevos
+    return cfg
+
+
+def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None) -> Dict[str, Any]:
+    """Actualiza los parámetros de simulación indicados."""
+    if tiempo_enfriado is not None:
+        t = round(float(tiempo_enfriado), 1)
+        if t < 0:
+            raise ValueError("El tiempo de enfriado no puede ser negativo.")
+        cfg["tiempo_enfriado_h"] = t
+    if max_iteraciones is not None:
+        n = int(max_iteraciones)
+        if n <= 0:
+            raise ValueError("El máximo de iteraciones debe ser mayor que 0.")
+        cfg["max_iteraciones"] = n
+    return cfg
+
+
+# ── Importación desde Excel de 4 hojas (siembra / migración) ──────────────────
+
+def cfg_desde_excel(ruta_excel: str) -> Dict[str, Any]:
+    """Extrae ``config_global`` y ``maquinas`` de un Excel con las hojas viejas.
+
+    Lee las hojas ``Configuración`` y ``Máquinas`` de un archivo en formato
+    antiguo (4 hojas) y devuelve un dict de configuración listo para guardar.
+    Conserva ``rangos`` y parámetros de simulación por defecto.
+    """
+    import pandas as pd
+
+    xl = pd.ExcelFile(ruta_excel, engine="openpyxl")
+    cfg = _copia_defaults()
+
+    if "Configuración" in xl.sheet_names:
+        df = xl.parse("Configuración")
+        valores = dict(zip(df["Parámetro"], df["Valor"]))
+        cfg["config_global"] = {
+            "diametro_maximo": float(valores.get("Diámetro Máximo (mm)", 575.0)),
+            "diametro_minimo": float(valores.get("Diámetro Mínimo (mm)", 520.0)),
+            "tiempo_traslado_crc_min": float(
+                valores.get("Tiempo Disponible→CRC por pareja (min)", 10.0)),
+            "cantidad_jaulas": int(valores.get("Cantidad de Jaulas", 4)),
+        }
+
+    if "Máquinas" in xl.sheet_names:
+        df = xl.parse("Máquinas")
+        maquinas: Dict[str, Dict[str, Any]] = {}
+        for _, row in df.iterrows():
+            nombre = str(row["Máquina"])
+            tipo = str(row["Tipo_Rectificado"])
+            maq = maquinas.setdefault(nombre, {"nombre": nombre, "prioridad": "produccion", "tasas": {}})
+            maq["tasas"][tipo] = {"mm": float(row["mm_removidos"]), "tiempo_min": float(row["Tiempo_min"])}
+        cfg["maquinas"] = list(maquinas.values())
+
+    return cfg

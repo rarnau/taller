@@ -33,7 +33,7 @@ Para elevar el simulador a un nivel de herramienta de soporte de decisiones (DSS
 
 ### B. Mejoras en la Gestión de Datos
 *   **Base de Datos Centralizada**: Migrar del archivo Excel a una base de Datos (PostgreSQL o SQLite) para mantener un histórico real de todos los cilindros y no solo de una semana.
-*   **Edición Dinámica**: Permitir agregar o quitar máquinas y jaulas directamente desde la interfaz de "Configuración" sin depender de la estructura del archivo Excel.
+*   **Edición Dinámica** *(implementado)*: El Excel ahora solo contiene datos variables (`Stock_Inicial` y `Programa_Cambios`). La configuración del taller (parámetros globales, máquinas y rangos por jaula) es persistente en `config/user_config.json` y se agrega/edita/elimina desde la pestaña "Configuración" de la app o desde el CLI (`python cli.py config ...`), sin depender de la estructura del archivo Excel.
 
 ### C. Visualización Avanzada
 *   **Gemelo Digital (3D)**: Evolucionar la vista 2D actual a una representación 3D simplificada para una mejor comprensión visual por parte de los operadores del taller.

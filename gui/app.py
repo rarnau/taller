@@ -13,14 +13,12 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from config.tema import *
-from config.persistencia import (cargar_config, guardar_config, obtener_rangos,
-                                  obtener_prioridades, obtener_tiempo_enfriado,
-                                  obtener_max_iteraciones)
+from config.persistencia import cargar_config
 from modelos.estrategias import ESTRATEGIAS_SELECCION
 from modelos.taller import TallerCilindros
 
-# Nota: Estos módulos se irán actualizando a CustomTkinter o eliminando si se integran
-# de forma diferente en la nueva GUI.
+# Cada pestaña es un componente de display puro; App es el único que conoce
+# tanto el modelo (TallerCilindros) como la UI y los conecta.
 from gui.tab_consola import crear_consola
 from gui.vista_realtime import VistaRealTime
 from gui.dashboard_principal import crear_dashboard_principal
@@ -50,8 +48,10 @@ class App(ctk.CTk):
         # Inicialización de lógica
         self.taller = TallerCilindros()
         self.user_cfg = cargar_config()
-        self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
-        self._aplicar_parametros_sim()
+        # La configuración estructural (globales + máquinas + rangos + sim) vive
+        # en el JSON y se aplica con un único configurar(); el Excel solo aporta
+        # datos. configurar() debe ir antes de cualquier cargar_datos().
+        self.taller.configurar(self.user_cfg)
         self.archivo_cargado = None
 
         # Estado de reproducción
@@ -131,7 +131,7 @@ class App(ctk.CTk):
         self.tab_cfg = self.tabview.add("Configuración")
         self.tab_log = self.tabview.add("Consola")
 
-        # Pestaña de configuración (rangos por jaula y prioridades de máquinas)
+        # Pestaña de configuración (globales + máquinas + rangos + sim, CRUD completo)
         self.cfg_widget = crear_tab_configuracion(self.tab_cfg, self)
 
         # Dashboard: barra de control con selector de SubStock para la evolución temporal
@@ -167,15 +167,13 @@ class App(ctk.CTk):
             self.log_w.insert("end", m + "\n")
             self.log_w.see("end")
 
-    def _aplicar_parametros_sim(self):
-        """Aplica al taller los parámetros de simulación del JSON (enfriado, máx. iteraciones)."""
-        self.taller.tiempo_enfriado_h = obtener_tiempo_enfriado(self.user_cfg)
-        self.taller.max_iteraciones = obtener_max_iteraciones(self.user_cfg)
-
     def _cargar(self):
         fp = filedialog.askopenfilename(title="Seleccionar Excel de Datos", filetypes=[("Excel", "*.xlsx *.xls")])
         if not fp: return
         try:
+            # configurar() (globales + máquinas + rangos + sim) debe ir antes de
+            # cargar_datos(): el stock necesita la cantidad de jaulas y el mínimo.
+            self.taller.configurar(self.user_cfg)
             self.taller.cargar_datos(fp)
             self.archivo_cargado = fp
             self.status_label.configure(text=f"Cargado: {os.path.basename(fp)}")
@@ -183,8 +181,6 @@ class App(ctk.CTk):
             for aviso in self.taller.avisos_carga:
                 self._log(aviso)
             self.cfg_widget.refrescar()
-            self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
-            self._aplicar_parametros_sim()
             self._sincronizar_vista_con_taller()
             self._refrescar_combo_substocks()
         except Exception as e:
@@ -213,13 +209,10 @@ class App(ctk.CTk):
     def _simular_worker(self, estrat):
         """Corre carga + simulación fuera del hilo de Tk (no toca widgets)."""
         try:
-            # Resetear estado del taller cargando los datos de nuevo
+            # Resetear estado del taller: configurar() (globales + máquinas +
+            # rangos + sim) antes de recargar los datos del Excel.
+            self.taller.configurar(self.user_cfg)
             self.taller.cargar_datos(self.archivo_cargado)
-            self.taller.configurar_substocks(obtener_rangos(self.user_cfg))
-            self._aplicar_parametros_sim()
-            prios = obtener_prioridades(self.user_cfg)
-            if prios:
-                self.taller.aplicar_prioridades_maquinas(prios)
             self.taller.simular(estrategia=estrat, callback_log=self._log_async)
         except Exception as e:
             self.after(0, lambda err=e: self._simular_error(err))

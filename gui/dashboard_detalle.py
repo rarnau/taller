@@ -23,7 +23,10 @@ def crear_dashboard_detalle(t):
     # 1. Mapa de Cilindros (Estado x Diámetro)
     ax1 = fig.add_subplot(gs[0, :])
     _style_ax(ax1, "Mapa de Cilindros: Estado vs Diámetro")
-    ey = {"Trabajando": 6, "CRC": 5, "Disponible": 4, "Enfriando": 3, "A rectificar": 2, "Rectificando": 1, "Baja": 0}
+    # Posición Y por estado, derivada del enum (orden de definición de arriba a
+    # abajo) para no duplicar la lista: el primer estado va arriba, el último abajo.
+    estados = [e.value for e in EstadoCilindro]
+    ey = {nombre: len(estados) - 1 - i for i, nombre in enumerate(estados)}
     for en, yv in ey.items():
         cls = [c for c in t.cilindros.values() if c.estado.value == en]
         if cls:

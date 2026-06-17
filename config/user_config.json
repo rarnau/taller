@@ -1,4 +1,54 @@
 {
+  "config_global": {
+    "diametro_maximo": 575.0,
+    "diametro_minimo": 520.0,
+    "tiempo_traslado_crc_min": 10.0,
+    "cantidad_jaulas": 4
+  },
+  "maquinas": [
+    {
+      "nombre": "G36",
+      "prioridad": "produccion",
+      "tasas": {
+        "produccion": {
+          "mm": 0.8,
+          "tiempo_min": 60.0
+        },
+        "desbaste": {
+          "mm": 5.0,
+          "tiempo_min": 480.0
+        }
+      }
+    },
+    {
+      "nombre": "F36",
+      "prioridad": "produccion",
+      "tasas": {
+        "produccion": {
+          "mm": 0.8,
+          "tiempo_min": 60.0
+        },
+        "desbaste": {
+          "mm": 5.0,
+          "tiempo_min": 480.0
+        }
+      }
+    },
+    {
+      "nombre": "F60",
+      "prioridad": "desbaste",
+      "tasas": {
+        "produccion": {
+          "mm": 0.8,
+          "tiempo_min": 60.0
+        },
+        "desbaste": {
+          "mm": 5.0,
+          "tiempo_min": 480.0
+        }
+      }
+    }
+  ],
   "rangos": [
     {
       "jaula": 1,
@@ -21,9 +71,6 @@
       "hasta": 561.0
     }
   ],
-  "prioridades_maquinas": {
-    "G36": "produccion",
-    "F36": "produccion",
-    "F60": "desbaste"
-  }
+  "tiempo_enfriado_h": 0.0,
+  "max_iteraciones": 10000
 }

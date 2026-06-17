@@ -1,7 +1,7 @@
 """Consola adaptada."""
 import customtkinter as ctk
 from tkinter import scrolledtext
-from config.tema import BG, BG2, BG3, FG, FG2, ACCENT, FONT_MONO, FONT_SIZE, FONT_FAMILY
+from config.tema import FG, FONT_MONO, FONT_SIZE
 
 
 def crear_consola(tab):
