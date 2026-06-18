@@ -4,7 +4,7 @@ from datetime import timedelta
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
-from matplotlib.dates import DateFormatter
+from matplotlib.dates import DateFormatter, date2num
 from matplotlib.patches import Patch
 from config.tema import (BG, BG2, BG3, FG, FG2, ACCENT, GREEN, ORANGE, RED, RED_DARK,
                           PURPLE, COLORES_ESTADO, SS_COLORS, TIPO_RECT_COLORS)
@@ -125,27 +125,30 @@ def crear_dashboard_principal(t, substock=None):
                      ha='center', color=FG, fontsize=8)
     ax3.legend(loc="upper right", fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
 
-    # 4. Gantt de máquinas
+    # 4. Gantt de máquinas. Eje X en fechas (alineado con la evolución temporal y
+    # el buffer). Las paradas por turno se dibujan como una barra sólida más —del
+    # mismo alto y estilo que la producción— pero en rojo oscuro.
     ax4 = fig.add_subplot(gs[1, 1])
     _style_ax(ax4, "Cronograma de Rectificado")
     hay_parada = False
     for i, (m_nombre, m) in enumerate(t.maquinas.items()):
-        # Sombrear primero los turnos cerrados (debajo de las barras de trabajo)
+        # Las paradas (turno cerrado) van debajo por si se solapan con trabajo.
         for ini, fin in _tramos_parada_maquina(m, ti[0], ti[-1]):
-            ax4.broken_barh([((ini - ti[0]).total_seconds() / 3600,
-                              (fin - ini).total_seconds() / 3600)],
-                            (i - 0.4, 0.8), facecolors=RED_DARK, alpha=0.35, zorder=0)
+            ax4.broken_barh([(date2num(ini), date2num(fin) - date2num(ini))],
+                            (i - 0.3, 0.6), facecolors=RED_DARK,
+                            alpha=0.9, edgecolors="white", linewidths=0.2, zorder=1)
             hay_parada = True
         for h in m.historial_trabajo:
-            ax4.broken_barh([((h["inicio"] - ti[0]).total_seconds() / 3600,
-                              (h["fin"] - h["inicio"]).total_seconds() / 3600)],
+            ax4.broken_barh([(date2num(h["inicio"]), date2num(h["fin"]) - date2num(h["inicio"]))],
                             (i - 0.3, 0.6), facecolors=TIPO_RECT_COLORS.get(h["tipo"], "#999"),
                             alpha=0.8, edgecolors="white", linewidths=0.2, zorder=2)
     ax4.set_yticks(range(len(maqs_n)))
     ax4.set_yticklabels(maqs_n, color=FG, fontsize=9)
-    ax4.set_xlabel("Horas desde inicio", color=FG2, fontsize=8)
+    ax4.set_xlim(ti[0], ti[-1])
+    ax4.xaxis_date()
+    ax4.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
     if hay_parada:
-        ax4.legend(handles=[Patch(facecolor=RED_DARK, alpha=0.35, label="Máquina parada (turno)")],
+        ax4.legend(handles=[Patch(facecolor=RED_DARK, label="Máquina parada (turno)")],
                    loc="upper right", fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
 
     return fig
