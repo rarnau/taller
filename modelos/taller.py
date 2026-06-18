@@ -637,6 +637,7 @@ class TallerCilindros:
                 sn.jaulas_paradas.append(j_id)
 
         for m_nombre, maq in self.maquinas.items():
+            sn.detalle_maquinas_operativa[m_nombre] = maq.esta_operativa(tiempo)
             if maq.ocupada and maq.cilindro_actual:
                 c = maq.cilindro_actual
                 progreso = 0.0
