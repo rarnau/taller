@@ -23,6 +23,7 @@ Esquemas viejos (sin ``config_global``/``maquinas`` y con el dict suelto
 """
 import json
 import os
+from collections import Counter
 from typing import Any, Dict, List, Optional
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -283,6 +284,52 @@ def remove_rango(cfg: Dict[str, Any], jaula: int) -> Dict[str, Any]:
         raise ValueError(f"No existe un rango para la jaula {jaula}.")
     cfg["rangos"] = nuevos
     return cfg
+
+
+# ── Coherencia jaulas ⇄ rangos (fuente única usada por CLI y GUI) ─────────────
+
+def problemas_coherencia(cfg: Dict[str, Any]) -> List[str]:
+    """Lista los problemas de coherencia entre ``cantidad_jaulas`` y los rangos.
+
+    Una config coherente tiene **exactamente un rango por jaula**, con números de
+    jaula ``1..cantidad_jaulas`` (sin faltantes, sobrantes ni duplicados). Para
+    cada tipo de desajuste agrega un mensaje legible. Devuelve ``[]`` si todo
+    está en orden. No muta ``cfg``; es la base tanto del aviso no fatal del CLI
+    como del error de guardado en CLI/GUI.
+    """
+    cg = obtener_config_global(cfg)
+    try:
+        n = int(cg.get("cantidad_jaulas", 0))
+    except (TypeError, ValueError):
+        n = 0
+    if n <= 0:
+        return ["La cantidad de jaulas debe ser un entero mayor que 0."]
+
+    jaulas = [int(r["jaula"]) for r in obtener_rangos(cfg)]
+    esperadas = set(range(1, n + 1))
+    presentes = set(jaulas)
+
+    problemas: List[str] = []
+    dups = sorted(j for j, c in Counter(jaulas).items() if c > 1)
+    faltan = sorted(esperadas - presentes)
+    sobran = sorted(presentes - esperadas)
+    if dups:
+        problemas.append(f"Rango(s) de SubStock duplicado(s) para la(s) jaula(s): "
+                         f"{', '.join(map(str, dups))}.")
+    if faltan:
+        problemas.append(f"Falta(n) rango(s) de SubStock para la(s) jaula(s): "
+                         f"{', '.join(map(str, faltan))}.")
+    if sobran:
+        problemas.append(f"Hay rango(s) de SubStock para jaula(s) inexistente(s) "
+                         f"(cantidad_jaulas={n}): {', '.join(map(str, sobran))}.")
+    return problemas
+
+
+def verificar_coherencia(cfg: Dict[str, Any]) -> None:
+    """Lanza ``ValueError`` si ``cfg`` es incoherente (ver ``problemas_coherencia``)."""
+    problemas = problemas_coherencia(cfg)
+    if problemas:
+        raise ValueError(" ".join(problemas))
 
 
 def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None) -> Dict[str, Any]:

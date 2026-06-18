@@ -56,6 +56,7 @@ def construir_taller(cfg: Dict[str, Any], ruta_excel: str) -> TallerCilindros:
     futuro runner de lotes: cada simulación crea su propia instancia
     independiente a partir de un mismo ``cfg``.
     """
+    cfgmod.verificar_coherencia(cfg)  # jaulas ⇄ rangos: aborta antes de simular
     taller = TallerCilindros()
     taller.configurar(cfg)
     taller.cargar_datos(ruta_excel)
@@ -205,6 +206,7 @@ def _cmd_config(args) -> int:
             guardar_config(cfg)
             print("Parámetros globales actualizados.")
             print(json.dumps(cfg["config_global"], ensure_ascii=False, indent=2))
+            _avisar_incoherencias(cfg)
             return 0
 
         if sub == "sim":
@@ -263,6 +265,17 @@ def _cmd_config_maquina(args, cfg) -> int:
     return 2
 
 
+def _avisar_incoherencias(cfg) -> None:
+    """Imprime avisos (no fatales) si jaulas y rangos quedaron desalineados.
+
+    La edición por CLI es incremental (p. ej. subir jaulas y luego agregar el
+    rango nuevo en otro comando), así que un estado intermedio incoherente no
+    debe abortar el guardado; solo se avisa. ``construir_taller`` sí lo trata
+    como error duro antes de simular."""
+    for p in cfgmod.problemas_coherencia(cfg):
+        print(f"Aviso: {p}", file=sys.stderr)
+
+
 def _cmd_config_jaula(args, cfg) -> int:
     accion = args.accion
     if accion == "list":
@@ -273,11 +286,13 @@ def _cmd_config_jaula(args, cfg) -> int:
         cfgmod.set_rango(cfg, args.jaula, args.desde, args.hasta)
         guardar_config(cfg)
         print(f"Rango de la jaula {args.jaula} actualizado.")
+        _avisar_incoherencias(cfg)
         return 0
     if accion == "remove":
         cfgmod.remove_rango(cfg, args.jaula)
         guardar_config(cfg)
         print(f"Rango de la jaula {args.jaula} eliminado.")
+        _avisar_incoherencias(cfg)
         return 0
     return 2
 
