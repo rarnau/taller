@@ -558,12 +558,15 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._label_estado.configure(text=mensaje, text_color=RED if error else GREEN)
         if self._feedback_after is not None:
             self.after_cancel(self._feedback_after)
-        # Los errores quedan más tiempo a la vista que la confirmación de guardado.
-        demora_ms = 12000 if error else 6000
+        # Los errores quedan algo más de tiempo a la vista que la confirmación.
+        demora_ms = 5000 if error else 3000
         self._feedback_after = self.after(demora_ms, self._limpiar_feedback)
 
     def _limpiar_feedback(self):
-        self._feedback_after = None
+        """Borra el mensaje de estado y cancela el timer pendiente (si lo hay)."""
+        if self._feedback_after is not None:
+            self.after_cancel(self._feedback_after)
+            self._feedback_after = None
         if self._label_estado is not None:
             self._label_estado.configure(text="")
 
