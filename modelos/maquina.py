@@ -1,8 +1,9 @@
 """
 Modelo de una máquina rectificadora de cilindros.
 """
+from bisect import bisect_right
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from .enums import EstadoCilindro, TipoRectificado
 from .cilindro import Cilindro
 
@@ -40,6 +41,15 @@ class MaquinaRectificadora:
         self.minutos_trabajo_actual: float = 0.0
         # Flag para no duplicar eventos de despertar (REANUDAR_MAQUINA).
         self._despertar_programado: bool = False
+
+        # Progreso del rectificado en curso. Con turnos se precalculan una sola
+        # vez los hitos (frontera_horaria, minutos_operativos_acumulados) en
+        # iniciar_rectificado y el progreso por snapshot se resuelve por bisect
+        # (O(log h)) en vez de recorrer la grilla cada vez. Con grilla 24/7 los
+        # hitos quedan None y el progreso es reloj directo.
+        self._inicio_rectificado: Optional[datetime] = None
+        self._hitos_t: Optional[List[datetime]] = None
+        self._hitos_min: Optional[List[float]] = None
 
     def configurar_tasa(self, tipo: str, mm_removidos: float, tiempo_minutos: float) -> None:
         """Registra la velocidad de rectificado para un tipo de pase."""
@@ -91,6 +101,43 @@ class MaquinaRectificadora:
             t = tramo_fin
         return total
 
+    def _construir_hitos_progreso(
+        self, inicio: datetime, total_min: float
+    ) -> Tuple[List[datetime], List[float]]:
+        """Tabla de hitos (frontera_horaria, minutos_operativos_acumulados).
+
+        Recorre ``inicio → fin`` hora por hora consumiendo solo las horas
+        operativas, devolviendo dos listas paralelas: las fronteras horarias y
+        los minutos operativos acumulados *hasta* cada frontera. La primera
+        entrada es ``(inicio, 0.0)`` y la última ``(fin, total_min)``, donde
+        ``fin`` es el instante de reloj en que se completan ``total_min`` de
+        tiempo operativo. Cada segmento ``[hitos_t[i], hitos_t[i+1])`` cae
+        íntegro dentro de una hora de grilla, así su operatividad es constante.
+        Es la única fuente del fin operativo (ver ``calcular_fin_operativo``).
+        Solo tiene sentido con ``grilla_operativa is not None`` y ``total_min > 0``.
+        """
+        hitos_t: List[datetime] = [inicio]
+        hitos_min: List[float] = [0.0]
+        restante = total_min
+        acum = 0.0
+        t = inicio
+        limite = inicio + timedelta(days=366)  # cota de seguridad anti-bucle
+        while restante > 0 and t < limite:
+            fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            if self.grilla_operativa[t.weekday()][t.hour]:
+                disp = (fin_hora - t).total_seconds() / 60.0
+                if disp >= restante:
+                    acum += restante
+                    hitos_t.append(t + timedelta(minutes=restante))
+                    hitos_min.append(acum)
+                    return hitos_t, hitos_min
+                acum += disp
+                restante -= disp
+            hitos_t.append(fin_hora)
+            hitos_min.append(acum)
+            t = fin_hora
+        return hitos_t, hitos_min
+
     def calcular_fin_operativo(self, inicio: datetime, minutos_op: float) -> datetime:
         """Instante de reloj en que se completan ``minutos_op`` de tiempo operativo.
 
@@ -102,19 +149,27 @@ class MaquinaRectificadora:
         """
         if self.grilla_operativa is None or minutos_op <= 0:
             return inicio + timedelta(minutes=minutos_op)
+        return self._construir_hitos_progreso(inicio, minutos_op)[0][-1]
 
-        restante = minutos_op
-        t = inicio
-        limite = inicio + timedelta(days=366)  # cota de seguridad anti-bucle
-        while restante > 0 and t < limite:
-            fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-            if self.grilla_operativa[t.weekday()][t.hour]:
-                disp = (fin_hora - t).total_seconds() / 60.0
-                if disp >= restante:
-                    return t + timedelta(minutes=restante)
-                restante -= disp
-            t = fin_hora
-        return t
+    def progreso_operativo(self, tiempo: datetime) -> float:
+        """Minutos operativos consumidos del rectificado en curso hasta ``tiempo``.
+
+        O(1) sin trabajo o con grilla 24/7 (reloj directo); O(log h) con turnos,
+        resolviendo por bisect sobre los hitos precalculados en iniciar_rectificado.
+        """
+        if self._inicio_rectificado is None:
+            return 0.0
+        if self.grilla_operativa is None or self._hitos_t is None:
+            return max(0.0, (tiempo - self._inicio_rectificado).total_seconds() / 60.0)
+
+        idx = bisect_right(self._hitos_t, tiempo) - 1
+        if idx < 0:
+            return 0.0
+        consumido = self._hitos_min[idx]
+        base = self._hitos_t[idx]
+        if tiempo > base and self.grilla_operativa[base.weekday()][base.hour]:
+            consumido += (tiempo - base).total_seconds() / 60.0
+        return min(consumido, self._hitos_min[-1])
 
     def proxima_apertura(self, desde: datetime) -> Optional[datetime]:
         """Próximo instante operativo a partir de ``desde`` (None si nunca lo está)."""
@@ -140,9 +195,19 @@ class MaquinaRectificadora:
         self.ocupada = True
         self.cilindro_actual = cilindro
         self.minutos_trabajo_actual = duracion_minutos
+        self._inicio_rectificado = tiempo_actual
         # El fin contempla los turnos no operativos: si la máquina para en medio
-        # del trabajo, el cilindro retoma donde quedó al reabrir el turno.
-        self.tiempo_fin_rectificado = self.calcular_fin_operativo(tiempo_actual, duracion_minutos)
+        # del trabajo, el cilindro retoma donde quedó al reabrir el turno. Con
+        # turnos se precalculan los hitos una sola vez (fuente única del fin); con
+        # grilla 24/7 el fin es la suma directa y el progreso es reloj directo.
+        if self.grilla_operativa is None or duracion_minutos <= 0:
+            self._hitos_t = None
+            self._hitos_min = None
+            self.tiempo_fin_rectificado = tiempo_actual + timedelta(minutes=duracion_minutos)
+        else:
+            self._hitos_t, self._hitos_min = self._construir_hitos_progreso(
+                tiempo_actual, duracion_minutos)
+            self.tiempo_fin_rectificado = self._hitos_t[-1]
 
         cilindro.estado = EstadoCilindro.RECTIFICANDO
         cilindro.maquina_actual = self.nombre
@@ -193,5 +258,8 @@ class MaquinaRectificadora:
         self.ocupada = False
         self.cilindro_actual = None
         self.tiempo_fin_rectificado = None
+        self._inicio_rectificado = None
+        self._hitos_t = None
+        self._hitos_min = None
 
         return cilindro

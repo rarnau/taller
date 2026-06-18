@@ -643,7 +643,7 @@ class TallerCilindros:
                 # Progreso por tiempo operativo: no avanza durante los turnos en
                 # que la máquina está parada. Con grilla None equivale al reloj.
                 if maq.minutos_trabajo_actual > 0 and c.rectificado_inicio:
-                    consumido = maq.minutos_operativos_entre(c.rectificado_inicio, tiempo)
+                    consumido = maq.progreso_operativo(tiempo)
                     progreso = min(100.0, max(0.0, (consumido / maq.minutos_trabajo_actual) * 100))
                 sn.detalle_maquinas[m_nombre] = {"id": c.id, "d": c.diametro, "progreso": progreso}
             else:

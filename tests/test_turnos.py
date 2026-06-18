@@ -140,6 +140,38 @@ def test_minutos_operativos_entre_excluye_huecos():
     assert m.minutos_operativos_entre(LUN_0600, datetime(2024, 1, 2, 6, 0)) == 480.0
 
 
+def test_progreso_operativo_equivale_a_minutos_operativos_entre():
+    """El cálculo rápido por hitos (bisect) coincide con el walk hora-por-hora.
+
+    Blinda el refactor de rendimiento de generar_snapshot: para un trabajo que
+    cruza un hueco cerrado, ``progreso_operativo(t)`` debe dar lo mismo que
+    ``minutos_operativos_entre(inicio, t)`` en cualquier ``t`` de ``[inicio, fin]``.
+    """
+    from datetime import timedelta
+
+    from modelos.cilindro import Cilindro
+    from modelos.enums import TipoRectificado
+
+    m = _maquina_un_turno()
+    m.configurar_tasa("produccion", 1.0, 1.0)  # 1 mm/min -> 600 min = 10 h operativas
+    cil = Cilindro("CIL-1", 560.0, 575.0)
+    # 600 min operativos cruzando el cierre del lunes (06→14) hacia el martes.
+    m.iniciar_rectificado(cil, LUN_0600, TipoRectificado.PRODUCCION, 600.0)
+    fin = m.tiempo_fin_rectificado
+    assert fin == datetime(2024, 1, 2, 8, 0)  # 8 h el lunes + 2 h el martes
+
+    # Muestreo denso en [inicio, fin]: fronteras de hora, instantes intermedios,
+    # dentro del hueco cerrado (lunes tarde/noche) y el extremo final.
+    t = LUN_0600
+    while t <= fin:
+        esperado = m.minutos_operativos_entre(LUN_0600, t)
+        assert abs(m.progreso_operativo(t) - esperado) < 1e-6, t
+        t += timedelta(minutes=37)
+    # Extremos exactos: inicio (0) y fin (= total operativo).
+    assert m.progreso_operativo(LUN_0600) == 0.0
+    assert abs(m.progreso_operativo(fin) - 600.0) < 1e-6
+
+
 # ── Integración: el esquema cambia el resultado sin romper el motor ───────────
 
 def _fingerprint_minimo(taller: TallerCilindros):
