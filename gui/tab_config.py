@@ -14,7 +14,7 @@ from config.tema import (
 )
 from config.persistencia import (
     guardar_config, obtener_rangos, obtener_maquinas, obtener_config_global,
-    obtener_tiempo_enfriado, obtener_max_iteraciones,
+    obtener_tiempo_enfriado, obtener_max_iteraciones, verificar_coherencia,
 )
 from modelos.enums import TipoRectificado
 from modelos import turnos as turnos_mod
@@ -465,9 +465,12 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
     def _guardar(self):
         try:
             config_global = self._recoger_globales()
-            rangos = self._recoger_rangos(esperado=config_global["cantidad_jaulas"])
+            rangos = self._recoger_rangos()
             maquinas = self._recoger_maquinas()
             tiempo_enfriado, max_iter = self._recoger_parametros()
+            # Coherencia jaulas ⇄ rangos: validar el candidato ANTES de persistir
+            # (misma verificación que usa el CLI), para no guardar un estado roto.
+            verificar_coherencia({"config_global": config_global, "rangos": rangos})
         except ValueError as exc:
             self._feedback(str(exc), error=True)
             return
@@ -526,13 +529,12 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
         return tiempo_enfriado, max_iter
 
-    def _recoger_rangos(self, esperado=None):
+    def _recoger_rangos(self):
         """Lee los rangos de SubStock (uno por jaula, numeradas 1..N).
 
-        El número de jaula viene de la fila (no es editable). ``esperado``, si se
-        pasa, es la «Cantidad de jaulas» declarada en globales: se exige que
-        coincida con la cantidad de filas, de modo que no queden jaulas sin banda
-        ni bandas para jaulas inexistentes.
+        El número de jaula viene de la fila (no es editable). La coherencia con
+        «Cantidad de jaulas» la valida ``verificar_coherencia`` en ``_guardar``
+        (la misma verificación compartida con el CLI).
         """
         rangos = []
         # Tuple: (jaula, e_min, e_max, fila)
@@ -556,11 +558,6 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
         if not rangos:
             raise ValueError("Debe definir al menos un rango de jaula.")
-        if esperado is not None and len(rangos) != esperado:
-            raise ValueError(
-                f"Hay {len(rangos)} rango(s) de SubStock pero «Cantidad de jaulas» es "
-                f"{esperado}. Deben coincidir (un rango por jaula)."
-            )
         return rangos
 
     def _recoger_maquinas(self):
