@@ -73,13 +73,13 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._filas_maquinas = []    # [(e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo_prio, turnos_holder, frame_fila)]
         self._cont_rangos = None
         self._cont_maquinas = None
-        # Entries de parámetros globales
+        # Entries de parámetros globales (incluye el tiempo de enfriado)
         self._e_diam_max = None
         self._e_diam_min = None
         self._e_crc = None
         self._e_jaulas = None
-        # Entries de parámetros de simulación
         self._entry_enfriado = None
+        # Entries de parámetros de simulación
         self._entry_max_iter = None
         self._label_estado = None
         self._feedback_after = None   # id del timer que borra el feedback transitorio
@@ -111,7 +111,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         cuerpo_g = _card(
             col_izq,
             "Parámetros Globales del Taller",
-            "Rango de diámetro útil, traslado al CRC y cantidad de jaulas.",
+            "Rango de diámetro útil, traslado al CRC, cantidad de jaulas y tiempo de enfriado.",
         )
         self._e_diam_max = _fila_param(cuerpo_g, "Diámetro máximo (mm)")
         self._e_diam_min = _fila_param(cuerpo_g, "Diámetro mínimo (mm)", "bajo este, el cilindro es BAJA")
@@ -122,6 +122,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         # tecla, para no destruir filas mientras se escribe un número de 2 dígitos.
         self._e_jaulas.bind("<FocusOut>", self._on_cambio_cantidad_jaulas)
         self._e_jaulas.bind("<Return>", self._on_cambio_cantidad_jaulas)
+        self._entry_enfriado = _fila_param(cuerpo_g, "Tiempo de enfriado (h)", "0 = sin enfriado")
 
         # Sección 2: Rangos de SubStock por jaula (columna izquierda)
         cuerpo_r = _card(
@@ -181,9 +182,8 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         cuerpo_p = _card(
             col_der,
             "Parámetros de Simulación",
-            "Tiempo de enfriado tras retirar un cilindro y tope de iteraciones del motor.",
+            "Tope de iteraciones del motor de simulación.",
         )
-        self._entry_enfriado = _fila_param(cuerpo_p, "Tiempo de enfriado (h)", "0 = sin enfriado")
         self._entry_max_iter = _fila_param(cuerpo_p, "Máximo de iteraciones")
 
         # Footer: guardar + estado
