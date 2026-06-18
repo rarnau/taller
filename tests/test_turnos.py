@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.persistencia import cargar_config
 from modelos import turnos as T
+from modelos.kpis import calcular_kpis
 from modelos.maquina import MaquinaRectificadora
 from modelos.taller import TallerCilindros
 
@@ -181,3 +182,41 @@ def test_default_no_define_turnos():
     t = TallerCilindros()
     t.configurar(cfg)
     assert all(maq.grilla_operativa is None for maq in t.maquinas.values())
+
+
+# ── KPIs de utilización disponible vs neta ────────────────────────────────────
+
+def _simular_con_turnos(turnos):
+    """Corre la simulación de referencia; ``turnos=None`` deja las máquinas 24/7."""
+    excel = os.path.join(_DIR_DATOS, "simulacion_140cils_1semana.xlsx")
+    cfg = cargar_config()
+    if turnos is not None:
+        for m in cfg["maquinas"]:
+            m["turnos"] = turnos
+    t = TallerCilindros()
+    t.configurar(cfg)
+    t.cargar_datos(excel)
+    t.simular(estrategia="mayor_diametro", callback_log=None)
+    return t
+
+
+def test_kpis_neta_igual_disponible_en_24x7():
+    """En 24/7, utilización neta y disponible coinciden por máquina."""
+    k = calcular_kpis(_simular_con_turnos(None))
+    disp, neta = k["utilizacion_maquinas_pct"], k["utilizacion_neta_pct"]
+    assert set(disp) == set(neta) and disp
+    for m in disp:
+        assert abs(disp[m] - neta[m]) < 1e-6
+
+
+def test_kpis_neta_mayor_que_disponible_con_turno_restringido():
+    """Con turnos cerrados, la neta supera a la disponible en las máquinas que trabajan."""
+    turnos = {d: ([True, False, False] if i < 5 else [False, False, False])
+              for i, d in enumerate(T.DIAS)}
+    k = calcular_kpis(_simular_con_turnos(turnos))
+    disp, neta = k["utilizacion_maquinas_pct"], k["utilizacion_neta_pct"]
+    for m in disp:
+        assert 0.0 <= neta[m] <= 100.0
+        assert neta[m] >= disp[m] - 1e-6      # operativo ≤ calendario ⇒ neta ≥ disponible
+    # Al menos una máquina trabajó y muestra la diferencia (operativo < calendario).
+    assert any(neta[m] > disp[m] + 1e-6 for m in disp)

@@ -120,10 +120,11 @@ def _formatear_resumen(kpis: Dict[str, Any]) -> str:
         f"  Horizonte simulación   : {kpis['horizonte_simulacion_h']:.1f} h",
         f"  Diámetro promedio      : {kpis['diametro_promedio_mm']:.1f} mm",
         f"  Desgaste medio         : {kpis['desgaste_medio_mm']:.2f} mm",
-        "  Utilización de máquinas:",
+        "  Utilización de máquinas (disponible / neta):",
     ]
     for nombre, pct in kpis["utilizacion_maquinas_pct"].items():
-        lineas.append(f"    - {nombre:<18}: {pct:.0f}%")
+        neta = kpis["utilizacion_neta_pct"].get(nombre, 0.0)
+        lineas.append(f"    - {nombre:<18}: {pct:.0f}% / {neta:.0f}%")
     lineas.append("═" * 48)
     return "\n".join(lineas)
 
