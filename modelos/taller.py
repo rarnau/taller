@@ -879,7 +879,7 @@ class TallerCilindros:
         # respecto al ev.tiempo original si hubo una PARADA).
         t_proc = ev_sim.tiempo
         retraso_str = (f" [orig {ev.tiempo.strftime('%H:%M')}, retr "
-                       f"{int((t_proc - ev.tiempo).total_seconds() / 60)} min]"
+                       f"{_fmt_duracion((t_proc - ev.tiempo).total_seconds() / 60)}]"
                        if t_proc != ev.tiempo else "")
         log(f"  {t_proc.strftime('%m-%d %H:%M')} | Jaula {ev.jaula} | Cambio a {ev.tipo.value}"
             f" | CRC={len(jaula.cilindros_crc)}{retraso_str}")
