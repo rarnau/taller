@@ -150,8 +150,11 @@ def crear_dashboard_principal(t, substock=None):
     ax4.set_xlim(ti[0], ti[-1])
     ax4.xaxis_date()
     ax4.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
+    handles = [Patch(facecolor=TIPO_RECT_COLORS.get("produccion", "#999"), label="Producción"),
+               Patch(facecolor=TIPO_RECT_COLORS.get("desbaste", "#999"), label="Desbaste")]
     if hay_parada:
-        ax4.legend(handles=[Patch(facecolor=RED_DARK, label="Máquina parada (turno)")],
-                   loc="upper right", fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
+        handles.append(Patch(facecolor=RED_DARK, label="Máquina parada (turno)"))
+    ax4.legend(handles=handles, loc="upper right", fontsize=7,
+               facecolor="#333", edgecolor="#333", labelcolor=FG)
 
     return fig
