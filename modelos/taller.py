@@ -544,8 +544,8 @@ class TallerCilindros:
 
         self.alertas.append(Alerta(
             tiempo, "INFO",
-            f"LÍNEA REANUDADA tras {dur:.0f} min; programa de cambios desplazado {dur:.0f} min "
-            f"({n_dif} cambio(s) diferido(s) reprogramado(s))"
+            f"LÍNEA REANUDADA tras {_fmt_duracion(dur)}; programa de cambios desplazado "
+            f"{_fmt_duracion(dur)} ({n_dif} cambio(s) diferido(s) reprogramado(s))"
         ))
         log(f"  >>> LÍNEA REANUDADA tras {_fmt_duracion(dur)} | programa desplazado {_fmt_duracion(dur)} "
             f"| {n_dif} cambio(s) diferido(s) <<<")
