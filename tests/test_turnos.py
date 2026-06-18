@@ -232,23 +232,34 @@ def _simular_con_turnos(turnos):
     return t
 
 
-def test_kpis_neta_igual_disponible_en_24x7():
-    """En 24/7, utilización neta y disponible coinciden por máquina."""
+def test_kpis_disponible_total_en_24x7():
+    """En 24/7 la disponibilidad es 100% (operativo == calendario) por máquina."""
     k = calcular_kpis(_simular_con_turnos(None))
     disp, neta = k["utilizacion_maquinas_pct"], k["utilizacion_neta_pct"]
     assert set(disp) == set(neta) and disp
     for m in disp:
-        assert abs(disp[m] - neta[m]) < 1e-6
+        assert abs(disp[m] - 100.0) < 1e-6     # disponible = calendario/calendario
+        assert 0.0 <= neta[m] <= 100.0
 
 
-def test_kpis_neta_menor_o_igual_que_disponible_con_turno_restringido():
-    """Con turnos cerrados, la neta queda por debajo de la disponible (su tope)."""
+def test_kpis_descomposicion_con_turno_restringido():
+    """Con turnos cerrados: disponible = operativo/calendario < 100; neta = ocupada/operativo.
+
+    Verifica la descomposición tipo OEE: disponible × neta == utilización global
+    (ocupada/calendario).
+    """
     turnos = {d: ([True, False, False] if i < 5 else [False, False, False])
               for i, d in enumerate(T.DIAS)}
-    k = calcular_kpis(_simular_con_turnos(turnos))
+    t = _simular_con_turnos(turnos)
+    k = calcular_kpis(t)
     disp, neta = k["utilizacion_maquinas_pct"], k["utilizacion_neta_pct"]
-    for m in disp:
-        assert 0.0 <= neta[m] <= 100.0
-        assert neta[m] <= disp[m] + 1e-6      # operativo ≤ calendario ⇒ neta ≤ disponible
-    # Al menos una máquina trabajó y muestra la diferencia (operativo < calendario).
-    assert any(neta[m] < disp[m] - 1e-6 for m in disp)
+    cal_min = (t.snapshots[-1].tiempo - t.snapshots[0].tiempo).total_seconds() / 60
+    for nombre, mq in t.maquinas.items():
+        assert 0.0 <= disp[nombre] <= 100.0
+        assert 0.0 <= neta[nombre] <= 100.0
+        op = mq.minutos_operativos_entre(t.snapshots[0].tiempo, t.snapshots[-1].tiempo)
+        assert abs(disp[nombre] - op / cal_min * 100) < 1e-6          # disponible = operativo/calendario
+        global_util = mq.tiempo_total_ocupada_min / cal_min * 100      # ocupada/calendario
+        assert abs(disp[nombre] / 100 * neta[nombre] - global_util) < 1e-6
+    # Con turnos cerrados la disponibilidad es estrictamente < 100 en todas.
+    assert all(disp[m] < 100.0 - 1e-6 for m in disp)

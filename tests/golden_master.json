@@ -11,9 +11,9 @@
       "diametro_promedio_mm": 543.3625,
       "desgaste_medio_mm": 0.8,
       "utilizacion_maquinas_pct": {
-        "G36": 62.8272,
-        "F36": 62.8272,
-        "F60": 0.0
+        "G36": 100.0,
+        "F36": 100.0,
+        "F60": 100.0
       }
     },
     "n_snapshots": 12,
@@ -134,9 +134,9 @@
       "diametro_promedio_mm": 543.3625,
       "desgaste_medio_mm": 0.8,
       "utilizacion_maquinas_pct": {
-        "G36": 62.8272,
-        "F36": 62.8272,
-        "F60": 0.0
+        "G36": 100.0,
+        "F36": 100.0,
+        "F60": 100.0
       }
     },
     "n_snapshots": 12,
@@ -257,9 +257,9 @@
       "diametro_promedio_mm": 543.3625,
       "desgaste_medio_mm": 0.8,
       "utilizacion_maquinas_pct": {
-        "G36": 10.4257,
-        "F36": 10.4257,
-        "F60": 0.0
+        "G36": 100.0,
+        "F36": 100.0,
+        "F60": 100.0
       }
     },
     "n_snapshots": 16,
@@ -380,9 +380,9 @@
       "diametro_promedio_mm": 545.0997,
       "desgaste_medio_mm": 3.5811,
       "utilizacion_maquinas_pct": {
-        "G36": 99.7118,
-        "F36": 97.9827,
-        "F60": 96.83
+        "G36": 100.0,
+        "F36": 100.0,
+        "F60": 100.0
       }
     },
     "n_snapshots": 282,
@@ -1104,9 +1104,9 @@
       "diametro_promedio_mm": 545.0997,
       "desgaste_medio_mm": 3.5811,
       "utilizacion_maquinas_pct": {
-        "G36": 99.7118,
-        "F36": 97.9827,
-        "F60": 96.83
+        "G36": 100.0,
+        "F36": 100.0,
+        "F60": 100.0
       }
     },
     "n_snapshots": 282,
