@@ -497,9 +497,9 @@ class TallerCilindros:
                 jaula.parada_desde = None
                 self.alertas.append(Alerta(
                     tiempo, "INFO",
-                    f"Jaula {jaula_id} reactivada tras {dur:.0f} min de parada", jaula_id
+                    f"Jaula {jaula_id} reactivada tras {_fmt_duracion(dur)} de parada", jaula_id
                 ))
-                log(f"  >>> JAULA {jaula_id} REACTIVADA tras {dur:.0f} min de parada <<<")
+                log(f"  >>> JAULA {jaula_id} REACTIVADA tras {_fmt_duracion(dur)} de parada <<<")
                 reactivo = True
 
         # ¿Se reanuda la línea? Solo si ya no queda ninguna jaula parada.
