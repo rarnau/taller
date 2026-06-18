@@ -7,7 +7,8 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.dates import DateFormatter
 from matplotlib.patches import Patch
 from config.tema import (BG, BG2, BG3, FG, FG2, ACCENT, GREEN, ORANGE, RED, RED_DARK,
-                          COLORES_ESTADO, SS_COLORS, TIPO_RECT_COLORS)
+                          PURPLE, COLORES_ESTADO, SS_COLORS, TIPO_RECT_COLORS)
+from modelos.kpis import calcular_kpis
 
 
 def _tramos_parada_maquina(m, t0, t1):
@@ -99,17 +100,30 @@ def crear_dashboard_principal(t, substock=None):
     ax2.legend(fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
     ax2.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
 
-    # 3. Utilización de Máquinas (Bar chart)
+    # 3. Utilización de Máquinas (Bar chart): disponible vs neta por máquina.
+    # Los porcentajes salen de calcular_kpis (fuente única consumida también por
+    # la pestaña KPIs y el CLI), para que coincidan exactamente.
     ax3 = fig.add_subplot(gs[1, 0])
-    _style_ax(ax3, "Utilización de Máquinas — Disponible (%)")
-    th = (ti[-1] - ti[0]).total_seconds() / 3600 if len(ti) > 1 else 1
+    _style_ax(ax3, "Utilización de Máquinas — Disponible vs Neta (%)")
+    kpis = calcular_kpis(t)
+    disp_d = kpis["utilizacion_maquinas_pct"]
+    neta_d = kpis["utilizacion_neta_pct"]
     maqs_n = list(t.maquinas.keys())
-    utils = [(m.tiempo_total_ocupada_min / 60) / th * 100 for m in t.maquinas.values()]
-    bars = ax3.bar(maqs_n, utils, color=ACCENT, alpha=0.8)
+    x = np.arange(len(maqs_n))
+    ancho = 0.38
+    disp = [disp_d.get(m, 0.0) for m in maqs_n]
+    neta = [neta_d.get(m, 0.0) for m in maqs_n]
+    barras_disp = ax3.bar(x - ancho / 2, disp, ancho, color=ACCENT, alpha=0.85, label="Disponible")
+    barras_neta = ax3.bar(x + ancho / 2, neta, ancho, color=PURPLE, alpha=0.85, label="Neta")
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(maqs_n)
     ax3.set_ylim(0, 100)
-    for bar in bars:
-        height = bar.get_height()
-        ax3.text(bar.get_x() + bar.get_width()/2., height + 1, f'{height:.0f}%', ha='center', color=FG, fontsize=9)
+    for barras in (barras_disp, barras_neta):
+        for bar in barras:
+            height = bar.get_height()
+            ax3.text(bar.get_x() + bar.get_width() / 2., height + 1, f'{height:.0f}%',
+                     ha='center', color=FG, fontsize=8)
+    ax3.legend(loc="upper right", fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
 
     # 4. Gantt de máquinas
     ax4 = fig.add_subplot(gs[1, 1])
