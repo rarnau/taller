@@ -33,10 +33,19 @@ def calcular_kpis(taller) -> Dict[str, Any]:
     ]
     desgaste_medio = float(np.mean(desgastes)) if desgastes else 0.0
 
+    # Dos utilizaciones por máquina (coinciden en 24/7):
+    #   - disponible: tiempo ocupada / tiempo calendario total
+    #   - neta: tiempo ocupada / tiempo operativo (calendario menos turnos cerrados)
+    t0 = taller.snapshots[0].tiempo if taller.snapshots else None
+    t1 = taller.snapshots[-1].tiempo if taller.snapshots else None
     utilizacion_maquinas: Dict[str, float] = {}
+    utilizacion_neta: Dict[str, float] = {}
     for nombre, mq in taller.maquinas.items():
-        pct = (mq.tiempo_total_ocupada_min / 60) / horizonte_h * 100 if horizonte_h else 0.0
-        utilizacion_maquinas[nombre] = pct
+        disp = (mq.tiempo_total_ocupada_min / 60) / horizonte_h * 100 if horizonte_h else 0.0
+        op_min = mq.minutos_operativos_entre(t0, t1) if t0 is not None else 0.0
+        neta = (mq.tiempo_total_ocupada_min / op_min * 100) if op_min > 0 else 0.0
+        utilizacion_maquinas[nombre] = disp
+        utilizacion_neta[nombre] = neta
 
     return {
         "cilindros_totales": total,
@@ -49,4 +58,5 @@ def calcular_kpis(taller) -> Dict[str, Any]:
         "diametro_promedio_mm": diam_prom,
         "desgaste_medio_mm": desgaste_medio,
         "utilizacion_maquinas_pct": utilizacion_maquinas,
+        "utilizacion_neta_pct": utilizacion_neta,
     }

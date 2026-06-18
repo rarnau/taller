@@ -17,6 +17,7 @@ from config.persistencia import (
     obtener_tiempo_enfriado, obtener_max_iteraciones,
 )
 from modelos.enums import TipoRectificado
+from modelos import turnos as turnos_mod
 
 _TIPOS_RECT = [t.value for t in TipoRectificado]
 
@@ -69,7 +70,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         super().__init__(parent, fg_color="transparent")
         self.app = app
         self._filas_rangos = []      # [(e_jaula, e_min, e_max, frame_fila)]
-        self._filas_maquinas = []    # [(e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo_prio, frame_fila)]
+        self._filas_maquinas = []    # [(e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo_prio, turnos_holder, frame_fila)]
         self._cont_rangos = None
         self._cont_maquinas = None
         # Entries de parámetros globales
@@ -146,13 +147,14 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         cuerpo_m = _card(
             col_der,
             "Máquinas Rectificadoras",
-            "Tasas por tipo (mm removidos y minutos) y prioridad de rectificado.",
+            "Tasas por tipo (mm removidos y minutos), prioridad y esquema de turnos.",
         )
 
         cab_m = ctk.CTkFrame(cuerpo_m, fg_color="transparent")
         cab_m.pack(fill="x", pady=(0, 6))
         for txt, w in [("Nombre", 84), ("Prod mm", 58), ("Prod min", 58),
-                       ("Desb mm", 58), ("Desb min", 58), ("Prioridad", 110), ("", 36)]:
+                       ("Desb mm", 58), ("Desb min", 58), ("Prioridad", 110),
+                       ("Turnos", 96), ("", 36)]:
             ctk.CTkLabel(
                 cab_m, text=txt, width=w, anchor="w",
                 font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold"),
@@ -262,7 +264,8 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
     # ── Filas de máquinas ────────────────────────────────────────────────
 
     def _agregar_fila_maquina(self, nombre="", prod_mm="", prod_min="",
-                              desb_mm="", desb_min="", prioridad=_TIPOS_RECT[0]):
+                              desb_mm="", desb_min="", prioridad=_TIPOS_RECT[0],
+                              turnos=None):
         fila = ctk.CTkFrame(self._cont_maquinas, fg_color="transparent")
         fila.pack(fill="x", pady=3)
 
@@ -282,7 +285,18 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         combo.set(prioridad if prioridad in _TIPOS_RECT else _TIPOS_RECT[0])
         combo.pack(side="left", padx=2)
 
-        registro = (e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo, fila)
+        # Estado mutable del esquema de turnos de la fila (None = 24/7).
+        turnos_holder = [turnos]
+        btn_turnos = ctk.CTkButton(
+            fila, text=turnos_mod.resumen(turnos), width=96,
+            fg_color="transparent", border_width=1, border_color=ACCENT,
+            text_color=ACCENT, hover_color=BG_CARD,
+        )
+        btn_turnos.pack(side="left", padx=2)
+        btn_turnos.configure(
+            command=lambda: self._abrir_editor_turnos(turnos_holder, btn_turnos))
+
+        registro = (e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo, turnos_holder, fila)
 
         ctk.CTkButton(
             fila, text="🗑", width=36, fg_color="transparent",
@@ -293,8 +307,75 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._filas_maquinas.append(registro)
 
     def _quitar_fila_maquina(self, registro):
-        registro[6].destroy()
+        registro[-1].destroy()
         self._filas_maquinas.remove(registro)
+
+    def _abrir_editor_turnos(self, turnos_holder, btn_turnos):
+        """Abre un popup con la grilla 7 días × 3 turnos y presets."""
+        win = ctk.CTkToplevel(self)
+        win.title("Esquema de turnos")
+        win.configure(fg_color=BG_CARD)
+        win.transient(self.winfo_toplevel())
+        win.grab_set()
+
+        t_actual = turnos_mod.normalizar(turnos_holder[0])
+        # vars[dia][turno] = BooleanVar
+        variables = {d: [ctk.BooleanVar(value=t_actual[d][i]) for i in range(turnos_mod.NUM_TURNOS)]
+                     for d in turnos_mod.DIAS}
+
+        ctk.CTkLabel(
+            win, text="Marque los turnos operativos por día (T3 22–06 cubre la madrugada siguiente).",
+            text_color=FG2, font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE),
+        ).grid(row=0, column=0, columnspan=4, padx=16, pady=(14, 8), sticky="w")
+
+        for c, etiqueta in enumerate(turnos_mod.TURNO_LABELS):
+            ctk.CTkLabel(
+                win, text=etiqueta, text_color=FG2,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold"),
+            ).grid(row=1, column=c + 1, padx=8, pady=2)
+
+        for r, dia in enumerate(turnos_mod.DIAS):
+            ctk.CTkLabel(
+                win, text=turnos_mod.DIAS_NOMBRES[r], width=90, anchor="w", text_color=FG,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
+            ).grid(row=r + 2, column=0, padx=(16, 8), pady=2, sticky="w")
+            for c in range(turnos_mod.NUM_TURNOS):
+                ctk.CTkCheckBox(win, text="", variable=variables[dia][c], width=24).grid(
+                    row=r + 2, column=c + 1, padx=8, pady=2)
+
+        def _aplicar_preset(clave):
+            preset = turnos_mod.PRESETS[clave]
+            for d in turnos_mod.DIAS:
+                for i in range(turnos_mod.NUM_TURNOS):
+                    variables[d][i].set(preset[d][i])
+
+        presets_fila = ctk.CTkFrame(win, fg_color="transparent")
+        presets_fila.grid(row=9, column=0, columnspan=4, padx=16, pady=(10, 4), sticky="w")
+        for clave in ("24x7", "off", "lv3"):
+            ctk.CTkButton(
+                presets_fila, text=turnos_mod.PRESET_LABELS[clave], width=110, height=28,
+                fg_color="transparent", border_width=1, border_color=ACCENT,
+                text_color=ACCENT, hover_color=BG_CARD,
+                command=lambda k=clave: _aplicar_preset(k),
+            ).pack(side="left", padx=4)
+
+        def _aceptar():
+            nuevo = {d: [variables[d][i].get() for i in range(turnos_mod.NUM_TURNOS)]
+                     for d in turnos_mod.DIAS}
+            # 24/7 se guarda como None para mantener limpia la configuración.
+            turnos_holder[0] = None if turnos_mod.es_completo(nuevo) else nuevo
+            btn_turnos.configure(text=turnos_mod.resumen(turnos_holder[0]))
+            win.destroy()
+
+        acciones = ctk.CTkFrame(win, fg_color="transparent")
+        acciones.grid(row=10, column=0, columnspan=4, padx=16, pady=(8, 16), sticky="e")
+        ctk.CTkButton(acciones, text="Cancelar", width=100, height=30,
+                      fg_color="transparent", border_width=1, border_color=FG2,
+                      text_color=FG2, hover_color=BG_CARD,
+                      command=win.destroy).pack(side="left", padx=4)
+        ctk.CTkButton(acciones, text="Aceptar", width=100, height=30,
+                      fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER,
+                      command=_aceptar).pack(side="left", padx=4)
 
     # ── Refresco desde la configuración actual ───────────────────────────
 
@@ -336,6 +417,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
                 prod.get("mm", ""), prod.get("tiempo_min", ""),
                 desb.get("mm", ""), desb.get("tiempo_min", ""),
                 m.get("prioridad", _TIPOS_RECT[0]),
+                m.get("turnos"),
             )
 
         # Parámetros de simulación
@@ -440,7 +522,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
     def _recoger_maquinas(self):
         maquinas = []
         nombres = set()
-        for e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo, _ in self._filas_maquinas:
+        for e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo, turnos_holder, _ in self._filas_maquinas:
             nombre = e_nom.get().strip()
             campos = [e_pmm.get().strip(), e_pmin.get().strip(), e_dmm.get().strip(), e_dmin.get().strip()]
             if not nombre and not any(campos):
@@ -454,14 +536,18 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
                 pmm, pmin, dmm, dmin = (float(c) for c in campos)
             except ValueError:
                 raise ValueError(f"Tasas inválidas en la máquina '{nombre}' (deben ser números).")
-            maquinas.append({
+            maq = {
                 "nombre": nombre,
                 "prioridad": combo.get(),
                 "tasas": {
                     "produccion": {"mm": pmm, "tiempo_min": pmin},
                     "desbaste": {"mm": dmm, "tiempo_min": dmin},
                 },
-            })
+            }
+            # Turnos solo se persisten si no es 24/7 (None), para no ensuciar el JSON.
+            if turnos_holder[0] is not None:
+                maq["turnos"] = turnos_holder[0]
+            maquinas.append(maq)
         if not maquinas:
             raise ValueError("Debe definir al menos una máquina.")
         return maquinas

@@ -32,8 +32,18 @@ from modelos.enums import TipoRectificado
 from modelos.kpis import calcular_kpis
 from modelos.estrategias import ESTRATEGIAS_SELECCION
 from modelos.taller import TallerCilindros
+from modelos import turnos as turnos_mod
 
 _TIPOS_RECT = [t.value for t in TipoRectificado]
+
+
+def _resolver_turnos(args) -> Optional[Dict[str, Any]]:
+    """Obtiene el esquema de turnos desde --turnos-preset o --turnos (o None)."""
+    if getattr(args, "turnos_preset", None):
+        return {k: list(v) for k, v in turnos_mod.PRESETS[args.turnos_preset].items()}
+    if getattr(args, "turnos", None):
+        return turnos_mod.parse_compacto(args.turnos)
+    return None
 
 
 # ── Núcleo reutilizable (sin argparse) ───────────────────────────────────────
@@ -110,10 +120,11 @@ def _formatear_resumen(kpis: Dict[str, Any]) -> str:
         f"  Horizonte simulación   : {kpis['horizonte_simulacion_h']:.1f} h",
         f"  Diámetro promedio      : {kpis['diametro_promedio_mm']:.1f} mm",
         f"  Desgaste medio         : {kpis['desgaste_medio_mm']:.2f} mm",
-        "  Utilización de máquinas:",
+        "  Utilización de máquinas (disponible / neta):",
     ]
     for nombre, pct in kpis["utilizacion_maquinas_pct"].items():
-        lineas.append(f"    - {nombre:<18}: {pct:.0f}%")
+        neta = kpis["utilizacion_neta_pct"].get(nombre, 0.0)
+        lineas.append(f"    - {nombre:<18}: {pct:.0f}% / {neta:.0f}%")
     lineas.append("═" * 48)
     return "\n".join(lineas)
 
@@ -226,18 +237,21 @@ def _cmd_config_maquina(args, cfg) -> int:
             prod, desb = t.get("produccion", {}), t.get("desbaste", {})
             print(f"  {m['nombre']:<10} prioridad={m.get('prioridad','-'):<11} "
                   f"prod={prod.get('mm','?')}mm/{prod.get('tiempo_min','?')}min  "
-                  f"desb={desb.get('mm','?')}mm/{desb.get('tiempo_min','?')}min")
+                  f"desb={desb.get('mm','?')}mm/{desb.get('tiempo_min','?')}min  "
+                  f"turnos={turnos_mod.resumen(m.get('turnos'))}")
         return 0
     if accion == "add":
         cfgmod.add_maquina(cfg, args.nombre, prod_mm=args.prod_mm, prod_min=args.prod_min,
                            desb_mm=args.desb_mm, desb_min=args.desb_min,
-                           prioridad=args.prioridad or "produccion")
+                           prioridad=args.prioridad or "produccion",
+                           turnos=_resolver_turnos(args))
         guardar_config(cfg)
         print(f"Máquina '{args.nombre}' agregada.")
         return 0
     if accion == "set":
         cfgmod.set_maquina(cfg, args.nombre, prod_mm=args.prod_mm, prod_min=args.prod_min,
-                           desb_mm=args.desb_mm, desb_min=args.desb_min, prioridad=args.prioridad)
+                           desb_mm=args.desb_mm, desb_min=args.desb_min, prioridad=args.prioridad,
+                           turnos=_resolver_turnos(args))
         guardar_config(cfg)
         print(f"Máquina '{args.nombre}' actualizada.")
         return 0
@@ -329,6 +343,10 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_maq.add_argument("--desb-mm", type=float)
     p_maq.add_argument("--desb-min", type=float)
     p_maq.add_argument("--prioridad", choices=_TIPOS_RECT)
+    p_maq.add_argument("--turnos", metavar="COMPACTO",
+                       help="Esquema de trabajo: 7 grupos lun..dom de 3 bits T1T2T3, "
+                            "p. ej. '111 111 111 111 111 110 000'.")
+    p_maq.add_argument("--turnos-preset", choices=list(turnos_mod.PRESETS))
 
     p_jau = csub.add_parser("jaula", help="Gestiona rangos por jaula (list/set/remove).")
     p_jau.add_argument("accion", choices=["list", "set", "remove"])
@@ -349,6 +367,8 @@ def main(argv: Optional[list] = None) -> int:
             parser.error(f"'config maquina {args.accion}' requiere --nombre")
         if args.accion == "add" and any(v is None for v in (args.prod_mm, args.prod_min, args.desb_mm, args.desb_min)):
             parser.error("'config maquina add' requiere --prod-mm --prod-min --desb-mm --desb-min")
+        if args.turnos and args.turnos_preset:
+            parser.error("Use --turnos o --turnos-preset, no ambos")
     if args.comando == "config" and args.subcomando == "jaula":
         if args.accion in ("set", "remove") and args.jaula is None:
             parser.error(f"'config jaula {args.accion}' requiere --jaula")

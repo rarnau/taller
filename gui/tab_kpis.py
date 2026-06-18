@@ -34,8 +34,11 @@ def llenar_kpis(tab, taller):
         ("Desgaste Medio", f"{k['desgaste_medio_mm']:.2f} mm", "#F97316")
     ]
 
+    neta = k["utilizacion_neta_pct"]
     for mn, pct in k["utilizacion_maquinas_pct"].items():
-        kpis.append((f"Utilización {mn}", f"{pct:.0f}%", GREEN if pct < 85 else ORANGE))
+        kpis.append((f"Util. disponible {mn}", f"{pct:.0f}%", GREEN if pct < 85 else ORANGE))
+        pn = neta.get(mn, 0.0)
+        kpis.append((f"Util. neta {mn}", f"{pn:.0f}%", GREEN if pn < 85 else ORANGE))
 
     cols = 3
     for i, (lbl, val, co) in enumerate(kpis):
