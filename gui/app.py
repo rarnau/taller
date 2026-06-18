@@ -204,6 +204,10 @@ class App(ctk.CTk):
         # tanto). Los logs y la actualización de la UI se marshalan al hilo de
         # Tk con self.after(); el taller solo se lee desde la UI una vez que el
         # hilo termina (en _simular_finalizado).
+        # Al simular, el aviso "Configuración guardada..." ya no aplica: borrarlo.
+        if getattr(self, "cfg_widget", None) is not None:
+            self.cfg_widget._limpiar_feedback()
+
         self._simulando = True
         self.btn_simular.configure(state="disabled")
         self.status_label.configure(text="Simulando...")

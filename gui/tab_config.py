@@ -82,6 +82,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._entry_enfriado = None
         self._entry_max_iter = None
         self._label_estado = None
+        self._feedback_after = None   # id del timer que borra el feedback transitorio
 
         self._construir()
         self.refrescar()
@@ -553,7 +554,21 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         return maquinas
 
     def _feedback(self, mensaje, error):
+        """Muestra un mensaje de estado transitorio que se borra solo a los segundos."""
         self._label_estado.configure(text=mensaje, text_color=RED if error else GREEN)
+        if self._feedback_after is not None:
+            self.after_cancel(self._feedback_after)
+        # Los errores quedan algo más de tiempo a la vista que la confirmación.
+        demora_ms = 5000 if error else 3000
+        self._feedback_after = self.after(demora_ms, self._limpiar_feedback)
+
+    def _limpiar_feedback(self):
+        """Borra el mensaje de estado y cancela el timer pendiente (si lo hay)."""
+        if self._feedback_after is not None:
+            self.after_cancel(self._feedback_after)
+            self._feedback_after = None
+        if self._label_estado is not None:
+            self._label_estado.configure(text="")
 
 
 def crear_tab_configuracion(tab, app):
