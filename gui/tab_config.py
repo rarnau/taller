@@ -117,6 +117,11 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._e_diam_min = _fila_param(cuerpo_g, "Diámetro mínimo (mm)", "bajo este, el cilindro es BAJA")
         self._e_crc = _fila_param(cuerpo_g, "Traslado Disponible→CRC (min)")
         self._e_jaulas = _fila_param(cuerpo_g, "Cantidad de jaulas")
+        # Cambiar la cantidad de jaulas crea/elimina filas de SubStock al vuelo.
+        # Se sincroniza al confirmar (Enter) o al salir del campo, no en cada
+        # tecla, para no destruir filas mientras se escribe un número de 2 dígitos.
+        self._e_jaulas.bind("<FocusOut>", self._on_cambio_cantidad_jaulas)
+        self._e_jaulas.bind("<Return>", self._on_cambio_cantidad_jaulas)
 
         # Sección 2: Rangos de SubStock por jaula (columna izquierda)
         cuerpo_r = _card(
@@ -127,7 +132,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
         cab = ctk.CTkFrame(cuerpo_r, fg_color="transparent")
         cab.pack(fill="x", pady=(0, 6))
-        for txt, w in [("Jaula", 70), ("Desde (mín, mm)", 140), ("Hasta (máx, mm)", 140), ("", 40)]:
+        for txt, w in [("Jaula", 70), ("Desde (mín, mm)", 140), ("Hasta (máx, mm)", 140)]:
             ctk.CTkLabel(
                 cab, text=txt, width=w, anchor="w",
                 font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold"),
@@ -137,11 +142,11 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._cont_rangos = ctk.CTkFrame(cuerpo_r, fg_color="transparent")
         self._cont_rangos.pack(fill="x")
 
-        ctk.CTkButton(
-            cuerpo_r, text="+ Agregar jaula", width=140, height=30,
-            fg_color="transparent", border_width=1, border_color=ACCENT,
-            text_color=ACCENT, hover_color=BG_CARD,
-            command=self._agregar_fila_rango,
+        ctk.CTkLabel(
+            cuerpo_r,
+            text="Las jaulas se crean/eliminan al cambiar «Cantidad de jaulas».",
+            anchor="w", text_color=FG2,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE),
         ).pack(anchor="w", pady=(10, 0))
 
         # Sección 3: Máquinas (CRUD completo, columna derecha)
@@ -226,41 +231,60 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
     # ── Filas de rangos ──────────────────────────────────────────────────
 
-    def _agregar_fila_rango(self, jaula="", minimo="", maximo=""):
-        """Crea fila: Jaula | Desde (mín) | Hasta (máx).
+    def _crear_fila_rango(self, jaula, minimo="", maximo=""):
+        """Crea una fila de SubStock para una jaula fija: Jaula | Desde | Hasta.
 
-        ``minimo`` es el límite inferior (interno: ``hasta``),
-        ``maximo`` es el límite superior (interno: ``desde``).
+        El número de jaula **no es editable** (es una etiqueta): las filas se
+        crean/eliminan al cambiar «Cantidad de jaulas». Solo se editan los
+        límites. ``minimo`` es el límite inferior (interno: ``hasta``),
+        ``maximo`` el superior (interno: ``desde``).
         """
         fila = ctk.CTkFrame(self._cont_rangos, fg_color="transparent")
         fila.pack(fill="x", pady=3)
 
-        e_jaula = ctk.CTkEntry(fila, width=70, justify="center")
-        e_jaula.insert(0, str(jaula))
-        e_jaula.pack(side="left", padx=4)
+        ctk.CTkLabel(
+            fila, text=str(jaula), width=70, anchor="center", text_color=FG,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
+        ).pack(side="left", padx=4)
 
         e_min = ctk.CTkEntry(fila, width=140, justify="center")
-        e_min.insert(0, str(minimo))
+        if minimo != "":
+            e_min.insert(0, str(minimo))
         e_min.pack(side="left", padx=4)
 
         e_max = ctk.CTkEntry(fila, width=140, justify="center")
-        e_max.insert(0, str(maximo))
+        if maximo != "":
+            e_max.insert(0, str(maximo))
         e_max.pack(side="left", padx=4)
 
-        # e_min = hasta (lower bound), e_max = desde (upper bound) internamente
-        registro = (e_jaula, e_min, e_max, fila)
+        # Registro: (jaula:int, e_min=hasta interno, e_max=desde interno, fila)
+        self._filas_rangos.append((int(jaula), e_min, e_max, fila))
 
-        ctk.CTkButton(
-            fila, text="🗑", width=40, fg_color="transparent",
-            text_color=RED, hover_color=BG_CARD,
-            command=lambda: self._quitar_fila_rango(registro),
-        ).pack(side="left", padx=4)
+    def _on_cambio_cantidad_jaulas(self, event=None):
+        """Sincroniza las filas de SubStock cuando cambia «Cantidad de jaulas»."""
+        txt = self._e_jaulas.get().strip()
+        try:
+            n = int(float(txt))
+        except ValueError:
+            return  # texto inválido: se valida al guardar, no tocamos las filas
+        if n > 0:
+            self._sincronizar_filas_rango(n)
 
-        self._filas_rangos.append(registro)
+    def _sincronizar_filas_rango(self, n):
+        """Ajusta la cantidad de filas de SubStock a ``n`` jaulas (numeradas 1..n).
 
-    def _quitar_fila_rango(self, registro):
-        registro[3].destroy()
-        self._filas_rangos.remove(registro)
+        Conserva los valores ya cargados; agrega filas vacías para las jaulas
+        nuevas y elimina las sobrantes desde el final.
+        """
+        n = max(0, int(n))
+        actual = len(self._filas_rangos)
+        if n < actual:
+            for _jaula, _e_min, _e_max, fila in self._filas_rangos[n:]:
+                fila.destroy()
+            del self._filas_rangos[n:]
+        else:
+            for jaula in range(actual + 1, n + 1):
+                self._crear_fila_rango(jaula)
 
     # ── Filas de máquinas ────────────────────────────────────────────────
 
@@ -398,12 +422,21 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             except (KeyError, ValueError):
                 entry.insert(0, str(cg.get(clave, "")))
 
-        # Rangos
+        # Rangos: una fila por jaula (1..N), con el número no editable y la
+        # cantidad ligada a «Cantidad de jaulas». Se conservan los límites
+        # guardados; las jaulas sin rango quedan con los campos vacíos.
         for *_, fila in self._filas_rangos:
             fila.destroy()
         self._filas_rangos.clear()
-        for r in obtener_rangos(cfg):
-            self._agregar_fila_rango(r.get("jaula", ""), r.get("hasta", ""), r.get("desde", ""))
+        rangos_cfg = {int(r["jaula"]): r for r in obtener_rangos(cfg)}
+        try:
+            n = int(cg.get("cantidad_jaulas", len(rangos_cfg)))
+        except (TypeError, ValueError):
+            n = len(rangos_cfg)
+        n = max(n, 1)
+        for jaula in range(1, n + 1):
+            r = rangos_cfg.get(jaula, {})
+            self._crear_fila_rango(jaula, r.get("hasta", ""), r.get("desde", ""))
 
         # Máquinas
         for *_, fila in self._filas_maquinas:
@@ -432,7 +465,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
     def _guardar(self):
         try:
             config_global = self._recoger_globales()
-            rangos = self._recoger_rangos()
+            rangos = self._recoger_rangos(esperado=config_global["cantidad_jaulas"])
             maquinas = self._recoger_maquinas()
             tiempo_enfriado, max_iter = self._recoger_parametros()
         except ValueError as exc:
@@ -493,23 +526,28 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
         return tiempo_enfriado, max_iter
 
-    def _recoger_rangos(self):
+    def _recoger_rangos(self, esperado=None):
+        """Lee los rangos de SubStock (uno por jaula, numeradas 1..N).
+
+        El número de jaula viene de la fila (no es editable). ``esperado``, si se
+        pasa, es la «Cantidad de jaulas» declarada en globales: se exige que
+        coincida con la cantidad de filas, de modo que no queden jaulas sin banda
+        ni bandas para jaulas inexistentes.
+        """
         rangos = []
-        # Tuple: (e_jaula, e_min, e_max, fila)
+        # Tuple: (jaula, e_min, e_max, fila)
         # e_min = "Desde (mín)" en UI = hasta interno (lower bound)
         # e_max = "Hasta (máx)" en UI = desde interno (upper bound)
-        for e_jaula, e_min, e_max, _ in self._filas_rangos:
-            j_txt = e_jaula.get().strip()
+        for jaula, e_min, e_max, _ in self._filas_rangos:
             min_txt = e_min.get().strip()
             max_txt = e_max.get().strip()
-            if not (j_txt or min_txt or max_txt):
-                continue
             try:
-                jaula = int(float(j_txt))
                 hasta = float(min_txt)
                 desde = float(max_txt)
             except ValueError:
-                raise ValueError(f"Valores inválidos en la jaula '{j_txt or '?'}'.")
+                raise ValueError(
+                    f"Jaula {jaula}: defina valores numéricos en 'Desde (mín)' y 'Hasta (máx)'."
+                )
             if desde <= hasta:
                 raise ValueError(
                     f"Jaula {jaula}: 'Hasta (máx)' ({desde}) debe ser mayor que 'Desde (mín)' ({hasta})."
@@ -518,6 +556,11 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
         if not rangos:
             raise ValueError("Debe definir al menos un rango de jaula.")
+        if esperado is not None and len(rangos) != esperado:
+            raise ValueError(
+                f"Hay {len(rangos)} rango(s) de SubStock pero «Cantidad de jaulas» es "
+                f"{esperado}. Deben coincidir (un rango por jaula)."
+            )
         return rangos
 
     def _recoger_maquinas(self):
