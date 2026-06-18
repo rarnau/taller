@@ -33,6 +33,24 @@ _HOJA_STOCK = "Stock_Inicial"
 _HOJA_CAMBIOS = "Programa_Cambios"
 
 
+def _fmt_duracion(minutos: float) -> str:
+    """Formatea una duración (en minutos) de forma legible para los logs.
+
+    - hasta 60 min  → ``"N min"``
+    - hasta 24 h    → ``"N h M min"`` (omite los minutos si son 0)
+    - más de 24 h   → ``"N d M h"`` (días y horas)
+    """
+    m = int(round(minutos))
+    if m <= 60:
+        return f"{m} min"
+    if m <= 1440:
+        h, mm = divmod(m, 60)
+        return f"{h} h {mm} min" if mm else f"{h} h"
+    d, resto = divmod(m, 1440)
+    h = resto // 60
+    return f"{d} d {h} h" if h else f"{d} d"
+
+
 class _EventoSim(NamedTuple):
     """Evento interno tipado para la cola de simulación."""
     tipo: str       # "CAMBIO" | "FIN_RECT" | "REPONER_CRC" | "FIN_ENFRIADO"
@@ -526,10 +544,10 @@ class TallerCilindros:
 
         self.alertas.append(Alerta(
             tiempo, "INFO",
-            f"LÍNEA REANUDADA tras {dur:.0f} min; programa de cambios desplazado {dur:.0f} min "
-            f"({n_dif} cambio(s) diferido(s) reprogramado(s))"
+            f"LÍNEA REANUDADA tras {_fmt_duracion(dur)}; programa de cambios desplazado "
+            f"{_fmt_duracion(dur)} ({n_dif} cambio(s) diferido(s) reprogramado(s))"
         ))
-        log(f"  >>> LÍNEA REANUDADA tras {dur:.0f} min | programa desplazado {dur:.0f} min "
+        log(f"  >>> LÍNEA REANUDADA tras {_fmt_duracion(dur)} | programa desplazado {_fmt_duracion(dur)} "
             f"| {n_dif} cambio(s) diferido(s) <<<")
 
     # ── Consultas de estado ─────────────────────────────────────────────────
@@ -637,6 +655,7 @@ class TallerCilindros:
                 sn.jaulas_paradas.append(j_id)
 
         for m_nombre, maq in self.maquinas.items():
+            sn.detalle_maquinas_operativa[m_nombre] = maq.esta_operativa(tiempo)
             if maq.ocupada and maq.cilindro_actual:
                 c = maq.cilindro_actual
                 progreso = 0.0
@@ -860,7 +879,7 @@ class TallerCilindros:
         # respecto al ev.tiempo original si hubo una PARADA).
         t_proc = ev_sim.tiempo
         retraso_str = (f" [orig {ev.tiempo.strftime('%H:%M')}, retr "
-                       f"{int((t_proc - ev.tiempo).total_seconds() / 60)} min]"
+                       f"{_fmt_duracion((t_proc - ev.tiempo).total_seconds() / 60)}]"
                        if t_proc != ev.tiempo else "")
         log(f"  {t_proc.strftime('%m-%d %H:%M')} | Jaula {ev.jaula} | Cambio a {ev.tipo.value}"
             f" | CRC={len(jaula.cilindros_crc)}{retraso_str}")

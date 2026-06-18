@@ -220,7 +220,7 @@ class VistaRealTime(ctk.CTkScrollableFrame):
     def _crear_maquina_widget(self, nombre: str) -> None:
         columna = len(self.maq_widgets)
         self.maqs_container.grid_columnconfigure(columna, weight=1, uniform="maq")
-        f = ctk.CTkFrame(self.maqs_container, height=90)
+        f = ctk.CTkFrame(self.maqs_container, height=90, border_width=2, border_color=BG3)
         f.grid(row=0, column=columna, padx=6, pady=6, sticky="ew")
         f.grid_propagate(False)
 
@@ -236,7 +236,7 @@ class VistaRealTime(ctk.CTkScrollableFrame):
 
         lbl = ctk.CTkLabel(content, text="Libre")
         lbl.pack(expand=True)
-        self.maq_widgets[nombre] = {"frame": content, "prog": prog, "label": lbl}
+        self.maq_widgets[nombre] = {"outer": f, "frame": content, "prog": prog, "label": lbl}
 
     def _ordenar_cola(self, lista: list) -> list:
         """Ordena la cola según el sentido de toma (el próximo a tomar queda primero)."""
@@ -283,17 +283,30 @@ class VistaRealTime(ctk.CTkScrollableFrame):
             cg.pack(side="left", padx=5)
             self.enfriando_widgets[c["id"]] = cg
 
-        # Máquinas
+        # Máquinas: tres estados visuales —
+        #   rectificando (ocupada), libre y operativa (resaltada en verde) y
+        #   fuera de turno por régimen de trabajo (parada, en rojo oscuro).
+        operativas = getattr(snapshot, "detalle_maquinas_operativa", {})
         for m_nombre, data in snapshot.detalle_maquinas.items():
             if m_nombre not in self.maq_widgets:
                 self._crear_maquina_widget(m_nombre)
 
             w = self.maq_widgets[m_nombre]
+            operativa = operativas.get(m_nombre, True)
             if data:
                 w["prog"].set(data["progreso"] / 100.0)
-                w["label"].configure(text=f"{data['id']}\n{data['d']:.1f} mm")
+                w["label"].configure(text=f"{data['id']}\n{data['d']:.1f} mm", text_color=FG)
                 w["prog"].configure(progress_color=COLORES_ESTADO["Rectificando"])
-            else:
+                w["outer"].configure(border_color=COLORES_ESTADO["Rectificando"])
+            elif operativa:
+                # Libre y dentro de turno: disponible para tomar trabajo.
                 w["prog"].set(0)
-                w["label"].configure(text="Libre")
+                w["label"].configure(text="● Libre\n(operativa)", text_color=GREEN)
                 w["prog"].configure(progress_color="gray")
+                w["outer"].configure(border_color=GREEN)
+            else:
+                # Libre pero fuera de turno: parada por régimen de trabajo.
+                w["prog"].set(0)
+                w["label"].configure(text="⏸ Fuera de turno", text_color=RED)
+                w["prog"].configure(progress_color=RED_DARK)
+                w["outer"].configure(border_color=RED_DARK)

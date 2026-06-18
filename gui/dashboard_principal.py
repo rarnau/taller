@@ -4,10 +4,11 @@ from datetime import timedelta
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
-from matplotlib.dates import DateFormatter
+from matplotlib.dates import DateFormatter, date2num
 from matplotlib.patches import Patch
 from config.tema import (BG, BG2, BG3, FG, FG2, ACCENT, GREEN, ORANGE, RED, RED_DARK,
-                          COLORES_ESTADO, SS_COLORS, TIPO_RECT_COLORS)
+                          PURPLE, COLORES_ESTADO, SS_COLORS, TIPO_RECT_COLORS)
+from modelos.kpis import calcular_kpis
 
 
 def _tramos_parada_maquina(m, t0, t1):
@@ -99,39 +100,61 @@ def crear_dashboard_principal(t, substock=None):
     ax2.legend(fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
     ax2.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
 
-    # 3. Utilización de Máquinas (Bar chart)
+    # 3. Utilización de Máquinas (Bar chart): disponible vs neta por máquina.
+    # Los porcentajes salen de calcular_kpis (fuente única consumida también por
+    # la pestaña KPIs y el CLI), para que coincidan exactamente.
     ax3 = fig.add_subplot(gs[1, 0])
-    _style_ax(ax3, "Utilización de Máquinas — Disponible (%)")
-    th = (ti[-1] - ti[0]).total_seconds() / 3600 if len(ti) > 1 else 1
+    _style_ax(ax3, "Utilización de Máquinas — Disponible vs Neta (%)")
+    kpis = calcular_kpis(t)
+    disp_d = kpis["utilizacion_maquinas_pct"]
+    neta_d = kpis["utilizacion_neta_pct"]
     maqs_n = list(t.maquinas.keys())
-    utils = [(m.tiempo_total_ocupada_min / 60) / th * 100 for m in t.maquinas.values()]
-    bars = ax3.bar(maqs_n, utils, color=ACCENT, alpha=0.8)
+    x = np.arange(len(maqs_n))
+    ancho = 0.38
+    disp = [disp_d.get(m, 0.0) for m in maqs_n]
+    neta = [neta_d.get(m, 0.0) for m in maqs_n]
+    barras_disp = ax3.bar(x - ancho / 2, disp, ancho, color=ACCENT, alpha=0.85, label="Disponible")
+    barras_neta = ax3.bar(x + ancho / 2, neta, ancho, color=PURPLE, alpha=0.85, label="Neta")
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(maqs_n)
     ax3.set_ylim(0, 100)
-    for bar in bars:
-        height = bar.get_height()
-        ax3.text(bar.get_x() + bar.get_width()/2., height + 1, f'{height:.0f}%', ha='center', color=FG, fontsize=9)
+    for barras in (barras_disp, barras_neta):
+        for bar in barras:
+            height = bar.get_height()
+            ax3.text(bar.get_x() + bar.get_width() / 2., height + 1, f'{height:.0f}%',
+                     ha='center', color=FG, fontsize=8)
+    ax3.legend(loc="upper right", fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
 
-    # 4. Gantt de máquinas
+    # 4. Gantt de máquinas. Eje X en fechas (alineado con la evolución temporal y
+    # el buffer). Las paradas por turno se dibujan como una barra sólida más —del
+    # mismo alto y estilo que la producción— pero en rojo oscuro.
     ax4 = fig.add_subplot(gs[1, 1])
     _style_ax(ax4, "Cronograma de Rectificado")
     hay_parada = False
     for i, (m_nombre, m) in enumerate(t.maquinas.items()):
-        # Sombrear primero los turnos cerrados (debajo de las barras de trabajo)
-        for ini, fin in _tramos_parada_maquina(m, ti[0], ti[-1]):
-            ax4.broken_barh([((ini - ti[0]).total_seconds() / 3600,
-                              (fin - ini).total_seconds() / 3600)],
-                            (i - 0.4, 0.8), facecolors=RED_DARK, alpha=0.35, zorder=0)
-            hay_parada = True
+        # La producción va debajo; las paradas se dibujan ENCIMA y opacas para que
+        # "corten" una barra de trabajo a medio hacer (cuyo fin absorbe el hueco
+        # del turno), mostrando la parada en el medio igual que en una máquina
+        # totalmente parada.
         for h in m.historial_trabajo:
-            ax4.broken_barh([((h["inicio"] - ti[0]).total_seconds() / 3600,
-                              (h["fin"] - h["inicio"]).total_seconds() / 3600)],
+            ax4.broken_barh([(date2num(h["inicio"]), date2num(h["fin"]) - date2num(h["inicio"]))],
                             (i - 0.3, 0.6), facecolors=TIPO_RECT_COLORS.get(h["tipo"], "#999"),
-                            alpha=0.8, edgecolors="white", linewidths=0.2, zorder=2)
+                            alpha=0.8, edgecolors="white", linewidths=0.2, zorder=1)
+        for ini, fin in _tramos_parada_maquina(m, ti[0], ti[-1]):
+            ax4.broken_barh([(date2num(ini), date2num(fin) - date2num(ini))],
+                            (i - 0.3, 0.6), facecolors=RED_DARK,
+                            alpha=1.0, edgecolors="white", linewidths=0.2, zorder=2)
+            hay_parada = True
     ax4.set_yticks(range(len(maqs_n)))
     ax4.set_yticklabels(maqs_n, color=FG, fontsize=9)
-    ax4.set_xlabel("Horas desde inicio", color=FG2, fontsize=8)
+    ax4.set_xlim(ti[0], ti[-1])
+    ax4.xaxis_date()
+    ax4.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
+    handles = [Patch(facecolor=TIPO_RECT_COLORS.get("produccion", "#999"), label="Producción"),
+               Patch(facecolor=TIPO_RECT_COLORS.get("desbaste", "#999"), label="Desbaste")]
     if hay_parada:
-        ax4.legend(handles=[Patch(facecolor=RED_DARK, alpha=0.35, label="Máquina parada (turno)")],
-                   loc="upper right", fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
+        handles.append(Patch(facecolor=RED_DARK, label="Máquina parada (turno)"))
+    ax4.legend(handles=handles, loc="upper right", fontsize=7,
+               facecolor="#333", edgecolor="#333", labelcolor=FG)
 
     return fig

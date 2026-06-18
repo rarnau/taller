@@ -33,16 +33,20 @@ def calcular_kpis(taller) -> Dict[str, Any]:
     ]
     desgaste_medio = float(np.mean(desgastes)) if desgastes else 0.0
 
-    # Dos utilizaciones por máquina (coinciden en 24/7):
-    #   - disponible: tiempo ocupada / tiempo calendario total
-    #   - neta: tiempo ocupada / tiempo operativo (calendario menos turnos cerrados)
+    # Descomposición de la utilización por máquina (tipo OEE; disponible × neta =
+    # utilización global = ocupada / calendario):
+    #   - disponible: factor de disponibilidad = tiempo operativo / calendario, donde
+    #     operativo = calendario − paradas programadas (turnos cerrados). En 24/7 = 100%.
+    #   - neta: utilización del tiempo disponible = ocupada / operativo, donde
+    #     ocupada = operativo − máquina libre − fallas (las fallas aún no se modelan ⇒ 0).
+    calendario_min = horizonte_h * 60
     t0 = taller.snapshots[0].tiempo if taller.snapshots else None
     t1 = taller.snapshots[-1].tiempo if taller.snapshots else None
     utilizacion_maquinas: Dict[str, float] = {}
     utilizacion_neta: Dict[str, float] = {}
     for nombre, mq in taller.maquinas.items():
-        disp = (mq.tiempo_total_ocupada_min / 60) / horizonte_h * 100 if horizonte_h else 0.0
         op_min = mq.minutos_operativos_entre(t0, t1) if t0 is not None else 0.0
+        disp = (op_min / calendario_min * 100) if calendario_min > 0 else 0.0
         neta = (mq.tiempo_total_ocupada_min / op_min * 100) if op_min > 0 else 0.0
         utilizacion_maquinas[nombre] = disp
         utilizacion_neta[nombre] = neta
