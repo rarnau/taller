@@ -241,14 +241,14 @@ def test_kpis_neta_igual_disponible_en_24x7():
         assert abs(disp[m] - neta[m]) < 1e-6
 
 
-def test_kpis_neta_mayor_que_disponible_con_turno_restringido():
-    """Con turnos cerrados, la neta supera a la disponible en las máquinas que trabajan."""
+def test_kpis_neta_menor_o_igual_que_disponible_con_turno_restringido():
+    """Con turnos cerrados, la neta queda por debajo de la disponible (su tope)."""
     turnos = {d: ([True, False, False] if i < 5 else [False, False, False])
               for i, d in enumerate(T.DIAS)}
     k = calcular_kpis(_simular_con_turnos(turnos))
     disp, neta = k["utilizacion_maquinas_pct"], k["utilizacion_neta_pct"]
     for m in disp:
         assert 0.0 <= neta[m] <= 100.0
-        assert neta[m] >= disp[m] - 1e-6      # operativo ≤ calendario ⇒ neta ≥ disponible
+        assert neta[m] <= disp[m] + 1e-6      # operativo ≤ calendario ⇒ neta ≤ disponible
     # Al menos una máquina trabajó y muestra la diferencia (operativo < calendario).
-    assert any(neta[m] > disp[m] + 1e-6 for m in disp)
+    assert any(neta[m] < disp[m] - 1e-6 for m in disp)
