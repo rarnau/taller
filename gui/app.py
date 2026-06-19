@@ -81,7 +81,7 @@ class App(ctk.CTk):
         self.btn_cargar = ctk.CTkButton(self.sidebar, text="Cargar Excel", command=self._cargar)
         self.btn_cargar.grid(row=1, column=0, padx=20, pady=10)
 
-        self.label_estrat = ctk.CTkLabel(self.sidebar, text="Estrategia:", anchor="w")
+        self.label_estrat = ctk.CTkLabel(self.sidebar, text="Estrategia de rectificado:", anchor="w")
         self.label_estrat.grid(row=2, column=0, padx=20, pady=(10, 0))
         # El combo muestra etiquetas legibles; se mapean a la clave de estrategia
         # que espera el motor. Ambas se derivan del registro ESTRATEGIAS_SELECCION.
