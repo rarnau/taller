@@ -5,6 +5,10 @@ import customtkinter as ctk
 from config.tema import *
 
 
+# Alto (px) del área de cada barra del gráfico de stock disponible por jaula.
+_ALTO_BARRA = 90
+
+
 # Texto descriptivo del sentido de toma de la cola según la estrategia.
 _SENTIDO_TOMA = {
     "mayor_diametro": "Sentido de toma:  mayor diámetro primero  →",
@@ -105,6 +109,13 @@ class VistaRealTime(ctk.CTkScrollableFrame):
         self.cola_widgets: dict = {}
         self.enfriando_widgets: dict = {}
 
+        # Gráfico de barras de stock Disponible por jaula. _mapa_substocks mapea
+        # jaula -> nombre de su SubStock (clave de Snapshot.disponibles_por_substock);
+        # _escala_disp es el máximo (sobre todo el run) para normalizar la altura.
+        self.barras_disp: dict = {}   # {jaula: {"col","area","bar","lbl_val"}}
+        self._mapa_substocks: dict = {}
+        self._escala_disp: int = 0
+
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -128,6 +139,15 @@ class VistaRealTime(ctk.CTkScrollableFrame):
         self.main_container = ctk.CTkFrame(self.col_jaulas, fg_color="transparent")
         self.main_container.pack(fill="both", expand=True)
         self._crear_filas_jaulas(self.cantidad_jaulas)
+
+        # ── Gráfico de barras: stock Disponible por jaula ─────────────────
+        ctk.CTkLabel(self.col_jaulas, text="STOCK DISPONIBLE POR JAULA",
+                     font=ctk.CTkFont(size=16, weight="bold"),
+                     text_color=COLORES_ESTADO["Disponible"]).pack(pady=(14, 4))
+
+        self.disp_container = ctk.CTkFrame(self.col_jaulas, fg_color="transparent")
+        self.disp_container.pack(fill="x", pady=(0, 10))
+        self._crear_barras_disponibilidad(self.cantidad_jaulas)
 
         # ── Columna derecha: rectificadoras + cola + enfriado ─────────────
         self.col_maqs = ctk.CTkFrame(self.columnas, fg_color="transparent")
@@ -185,6 +205,37 @@ class VistaRealTime(ctk.CTkScrollableFrame):
             cf.pack(side="left", padx=6, pady=6)
             self.crc_frames[i] = cf
 
+    def _crear_barras_disponibilidad(self, n: int) -> None:
+        """Crea N barras verticales (una por jaula) para el stock Disponible."""
+        for w in self.disp_container.winfo_children():
+            w.destroy()
+        self.barras_disp.clear()
+        for i in range(1, n + 1):
+            col = ctk.CTkFrame(self.disp_container, fg_color="transparent")
+            col.pack(side="left", expand=True, padx=6)
+
+            lbl_val = ctk.CTkLabel(col, text="0", font=ctk.CTkFont(size=13, weight="bold"),
+                                   text_color=FG)
+            lbl_val.pack()
+
+            # Área de alto fijo con fondo tenue; la barra crece desde abajo.
+            area = ctk.CTkFrame(col, height=_ALTO_BARRA, width=44, fg_color=BG3, corner_radius=4)
+            area.pack()
+            area.pack_propagate(False)
+            bar = ctk.CTkFrame(area, height=0, fg_color=COLORES_ESTADO["Disponible"],
+                               corner_radius=4)
+            bar.pack(side="bottom", fill="x")
+
+            ctk.CTkLabel(col, text=f"J{i}", font=ctk.CTkFont(size=13, weight="bold"),
+                         text_color=FG_DIM).pack(pady=(2, 0))
+
+            self.barras_disp[i] = {"col": col, "area": area, "bar": bar, "lbl_val": lbl_val}
+
+    def configurar_disponibilidad(self, mapa_substocks: dict, escala_max: int) -> None:
+        """Define el mapeo jaula→SubStock y la escala (máximo) para normalizar las barras."""
+        self._mapa_substocks = dict(mapa_substocks)
+        self._escala_disp = max(1, int(escala_max))
+
     def ajustar_jaulas(self, cantidad_jaulas: int) -> None:
         """Reconstruye las filas de jaulas si la cantidad difiere de la actual."""
         if self.cantidad_jaulas == cantidad_jaulas and self.jaulas_frames:
@@ -195,6 +246,7 @@ class VistaRealTime(ctk.CTkScrollableFrame):
         self.jaulas_frames.clear()
         self.crc_frames.clear()
         self._crear_filas_jaulas(cantidad_jaulas)
+        self._crear_barras_disponibilidad(cantidad_jaulas)
 
     def set_estrategia(self, estrategia: str) -> None:
         """Define la estrategia de selección y actualiza el indicador de sentido de toma."""
@@ -249,12 +301,19 @@ class VistaRealTime(ctk.CTkScrollableFrame):
     def actualizar(self, snapshot) -> None:
         """Actualiza todos los componentes visuales con el estado de un snapshot."""
         paradas = set(getattr(snapshot, "jaulas_paradas", []))
+        disp_por_ss = getattr(snapshot, "disponibles_por_substock", {})
         for i in range(1, self.cantidad_jaulas + 1):
             if i in snapshot.detalle_jaulas and i in self.jaulas_frames:
                 self.jaulas_frames[i].actualizar(snapshot.detalle_jaulas[i], self.on_cilindro_click)
                 self.jaulas_frames[i].set_parada(i in paradas)
             if i in snapshot.detalle_crc and i in self.crc_frames:
                 self.crc_frames[i].actualizar(snapshot.detalle_crc[i], self.on_cilindro_click)
+            # Barra de stock Disponible de la jaula (altura ∝ valor / escala).
+            if i in self.barras_disp:
+                val = disp_por_ss.get(self._mapa_substocks.get(i), 0)
+                alto = 0 if val == 0 else max(3, int(val / self._escala_disp * _ALTO_BARRA))
+                self.barras_disp[i]["bar"].configure(height=alto)
+                self.barras_disp[i]["lbl_val"].configure(text=str(val))
 
         # Cola de rectificado: se reconstruye ordenada según el sentido de toma.
         for w in self.cola_widgets.values():

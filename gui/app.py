@@ -270,6 +270,15 @@ class App(ctk.CTk):
         self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))
         self.vista_rt.set_estrategia(estrat)
 
+        # Gráfico de stock Disponible por jaula: mapa jaula→SubStock y escala
+        # (máximo de disponibles sobre todo el run, para normalizar las barras).
+        mapa = {j: ss.nombre
+                for j in range(1, self.taller.cantidad_jaulas + 1)
+                if (ss := self.taller.obtener_substock_por_jaula(j)) is not None}
+        escala = max((v for sn in self.taller.snapshots
+                      for v in sn.disponibles_por_substock.values()), default=0)
+        self.vista_rt.configurar_disponibilidad(mapa, escala)
+
     def _refrescar_combo_substocks(self):
         """Actualiza las opciones del selector de SubStock del Dashboard."""
         nombres = [ss.nombre for ss in self.taller.lista_substocks]
