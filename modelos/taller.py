@@ -14,7 +14,10 @@ from .substock import SubStock
 from .maquina import MaquinaRectificadora
 from .jaula import Jaula
 from .eventos import EventoCambio, Alerta, Snapshot
-from .estrategias import ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO
+from .estrategias import (
+    ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO,
+    ESTRATEGIAS_ASIGNACION, ESTRATEGIA_ASIGNACION_DEFECTO,
+)
 from . import turnos as turnos_mod
 
 logger = logging.getLogger(__name__)
@@ -22,6 +25,10 @@ logger = logging.getLogger(__name__)
 # ── Constantes de simulación ────────────────────────────────────────────────
 _MM_RECTIFICAR_DEFECTO: float = 0.8
 _TIPO_RECTIFICADO_DEFECTO: str = "produccion"
+# mm que se rebajan (rectificado de producción) cuando un cilindro queda
+# Disponible pero su (perfil, diámetro) no es colocable en ninguna jaula: se lo
+# re-encola a rectificado para re-perfilarlo hasta que entre en una banda.
+_MM_REPERFILADO: float = 0.8
 _BUFFER_CRC_SIZE: int = 2
 _MAX_ITERACIONES_SIM: int = 10_000
 _MAX_ITER_FINALIZACION: int = 500
@@ -31,6 +38,21 @@ _HOJA_CONFIG = "Configuración"
 _HOJA_MAQUINAS = "Máquinas"
 _HOJA_STOCK = "Stock_Inicial"
 _HOJA_CAMBIOS = "Programa_Cambios"
+
+
+def _normalizar_perfil(valor: Any) -> Optional[str]:
+    """Normaliza un valor de perfil a str canónico (o None si vacío).
+
+    Evita que un perfil numérico leído del Excel/JSON como ``4.0`` no coincida
+    con un ``"4"`` configurado: un float entero se formatea sin decimales.
+    """
+    if valor is None or valor == "":
+        return None
+    if isinstance(valor, float) and valor.is_integer():
+        return str(int(valor))
+    if isinstance(valor, int):
+        return str(valor)
+    return str(valor)
 
 
 def _fmt_duracion(minutos: float) -> str:
@@ -96,6 +118,7 @@ class TallerCilindros:
         self.tiempo_traslado_crc_min: float = 10.0
         self.cantidad_jaulas: int = 4
         self.estrategia_seleccion: str = "mayor_diametro"
+        self.estrategia_asignacion: str = ESTRATEGIA_ASIGNACION_DEFECTO
 
         # Tiempo de enfriado (horas) entre Trabajando y A rectificar. 0.0 = sin
         # estado de enfriado (comportamiento histórico). Máximo de iteraciones
@@ -128,8 +151,10 @@ class TallerCilindros:
             jaula = int(r["jaula"])
             desde = float(r["desde"])
             hasta = float(r["hasta"])
+            perfil = _normalizar_perfil(r.get("perfil"))
             nombre = f"SS{jaula} ({hasta:.0f}-{desde:.0f})"
-            self.lista_substocks.append(SubStock(nombre, jaula, desde, hasta, jaula_asignada=jaula))
+            self.lista_substocks.append(
+                SubStock(nombre, jaula, desde, hasta, jaula_asignada=jaula, perfil=perfil))
 
     def aplicar_prioridades_maquinas(self, prioridades: Dict[str, str]) -> None:
         """Asigna el tipo de rectificado prioritario a cada máquina."""
@@ -170,6 +195,8 @@ class TallerCilindros:
             self.tiempo_enfriado_h = float(cfg["tiempo_enfriado_h"])
         if "max_iteraciones" in cfg:
             self.max_iteraciones = int(cfg["max_iteraciones"])
+        if "estrategia_asignacion" in cfg:
+            self.estrategia_asignacion = str(cfg["estrategia_asignacion"])
 
     def configurar_maquinas(self, maquinas_config: List[Dict[str, Any]]) -> None:
         """Reconstruye el parque de máquinas desde la configuración persistente.
@@ -295,6 +322,14 @@ class TallerCilindros:
             jaula_id = int(row["Jaula_Asignada"]) if pd.notna(row.get("Jaula_Asignada")) else None
             pos = int(row["Posición"]) if pd.notna(row.get("Posición")) else None
             cil = Cilindro(str(row["ID_Cilindro"]), float(row["Diámetro_mm"]), estado, jaula_id, pos)
+
+            # Perfil físico: columna opcional del Excel; si falta, se deriva del
+            # perfil de la jaula asignada (un cilindro "viene" con su perfil).
+            perfil_col = row.get("Perfil")
+            if pd.notna(perfil_col) and str(perfil_col) != "":
+                cil.perfil = _normalizar_perfil(perfil_col)
+            elif jaula_id is not None:
+                cil.perfil = self.perfil_por_jaula(jaula_id)
 
             if estado in (EstadoCilindro.A_RECTIFICAR, EstadoCilindro.RECTIFICANDO):
                 mm_col = row.get("mm_a_Rectificar")
@@ -566,17 +601,47 @@ class TallerCilindros:
                 return ss
         return None
 
+    def perfil_por_jaula(self, jaula_id: int) -> Optional[str]:
+        """Devuelve el perfil (bombatura) requerido por una jaula (None = cualquiera)."""
+        ss = self.obtener_substock_por_jaula(jaula_id)
+        return ss.perfil if ss is not None else None
+
+    @staticmethod
+    def _perfil_compatible(perfil_cil: Optional[str], perfil_jaula: Optional[str]) -> bool:
+        """True si un cilindro con ``perfil_cil`` puede ir a una jaula de ``perfil_jaula``.
+
+        Si la jaula no exige perfil (None) o el cilindro no tiene perfil (None),
+        son compatibles; de lo contrario deben coincidir. Esto mantiene el
+        comportamiento histórico (sin perfiles ⇒ siempre compatible).
+        """
+        return perfil_jaula is None or perfil_cil is None or perfil_cil == perfil_jaula
+
     def obtener_cilindros_por_estado(self, estado: EstadoCilindro) -> List[Cilindro]:
         """Filtra la lista de cilindros por su estado actual."""
         return [c for c in self.cilindros.values() if c.estado == estado]
 
-    def obtener_disponibles_para_jaula(self, jaula_id: int) -> List[Cilindro]:
-        """Obtiene cilindros disponibles que cumplen el rango de diámetro de la jaula."""
+    def _admisible_en_jaula(self, cil: Cilindro, jaula_id: int) -> bool:
+        """True si ``cil`` (por diámetro y perfil) es admisible en la jaula dada.
+
+        Si la jaula tiene un cilindro destinado (``jaula_destino``), sólo es
+        admisible en ESA jaula. Si no, exige diámetro en banda y perfil
+        compatible. Pre-filtro duro por diámetro (regla del taller).
+        """
+        if cil.jaula_destino is not None:
+            return cil.jaula_destino == jaula_id
         ss = self.obtener_substock_por_jaula(jaula_id)
-        disponibles = self.obtener_cilindros_por_estado(EstadoCilindro.DISPONIBLE)
         if ss is None:
-            return disponibles
-        return [c for c in disponibles if ss.contiene_diametro(c.diametro)]
+            return True
+        return ss.contiene_diametro(cil.diametro) and self._perfil_compatible(cil.perfil, ss.perfil)
+
+    def _es_colocable(self, cil: Cilindro) -> bool:
+        """True si ``cil`` es admisible (diámetro+perfil) en alguna jaula."""
+        return any(self._admisible_en_jaula(cil, j) for j in range(1, self.cantidad_jaulas + 1))
+
+    def obtener_disponibles_para_jaula(self, jaula_id: int) -> List[Cilindro]:
+        """Obtiene cilindros disponibles admisibles (diámetro + perfil + destino) en la jaula."""
+        disponibles = self.obtener_cilindros_por_estado(EstadoCilindro.DISPONIBLE)
+        return [c for c in disponibles if self._admisible_en_jaula(c, jaula_id)]
 
     def obtener_cola_rectificado(self) -> List[Cilindro]:
         """Obtiene la lista de cilindros esperando rectificado."""
@@ -719,11 +784,42 @@ class TallerCilindros:
                 cola.remove(cil)
                 continue
 
-            maq.iniciar_rectificado(cil, tiempo, tipo, mm)
+            # El motor decide la jaula destino (y por tanto el perfil) con el
+            # diámetro proyectado tras el rectificado; la máquina sólo lo aplica.
+            _, perfil = self._asignar_jaula_destino(cil, nuevo_diam, tiempo)
+            maq.iniciar_rectificado(cil, tiempo, tipo, mm, perfil)
             nuevos_eventos.append(_EventoSim("FIN_RECT", maq.tiempo_fin_rectificado, nombre))
             cola.remove(cil)
 
         return nuevos_eventos
+
+    def _asignar_jaula_destino(self, cil: Cilindro, diametro_final: float,
+                               tiempo: datetime) -> Tuple[Optional[int], Optional[str]]:
+        """Decide la jaula destino de un cilindro al iniciar su rectificado.
+
+        Pre-filtra las jaulas por **diámetro proyectado admisible** (regla dura
+        del taller: nunca se asigna a una jaula cuyo SubStock no admite el
+        diámetro) y aplica la estrategia de asignación configurada sobre las
+        candidatas. Devuelve ``(jaula_destino, perfil)`` y etiqueta
+        ``cil.jaula_destino`` (la máquina talla el perfil). Si ninguna jaula
+        admite el diámetro, devuelve ``(None, perfil_actual)`` y deja
+        ``jaula_destino=None`` (stock no colocable, se re-perfila al finalizar).
+        """
+        candidatas = [
+            j for j in range(1, self.cantidad_jaulas + 1)
+            if (ss := self.obtener_substock_por_jaula(j)) is not None
+            and ss.contiene_diametro(diametro_final)
+        ]
+        if not candidatas:
+            cil.jaula_destino = None
+            return None, cil.perfil
+
+        estrategia = ESTRATEGIAS_ASIGNACION.get(
+            self.estrategia_asignacion, ESTRATEGIAS_ASIGNACION[ESTRATEGIA_ASIGNACION_DEFECTO]
+        )
+        destino = estrategia.asignar(cil, candidatas, self)
+        cil.jaula_destino = destino
+        return destino, self.perfil_por_jaula(destino)
 
     def reponer_buffer_crc(self, jaula_id: int, tiempo: datetime) -> bool:
         """Intenta llenar el CRC de una jaula con cilindros disponibles."""
@@ -790,6 +886,22 @@ class TallerCilindros:
         simulación (ambos cierran rectificados en curso de idéntica forma).
         """
         cil_terminado = maquina.finalizar_rectificado(tiempo)
+        if (cil_terminado and not self._es_colocable(cil_terminado)
+                and cil_terminado.diametro > self.diametro_minimo):
+            # No colocable en ninguna jaula (su perfil/diámetro no entra): en vez
+            # de quedar como stock muerto, se re-encola a rectificado con un pase
+            # de producción de _MM_REPERFILADO mm; al re-iniciarlo la estrategia
+            # re-decide la jaula (y el perfil) con el nuevo diámetro proyectado.
+            self.alertas.append(Alerta(
+                tiempo, "INFO",
+                f"Cilindro {cil_terminado.id} no colocable; re-perfilado "
+                f"producción {_MM_REPERFILADO} mm"))
+            cil_terminado.estado = EstadoCilindro.A_RECTIFICAR
+            cil_terminado.tipo_rectificado_actual = TipoRectificado.PRODUCCION
+            cil_terminado.mm_a_rectificar = _MM_REPERFILADO
+            cil_terminado.jaula_destino = None
+            cil_terminado.registrar_evento(tiempo, "No colocable: re-perfilado a producción")
+            cil_terminado = None  # no tratarlo como Disponible recién llegado
         if cil_terminado:
             # Prioridad: rearmar jaulas paradas antes de reponer el CRC.
             self._intentar_reactivar_jaulas(tiempo, log, cola)
@@ -889,6 +1001,7 @@ class TallerCilindros:
         #    si es 0, van directo a A_RECTIFICAR (comportamiento histórico).
         for cil in list(jaula.cilindros_trabajando):
             cil.jaula = None
+            cil.jaula_destino = None  # se re-decide al próximo rectificado
             cil.tipo_rectificado_actual = ev.tipo
             cil.mm_a_rectificar = ev.mm_a_rectificar
             if self.tiempo_enfriado_h > 0:

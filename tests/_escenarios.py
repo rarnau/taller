@@ -42,12 +42,36 @@ ESCENARIOS = {
     "cils140_menor_mm_desb": {
         "excel": "simulacion_140cils_1semana.xlsx", "estrategia": "menor_mm_desb_fifo_prod", "tiempo_enfriado": 0.0,
     },
+    # Bandas solapadas + perfiles: jaulas 2 y 3 comparten perfil "2" con rangos
+    # que se solapan, así que la estrategia de asignación elige entre candidatas.
+    # Trae su propia config (independiente de user_config.json) vía "cfg".
+    "perfiles_jaula_mas_necesitada": {
+        "excel": "simulacion_caso_perfiles.xlsx", "estrategia": "mayor_diametro",
+        "tiempo_enfriado": 0.0, "cfg": "perfiles",
+    },
 }
+
+
+def _cfg_perfiles() -> dict:
+    """Config autocontenida con bandas solapadas + perfiles (ver generar_caso_perfiles.py)."""
+    cfg = cargar_config()
+    cfg["config_global"] = {
+        "diametro_maximo": 575.0, "diametro_minimo": 520.0,
+        "tiempo_traslado_crc_min": 10.0, "cantidad_jaulas": 4,
+    }
+    cfg["rangos"] = [
+        {"jaula": 1, "desde": 540.0, "hasta": 520.0, "perfil": "4"},
+        {"jaula": 2, "desde": 555.0, "hasta": 530.0, "perfil": "2"},
+        {"jaula": 3, "desde": 565.0, "hasta": 540.0, "perfil": "2"},
+        {"jaula": 4, "desde": 575.0, "hasta": 555.0, "perfil": "3"},
+    ]
+    cfg["estrategia_asignacion"] = "jaula_mas_necesitada"
+    return cfg
 
 
 def ejecutar_escenario(esc: dict) -> TallerCilindros:
     """Construye y simula un taller para un escenario dado (sin GUI ni I/O extra)."""
-    cfg = cargar_config()
+    cfg = _cfg_perfiles() if esc.get("cfg") == "perfiles" else cargar_config()
     cfg["tiempo_enfriado_h"] = esc["tiempo_enfriado"]
     taller = TallerCilindros()
     taller.configurar(cfg)

@@ -188,9 +188,14 @@ class MaquinaRectificadora:
         cilindro: Cilindro,
         tiempo_actual: datetime,
         tipo: TipoRectificado,
-        mm: float
+        mm: float,
+        perfil: Optional[str] = None
     ) -> None:
-        """Inicia el proceso de rectificado para un cilindro."""
+        """Inicia el proceso de rectificado para un cilindro.
+
+        ``perfil`` es el perfil (bombatura) a tallar, decidido por el motor (la
+        máquina sólo lo aplica físicamente). ``None`` ⇒ no cambia el perfil.
+        """
         duracion_minutos = self.calcular_tiempo_proceso(mm, tipo.value)
         self.ocupada = True
         self.cilindro_actual = cilindro
@@ -215,6 +220,8 @@ class MaquinaRectificadora:
         cilindro.rectificado_fin = self.tiempo_fin_rectificado
         cilindro.tipo_rectificado_actual = tipo
         cilindro.mm_a_rectificar = mm
+        if perfil is not None:
+            cilindro.perfil = perfil  # la máquina talla físicamente el perfil decidido
 
         cilindro.registrar_evento(
             tiempo_actual,

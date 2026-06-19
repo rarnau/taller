@@ -1815,5 +1815,114 @@
       ]
     ],
     "snapshots_sha256": "bec6b9650b7fae1d164471a05daa4ddd0ad21faebba9078c92e05efb9cc3c67d"
+  },
+  "perfiles_jaula_mas_necesitada": {
+    "kpis": {
+      "cilindros_totales": 17,
+      "activos": 17,
+      "bajas": 0,
+      "alertas_criticas": 0,
+      "cambios_programados": 2,
+      "rectificados_realizados": 4,
+      "horizonte_simulacion_h": 3.6833,
+      "diametro_promedio_mm": 550.2824,
+      "desgaste_medio_mm": 0.8,
+      "utilizacion_maquinas_pct": {
+        "G36": 100.0,
+        "F36": 100.0,
+        "F60": 100.0
+      }
+    },
+    "n_snapshots": 12,
+    "n_alertas": 0,
+    "alertas": [],
+    "cilindros": [
+      [
+        "CIL-101",
+        "Trabajando",
+        538.0
+      ],
+      [
+        "CIL-102",
+        "Trabajando",
+        537.0
+      ],
+      [
+        "CIL-103",
+        "CRC",
+        535.0
+      ],
+      [
+        "CIL-104",
+        "CRC",
+        534.0
+      ],
+      [
+        "CIL-105",
+        "Disponible",
+        536.0
+      ],
+      [
+        "CIL-201",
+        "CRC",
+        549.2
+      ],
+      [
+        "CIL-202",
+        "CRC",
+        548.2
+      ],
+      [
+        "CIL-203",
+        "Trabajando",
+        545.0
+      ],
+      [
+        "CIL-204",
+        "Trabajando",
+        544.0
+      ],
+      [
+        "CIL-301",
+        "CRC",
+        559.2
+      ],
+      [
+        "CIL-302",
+        "CRC",
+        558.2
+      ],
+      [
+        "CIL-303",
+        "Trabajando",
+        552.0
+      ],
+      [
+        "CIL-304",
+        "Trabajando",
+        551.0
+      ],
+      [
+        "CIL-401",
+        "Trabajando",
+        570.0
+      ],
+      [
+        "CIL-402",
+        "Trabajando",
+        568.0
+      ],
+      [
+        "CIL-403",
+        "CRC",
+        566.0
+      ],
+      [
+        "CIL-404",
+        "CRC",
+        564.0
+      ]
+    ],
+    "snapshots_sha256": "8c7098595199669ce72fe293c09f0cca21057514527d3659add15b6fad00db8b"
   }
 }

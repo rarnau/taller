@@ -44,6 +44,13 @@ class Cilindro:
         self.tipo_rectificado_actual: Optional[TipoRectificado] = None
         self.mm_a_rectificar: float = 0.0
 
+        # Perfil (bombatura) físico del cilindro: propiedad "pegajosa" que sólo
+        # cambia al rectificar (= perfil de la jaula destino elegida). None = sin
+        # perfil definido. jaula_destino marca la jaula a la que se lo destinó al
+        # iniciar el rectificado (None = stock sin destino, p. ej. el inicial).
+        self.perfil: Optional[str] = None
+        self.jaula_destino: Optional[int] = None
+
         # Historial de eventos para trazabilidad
         self.historial: List[Dict[str, Any]] = []
 
