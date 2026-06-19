@@ -53,22 +53,26 @@
     {
       "jaula": 1,
       "desde": 533.0,
-      "hasta": 520.0
+      "hasta": 520.0,
+      "perfil": "4"
     },
     {
       "jaula": 2,
       "desde": 547.0,
-      "hasta": 533.0
+      "hasta": 533.0,
+      "perfil": "2"
     },
     {
       "jaula": 3,
       "desde": 561.0,
-      "hasta": 547.0
+      "hasta": 547.0,
+      "perfil": "2"
     },
     {
       "jaula": 4,
       "desde": 575.0,
-      "hasta": 561.0
+      "hasta": 561.0,
+      "perfil": "3"
     }
   ],
   "tiempo_enfriado_h": 0.0,

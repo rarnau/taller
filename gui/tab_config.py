@@ -118,7 +118,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         cuerpo_g = _card(
             col_izq,
             "Parámetros Globales del Taller",
-            "Rango de diámetro útil, traslado al CRC, cantidad de jaulas y tiempo de enfriado.",
+            "Rango de diámetro útil, traslado al CRC, cantidad de jaulas, tiempo de enfriado y estrategia de asignación.",
         )
         self._e_diam_max = _fila_param(cuerpo_g, "Diámetro máximo (mm)")
         self._e_diam_min = _fila_param(cuerpo_g, "Diámetro mínimo (mm)", "bajo este, el cilindro es BAJA")
@@ -130,6 +130,17 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._e_jaulas.bind("<FocusOut>", self._on_cambio_cantidad_jaulas)
         self._e_jaulas.bind("<Return>", self._on_cambio_cantidad_jaulas)
         self._entry_enfriado = _fila_param(cuerpo_g, "Tiempo de enfriado (h)", "0 = sin enfriado")
+
+        # Estrategia de asignación de jaula destino (combo etiqueta↔clave).
+        fila_asig = ctk.CTkFrame(cuerpo_g, fg_color="transparent")
+        fila_asig.pack(fill="x", pady=3)
+        ctk.CTkLabel(
+            fila_asig, text="Estrategia de asignación", width=220, anchor="w", text_color=FG,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
+        ).pack(side="left", padx=4)
+        self._combo_asignacion = ctk.CTkComboBox(
+            fila_asig, values=list(_ASIGNACION_ETIQUETAS.keys()), width=240, state="readonly")
+        self._combo_asignacion.pack(side="left", padx=4)
 
         # Sección 2: Rangos de SubStock por jaula (columna izquierda)
         cuerpo_r = _card(
@@ -190,20 +201,9 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         cuerpo_p = _card(
             col_der,
             "Parámetros de Simulación",
-            "Tope de iteraciones del motor y estrategia de asignación de jaula destino.",
+            "Tope de iteraciones del motor.",
         )
         self._entry_max_iter = _fila_param(cuerpo_p, "Máximo de iteraciones")
-
-        # Estrategia de asignación de jaula destino (combo etiqueta↔clave).
-        fila_asig = ctk.CTkFrame(cuerpo_p, fg_color="transparent")
-        fila_asig.pack(fill="x", pady=3)
-        ctk.CTkLabel(
-            fila_asig, text="Estrategia de asignación", width=220, anchor="w", text_color=FG,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
-        ).pack(side="left", padx=4)
-        self._combo_asignacion = ctk.CTkComboBox(
-            fila_asig, values=list(_ASIGNACION_ETIQUETAS.keys()), width=240, state="readonly")
-        self._combo_asignacion.pack(side="left", padx=4)
 
         # Footer: guardar + estado
         footer = ctk.CTkFrame(self, fg_color="transparent")
