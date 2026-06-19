@@ -24,13 +24,17 @@ from typing import Any, Callable, Dict, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import pandas as pd
+
 from config import persistencia as cfgmod
+from config import modelo_generador as modmod
 from config.persistencia import (cargar_config, guardar_config, obtener_maquinas,
                                   obtener_max_iteraciones, obtener_rangos,
                                   obtener_tiempo_enfriado, obtener_estrategia_asignacion)
 from modelos.enums import TipoRectificado
 from modelos.kpis import calcular_kpis
 from modelos.estrategias import ESTRATEGIAS_SELECCION, ESTRATEGIAS_ASIGNACION
+from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
 from modelos import turnos as turnos_mod
 
@@ -61,6 +65,33 @@ def construir_taller(cfg: Dict[str, Any], ruta_excel: str) -> TallerCilindros:
     taller.configurar(cfg)
     taller.cargar_datos(ruta_excel)
     return taller
+
+
+def construir_taller_desde_dataframes(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
+                                      cambios_df: "pd.DataFrame") -> TallerCilindros:
+    """Como ``construir_taller`` pero con DataFrames en memoria (sin I/O de disco).
+
+    Base del runner batch: el stock se carga una vez y el ``cambios_df`` lo
+    produce el generador para cada seed, sin escribir Excel intermedios.
+    """
+    cfgmod.verificar_coherencia(cfg)
+    taller = TallerCilindros()
+    taller.configurar(cfg)
+    taller.cargar_datos_desde_dataframes(stock_df, cambios_df)
+    return taller
+
+
+def generar_y_construir(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
+                        modelo: Dict[str, Any], *, seed: Optional[int] = None,
+                        horizonte_dias: Optional[int] = None) -> TallerCilindros:
+    """Genera el Programa_Cambios desde ``modelo`` y arma el taller listo a simular.
+
+    Pensado para que un runner paralelo itere sobre seeds reusando el mismo
+    ``stock_df`` y ``modelo`` ya ajustado.
+    """
+    cambios_df = gencambios.generar_cambios(modelo, cfg, seed=seed,
+                                            horizonte_dias=horizonte_dias)
+    return construir_taller_desde_dataframes(cfg, stock_df, cambios_df)
 
 
 def ejecutar_simulacion(ruta_excel: str, estrategia: str = "mayor_diametro",
@@ -225,6 +256,12 @@ def _cmd_config(args) -> int:
         if sub == "jaula":
             return _cmd_config_jaula(args, cfg)
 
+        if sub == "generador":
+            return _cmd_config_generador(args, cfg)
+
+        if sub == "turnos-cambios":
+            return _cmd_config_turnos_cambios(args, cfg)
+
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -299,6 +336,134 @@ def _cmd_config_jaula(args, cfg) -> int:
         _avisar_incoherencias(cfg)
         return 0
     return 2
+
+
+# ── Comandos: modelo / generar-cambios ────────────────────────────────────────
+
+def _leer_historia(ruta: str) -> "pd.DataFrame":
+    """Lee la historia desde CSV o Excel (primera hoja, o 'Historia' si existe)."""
+    if ruta.lower().endswith(".csv"):
+        return pd.read_csv(ruta)
+    xl = pd.ExcelFile(ruta, engine="openpyxl")
+    hoja = "Historia" if "Historia" in xl.sheet_names else xl.sheet_names[0]
+    return xl.parse(hoja)
+
+
+def _resumen_modelo(modelo: Dict[str, Any]) -> str:
+    jaulas = sorted(modelo.get("jaulas", {}).keys(), key=int)
+    return (f"  generador : {modelo.get('clave')}\n"
+            f"  filas     : {modelo.get('n_filas', 0)}\n"
+            f"  jaulas    : {', '.join(jaulas) or '(ninguna)'}\n"
+            f"  fechas    : {modelo.get('fecha_min')} → {modelo.get('fecha_max')}")
+
+
+def _cmd_modelo(args) -> int:
+    accion = args.accion
+
+    if accion == "show":
+        modelo = modmod.cargar_modelo()
+        if not modelo:
+            print("No hay modelo persistido. Ajuste uno con 'modelo ajustar <historia>'.")
+            return 0
+        print(_resumen_modelo(modelo))
+        return 0
+
+    if accion == "reset":
+        modmod.reiniciar_modelo()
+        print("Modelo de generador reiniciado (adaptación limpia).")
+        return 0
+
+    if accion == "ajustar":
+        if not os.path.isfile(args.historia):
+            print(f"Error: no se encontró la historia: {args.historia}", file=sys.stderr)
+            return 2
+        cfg = cargar_config()
+        if args.umbral_desbaste is not None:
+            cfgmod.set_generador_cambios(cfg, umbral_desbaste=args.umbral_desbaste)
+        previo = None if args.reiniciar else modmod.cargar_modelo()
+        try:
+            historia = _leer_historia(args.historia)
+            modelo = gencambios.ajustar_modelo(historia, cfg, clave=args.generador,
+                                               modelo_previo=previo)
+        except Exception as e:
+            print(f"Error al ajustar el modelo: {e}", file=sys.stderr)
+            return 1
+        modmod.guardar_modelo(modelo)
+        modo = "desde cero" if (args.reiniciar or previo is None) else "incremental"
+        print(f"Modelo ajustado ({modo}):")
+        print(_resumen_modelo(modelo))
+        return 0
+
+    return 2
+
+
+def _cmd_generar_cambios(args) -> int:
+    cfg = cargar_config()
+    if args.umbral_desbaste is not None:
+        cfgmod.set_generador_cambios(cfg, umbral_desbaste=args.umbral_desbaste)
+
+    # Ajustar al vuelo si se pidió o si se pasó historia; si no, usar el persistido.
+    if args.historia or args.ajustar:
+        if not args.historia or not os.path.isfile(args.historia):
+            print("Error: --ajustar requiere una historia válida.", file=sys.stderr)
+            return 2
+        previo = modmod.cargar_modelo()
+        try:
+            historia = _leer_historia(args.historia)
+            modelo = gencambios.ajustar_modelo(historia, cfg, clave=args.generador,
+                                               modelo_previo=previo)
+        except Exception as e:
+            print(f"Error al ajustar el modelo: {e}", file=sys.stderr)
+            return 1
+        modmod.guardar_modelo(modelo)
+    else:
+        modelo = modmod.cargar_modelo()
+        if not modelo:
+            print("Error: no hay modelo persistido. Use 'modelo ajustar' o pase una historia.",
+                  file=sys.stderr)
+            return 2
+
+    inicio = None
+    if args.inicio:
+        try:
+            inicio = pd.to_datetime(args.inicio).to_pydatetime()
+        except Exception:
+            print(f"Error: fecha de inicio inválida: {args.inicio}", file=sys.stderr)
+            return 2
+
+    seed = gencambios.resolver_seed(args.seed)
+    gen = gencambios.obtener_generador(args.generador or modelo.get("clave"))
+    cambios_df = gen.generar(modelo, cfg, seed=seed, inicio=inicio,
+                             horizonte_dias=args.horizonte_dias,
+                             grilla_cambios=gencambios.grilla_cambios_desde_cfg(cfg))
+
+    print(f"Generados {len(cambios_df)} cambios (generador={gen.clave}, seed={seed}).")
+    if args.salida:
+        with pd.ExcelWriter(args.salida, engine="openpyxl") as xl:
+            cambios_df.to_excel(xl, sheet_name="Programa_Cambios", index=False)
+        print(f"Programa_Cambios escrito en: {args.salida}")
+    else:
+        print(cambios_df.to_string(index=False))
+    return 0
+
+
+def _cmd_config_generador(args, cfg) -> int:
+    cfgmod.set_generador_cambios(cfg, generador=args.generador,
+                                 umbral_desbaste=args.umbral_desbaste,
+                                 horizonte_dias=args.horizonte_dias)
+    guardar_config(cfg)
+    gc = cfgmod.obtener_generador_cambios(cfg)
+    print(f"Generador de cambios: generador={gc['generador']}, "
+          f"umbral_desbaste_mm={gc['umbral_desbaste_mm']}, horizonte_dias={gc['horizonte_dias']}")
+    return 0
+
+
+def _cmd_config_turnos_cambios(args, cfg) -> int:
+    turnos = _resolver_turnos(args)
+    cfgmod.set_turnos_cambios(cfg, turnos)
+    guardar_config(cfg)
+    print(f"Régimen de turnos de cambios: {turnos_mod.resumen(cfgmod.obtener_turnos_cambios(cfg))}")
+    return 0
 
 
 # ── Parser de argumentos ──────────────────────────────────────────────────────
@@ -376,6 +541,41 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_jau.add_argument("--hasta", type=float)
     p_jau.add_argument("--perfil", help="Perfil (bombatura) de la jaula; \"\" lo quita.")
 
+    p_gen = csub.add_parser("generador", help="Edita la config del generador de cambios.")
+    p_gen.add_argument("--generador", choices=list(gencambios.GENERADORES_CAMBIOS))
+    p_gen.add_argument("--umbral-desbaste", type=float,
+                       help="mm a partir del cual el cambio se clasifica 'desbaste'.")
+    p_gen.add_argument("--horizonte-dias", type=int)
+
+    p_tc = csub.add_parser("turnos-cambios", help="Régimen de turnos del laminador (cambios).")
+    p_tc.add_argument("--turnos", metavar="COMPACTO",
+                      help="7 grupos lun..dom de 3 bits T1T2T3, p. ej. '111 111 111 111 111 110 000'.")
+    p_tc.add_argument("--turnos-preset", choices=list(turnos_mod.PRESETS))
+
+    # modelo (adaptación persistida del generador)
+    p_mod = sub.add_parser("modelo", help="Ajusta/inspecciona el modelo aprendido del generador.")
+    p_mod.add_argument("accion", choices=["ajustar", "show", "reset"])
+    p_mod.add_argument("historia", nargs="?", help="Historia (.xlsx/.csv) para 'ajustar'.")
+    p_mod.add_argument("--generador", choices=list(gencambios.GENERADORES_CAMBIOS))
+    p_mod.add_argument("--umbral-desbaste", type=float)
+    p_mod.add_argument("--reiniciar", action="store_true",
+                       help="Ajusta desde cero en vez de refit incremental.")
+    p_mod.set_defaults(func=_cmd_modelo)
+
+    # generar-cambios
+    p_gc = sub.add_parser("generar-cambios", help="Genera un Programa_Cambios reproducible por seed.")
+    p_gc.add_argument("historia", nargs="?",
+                      help="Historia opcional: si se pasa (o --ajustar), re-ajusta antes de generar.")
+    p_gc.add_argument("--generador", choices=list(gencambios.GENERADORES_CAMBIOS))
+    p_gc.add_argument("--seed", type=int, help="Seed (por defecto aleatoria reproducible).")
+    p_gc.add_argument("--horizonte-dias", type=int)
+    p_gc.add_argument("--umbral-desbaste", type=float)
+    p_gc.add_argument("--inicio", help="Fecha/hora de inicio del horizonte (ISO).")
+    p_gc.add_argument("--ajustar", action="store_true",
+                      help="Re-ajusta el modelo con la historia antes de generar.")
+    p_gc.add_argument("--salida", metavar="RUTA.xlsx", help="Excel de salida (si se omite, imprime).")
+    p_gc.set_defaults(func=_cmd_generar_cambios)
+
     return parser
 
 
@@ -396,6 +596,11 @@ def main(argv: Optional[list] = None) -> int:
             parser.error(f"'config jaula {args.accion}' requiere --jaula")
         if args.accion == "set" and (args.desde is None or args.hasta is None):
             parser.error("'config jaula set' requiere --desde y --hasta")
+    if args.comando == "config" and args.subcomando == "turnos-cambios":
+        if args.turnos and args.turnos_preset:
+            parser.error("Use --turnos o --turnos-preset, no ambos")
+    if args.comando == "modelo" and args.accion == "ajustar" and not args.historia:
+        parser.error("'modelo ajustar' requiere la ruta de la historia")
 
     return args.func(args)
 
