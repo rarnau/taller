@@ -60,6 +60,16 @@ class MaquinaRectificadora:
             "rate": tasa
         }
 
+    def puede_rectificar(self, tipo: str) -> bool:
+        """True si la máquina tiene una tasa útil (rate > 0) para ese tipo de pase.
+
+        Es el predicado que respalda el centinela ``inf`` de
+        :meth:`calcular_tiempo_proceso`: la asignación lo usa para no entregarle
+        a una máquina un trabajo cuyo tipo no puede ejecutar.
+        """
+        cfg = self.tasas_rectificado.get(tipo)
+        return cfg is not None and cfg["rate"] > 0
+
     def calcular_tiempo_proceso(self, mm_a_rectificar: float, tipo: str) -> float:
         """
         Calcula cuántos minutos tomará rectificar la cantidad indicada.
@@ -67,10 +77,9 @@ class MaquinaRectificadora:
         Devuelve float('inf') si el tipo no está configurado o su tasa es 0,
         lo que excluirá este trabajo de la asignación.
         """
-        cfg = self.tasas_rectificado.get(tipo)
-        if cfg is None or cfg["rate"] <= 0:
+        if not self.puede_rectificar(tipo):
             return float("inf")
-        return mm_a_rectificar / cfg["rate"]
+        return mm_a_rectificar / self.tasas_rectificado[tipo]["rate"]
 
     # ── Esquema de trabajo (turnos) ─────────────────────────────────────────
 
