@@ -375,6 +375,28 @@ class TallerCilindros:
             logger.warning(msg)
             self.avisos_carga.append(msg)
 
+        # Cilindros TRABAJANDO/CRC sin jaula asignada: no podrían ubicarse en
+        # ninguna jaula (la colocación inicial exige cil.jaula) y quedarían como
+        # stock muerto. Se los reclasifica a DISPONIBLE para que puedan reponer
+        # cualquier jaula compatible por diámetro, y se avisa para revisión.
+        sin_jaula = [
+            cil for cil in self.cilindros.values()
+            if cil.estado in (EstadoCilindro.TRABAJANDO, EstadoCilindro.CRC)
+            and cil.jaula is None
+        ]
+        if sin_jaula:
+            for cil in sin_jaula:
+                cil.estado = EstadoCilindro.DISPONIBLE
+                cil.jaula = None
+                cil.jaula_destino = None
+            ids = ", ".join(c.id for c in sin_jaula)
+            msg = (
+                f"AVISO: {len(sin_jaula)} cilindro(s) venían en estado Trabajando/CRC "
+                f"sin jaula asignada; se reclasifican a Disponible: {ids}"
+            )
+            logger.warning(msg)
+            self.avisos_carga.append(msg)
+
         # Inicializar jaulas y ubicar cilindros
         for j_id in range(1, self.cantidad_jaulas + 1):
             self.jaulas[j_id] = Jaula(j_id)
