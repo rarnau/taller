@@ -27,11 +27,11 @@ class EventoCambio:
 
 
 class Alerta:
-    """Notificación generada durante la simulación (INFO o CRITICO)."""
+    """Notificación generada durante la simulación (INFO, WARNING o CRITICO)."""
 
     def __init__(self, tiempo: datetime, tipo: str, mensaje: str, jaula: Optional[int] = None):
         self.tiempo: datetime = tiempo
-        self.tipo: str = tipo       # "INFO" | "CRITICO"
+        self.tipo: str = tipo       # "INFO" | "WARNING" | "CRITICO"
         self.mensaje: str = mensaje
         self.jaula: Optional[int] = jaula
 

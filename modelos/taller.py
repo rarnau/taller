@@ -111,6 +111,8 @@ class TallerCilindros:
         self.alertas: List[Alerta] = []
         self.snapshots: List[Snapshot] = []
         self.avisos_carga: List[str] = []  # avisos surgidos al cargar datos (para la GUI)
+        # IDs ya avisados por "ninguna máquina puede rectificar su tipo" (alerta 1 vez).
+        self._sin_maquina_alertados: set = set()
 
         # Parámetros de configuración (sobreescritos al cargar Excel)
         self.diametro_maximo: float = 575.0
@@ -277,6 +279,7 @@ class TallerCilindros:
         self.alertas.clear()
         self.snapshots.clear()
         self.avisos_carga.clear()
+        self._sin_maquina_alertados.clear()
 
         self._cargar_stock(stock_df)
         self._cargar_cambios(cambios_df)
@@ -466,12 +469,23 @@ class TallerCilindros:
                     continue
                 break
 
-            # Una jaula no puede arrancar con menos de una pareja completa.
+            # Una jaula no puede arrancar con menos de una pareja completa
+            # ("pareja completa o nada"): si no se llegó a _BUFFER_CRC_SIZE, se
+            # vacían los cilindros parciales ya instalados al buffer CRC de la
+            # jaula (quedan comprometidos a ella y _instalar_pareja_o_parar los
+            # tomará primero al reactivar). Así la jaula PARADA arranca con 0
+            # trabajando, sin el estado híbrido (parada + 1 trabajando).
             if len(jaula.cilindros_trabajando) < _BUFFER_CRC_SIZE:
+                parciales = jaula.cilindros_trabajando
+                jaula.cilindros_trabajando = []
+                for cil in parciales:
+                    cil.estado = EstadoCilindro.CRC
+                    jaula.cilindros_crc.append(cil)
                 jaula.parada = True
                 logger.warning(
-                    "Jaula %s arranca PARADA: solo %d cilindro(s) en su rango de diámetros.",
-                    j_id, len(jaula.cilindros_trabajando)
+                    "Jaula %s arranca PARADA: solo %d cilindro(s) en su rango de "
+                    "diámetros (movidos al CRC a la espera de pareja).",
+                    j_id, len(parciales)
                 )
 
     def _instalar_en_jaula(self, cil: Cilindro, jaula_id: int, tiempo: datetime, motivo: str) -> None:
@@ -669,16 +683,29 @@ class TallerCilindros:
         """Obtiene la lista de cilindros esperando rectificado."""
         return self.obtener_cilindros_por_estado(EstadoCilindro.A_RECTIFICAR)
 
+    @staticmethod
+    def _tipo_efectivo(cil: Cilindro, maq: MaquinaRectificadora) -> TipoRectificado:
+        """Tipo de pase que se ejecutaría: el del cilindro, o la prioridad de la
+        máquina cuando el cilindro no trae uno. Fuente única usada por la
+        selección (filtro de capacidad) y por la asignación."""
+        return cil.tipo_rectificado_actual if cil.tipo_rectificado_actual else maq.prioridad_defecto
+
     def seleccionar_siguiente_de_cola(
         self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora] = None
     ) -> Optional[Cilindro]:
         """Elige el siguiente cilindro a rectificar para una máquina.
 
-        Selección en dos pasos:
-          1. Filtro por prioridad: si se pasa una máquina, se consideran primero
+        Selección en tres pasos:
+          0. Filtro por capacidad: si se pasa una máquina, solo se consideran los
+             cilindros cuyo tipo de pase la máquina **puede ejecutar** (tiene tasa
+             útil). Sin esto, una máquina sin tasa para el tipo pedido recibiría
+             un tiempo de proceso ``inf`` y la simulación caería al construir el
+             ``timedelta`` (ver maquina.calcular_tiempo_proceso). Si no puede con
+             ninguno de la cola, devuelve ``None`` (otra máquina lo tomará).
+          1. Filtro por prioridad: entre los procesables, se consideran primero
              los cilindros cuyo tipo de rectificado coincide con su
              prioridad_defecto. Si ninguno coincide (o no se pasa máquina), se
-             consideran todos los de la cola.
+             consideran todos los procesables.
           2. Estrategia: sobre el subconjunto resultante se aplica la estrategia
              de selección configurada (ver ESTRATEGIAS_SELECCION).
         """
@@ -687,7 +714,12 @@ class TallerCilindros:
 
         candidatos = cola
         if maquina is not None:
-            preferidos = [c for c in cola if c.tipo_rectificado_actual == maquina.prioridad_defecto]
+            procesables = [c for c in cola
+                           if maquina.puede_rectificar(self._tipo_efectivo(c, maquina).value)]
+            if not procesables:
+                return None
+            candidatos = procesables
+            preferidos = [c for c in procesables if c.tipo_rectificado_actual == maquina.prioridad_defecto]
             if preferidos:
                 candidatos = preferidos
 
@@ -793,7 +825,7 @@ class TallerCilindros:
                 continue
 
             mm = cil.mm_a_rectificar if cil.mm_a_rectificar > 0 else _MM_RECTIFICAR_DEFECTO
-            tipo = cil.tipo_rectificado_actual if cil.tipo_rectificado_actual else maq.prioridad_defecto
+            tipo = self._tipo_efectivo(cil, maq)
             nuevo_diam = cil.diametro - mm
 
             if nuevo_diam < self.diametro_minimo:
@@ -812,6 +844,24 @@ class TallerCilindros:
             maq.iniciar_rectificado(cil, tiempo, tipo, mm, perfil)
             nuevos_eventos.append(_EventoSim("FIN_RECT", maq.tiempo_fin_rectificado, nombre))
             cola.remove(cil)
+
+        # Degradación segura: un cilindro cuyo tipo de pase NINGUNA máquina puede
+        # ejecutar (falta de tasa) no se asigna nunca y quedaría atascado en la
+        # cola. Antes esto llegaba a iniciar_rectificado con tiempo de proceso
+        # ``inf`` y caía con OverflowError; ahora queda en espera y se avisa una
+        # sola vez por cilindro (WARNING controlado, sin frenar la simulación).
+        for cil in cola:
+            if cil.id in self._sin_maquina_alertados:
+                continue
+            if not any(maq.puede_rectificar(self._tipo_efectivo(cil, maq).value)
+                       for maq in self.maquinas.values()):
+                self._sin_maquina_alertados.add(cil.id)
+                tipo_txt = cil.tipo_rectificado_actual.value if cil.tipo_rectificado_actual else "?"
+                self.alertas.append(Alerta(
+                    tiempo, "WARNING",
+                    f"Cilindro {cil.id}: ninguna máquina tiene tasa para el pase "
+                    f"'{tipo_txt}'; queda en espera (revise la configuración de máquinas)."
+                ))
 
         return nuevos_eventos
 

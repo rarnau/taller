@@ -130,3 +130,96 @@ def test_reperfilado_de_no_colocable():
     assert cil.jaula_destino is None
     # Y se registró la alerta INFO de "no colocable".
     assert any(a.tipo == "INFO" and "no colocable" in a.mensaje for a in t.alertas)
+
+
+# Una máquina sólo capaz de producción (desbaste con tiempo 0 ⇒ rate 0 ⇒ inf).
+_MAQ_SOLO_PROD = [{
+    "nombre": "SoloProd", "prioridad": "produccion",
+    "tasas": {"produccion": {"mm": 0.8, "tiempo_min": 60},
+              "desbaste": {"mm": 5.0, "tiempo_min": 0}},
+}]
+
+
+def _taller_solo_prod():
+    t = TallerCilindros()
+    t.configurar({
+        "config_global": {
+            "diametro_maximo": 575.0, "diametro_minimo": 520.0,
+            "tiempo_traslado_crc_min": 10.0, "cantidad_jaulas": 1,
+        },
+        "rangos": [{"jaula": 1, "desde": 575.0, "hasta": 520.0}],
+        "maquinas": _MAQ_SOLO_PROD,
+    })
+    t.jaulas[1] = Jaula(1)
+    return t
+
+
+def test_maquina_sin_tasa_no_es_seleccionada():
+    """``seleccionar_siguiente_de_cola`` no entrega un trabajo cuyo tipo la máquina
+    no puede ejecutar (evita el tiempo de proceso ``inf``)."""
+    t = _taller_solo_prod()
+    maq = t.maquinas["SoloProd"]
+    cil = Cilindro("D", 555.0, EstadoCilindro.A_RECTIFICAR)
+    cil.tipo_rectificado_actual = TipoRectificado.DESBASTE
+    cil.mm_a_rectificar = 5.0
+    assert t.seleccionar_siguiente_de_cola([cil], maq) is None
+
+
+def test_asignar_sin_maquina_capaz_no_crashea_y_alerta():
+    """Un pase de desbaste con sólo una máquina de producción no debe caer con
+    OverflowError: el cilindro queda en espera y se emite una alerta WARNING (1 vez)."""
+    t = _taller_solo_prod()
+    cil = Cilindro("D", 555.0, EstadoCilindro.A_RECTIFICAR)
+    cil.tipo_rectificado_actual = TipoRectificado.DESBASTE
+    cil.mm_a_rectificar = 5.0
+    t.cilindros[cil.id] = cil
+
+    eventos = t.asignar_trabajo_maquinas(T0)  # antes: OverflowError
+    assert eventos == []
+    assert cil.estado == EstadoCilindro.A_RECTIFICAR  # sigue en cola
+    warns = [a for a in t.alertas if a.tipo == "WARNING" and cil.id in a.mensaje]
+    assert len(warns) == 1
+    # No se duplica el aviso en llamadas sucesivas.
+    t.asignar_trabajo_maquinas(T0)
+    warns = [a for a in t.alertas if a.tipo == "WARNING" and cil.id in a.mensaje]
+    assert len(warns) == 1
+
+
+def test_jaula_inicial_sin_pareja_no_queda_hibrida():
+    """Con un solo cilindro en su rango, la jaula arranca PARADA con 0 trabajando.
+
+    "Pareja completa o nada": el cilindro parcial no debe quedar en la lista de
+    trabajando junto con la jaula marcada PARADA (estado híbrido). Se mueve al
+    CRC a la espera de pareja y se reactiva con la pareja completa.
+    """
+    import pandas as pd
+
+    t = TallerCilindros()
+    t.configurar({
+        "config_global": {
+            "diametro_maximo": 575.0, "diametro_minimo": 520.0,
+            "tiempo_traslado_crc_min": 10.0, "cantidad_jaulas": 1,
+        },
+        "rangos": [{"jaula": 1, "desde": 575.0, "hasta": 520.0}],
+        "maquinas": _MAQ,
+    })
+    stock = pd.DataFrame([
+        {"ID_Cilindro": "A", "Diámetro_mm": 560.0, "Estado": "Trabajando",
+         "Jaula_Asignada": 1, "Posición": 1},
+    ])
+    cambios = pd.DataFrame(
+        [], columns=["ID_Cambio", "Fecha_Hora", "Jaula", "Tipo_Rectificado",
+                     "mm_a_Rectificar", "Observación"])
+    t.cargar_datos_desde_dataframes(stock, cambios)
+
+    jaula = t.jaulas[1]
+    assert jaula.parada is True
+    assert jaula.cilindros_trabajando == []          # no híbrido
+    assert [c.id for c in jaula.cilindros_crc] == ["A"]
+    assert jaula.cilindros_crc[0].estado == EstadoCilindro.CRC
+
+    # Al aparecer un compañero compatible, se reactiva con pareja COMPLETA.
+    companero = Cilindro("B", 558.0, EstadoCilindro.DISPONIBLE)
+    t.cilindros["B"] = companero
+    assert t._instalar_pareja_o_parar(1, T0) is True
+    assert {c.id for c in jaula.cilindros_trabajando} == {"A", "B"}
