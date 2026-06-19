@@ -9,7 +9,7 @@ en ESTRATEGIAS_SELECCION; la GUI y el CLI la toman de ahí.
 from typing import Dict, List, Optional
 
 from .cilindro import Cilindro
-from .enums import TipoRectificado
+from .enums import EstadoCilindro, TipoRectificado
 from .maquina import MaquinaRectificadora
 
 
@@ -65,3 +65,66 @@ ESTRATEGIAS_SELECCION: Dict[str, EstrategiaSeleccion] = {
     )
 }
 ESTRATEGIA_DEFECTO = "fifo"
+
+
+# ── Estrategias de asignación de jaula destino ───────────────────────────────
+#
+# Al iniciar un rectificado el motor decide a qué jaula se destina el cilindro
+# (y por tanto qué perfil se le talla). La estrategia recibe las jaulas YA
+# filtradas por diámetro admisible (pre-filtro duro) y elige una de ellas. Para
+# agregar una estrategia nueva: subclasar EstrategiaAsignacion y registrarla en
+# ESTRATEGIAS_ASIGNACION; la GUI y el CLI la toman de ahí.
+
+# Estados de un cilindro "en camino" a una jaula (comprometido pero no instalado).
+_ESTADOS_EN_CAMINO = (
+    EstadoCilindro.ENFRIANDO,
+    EstadoCilindro.A_RECTIFICAR,
+    EstadoCilindro.RECTIFICANDO,
+    EstadoCilindro.DISPONIBLE,
+    EstadoCilindro.CRC,
+)
+
+
+class EstrategiaAsignacion:
+    """Estrategia de asignación de la jaula destino al iniciar un rectificado."""
+
+    clave: str = ""
+    etiqueta: str = ""
+
+    def asignar(self, cilindro: Cilindro, jaulas_candidatas: List[int], taller) -> int:
+        raise NotImplementedError
+
+
+class _JaulaMasNecesitada(EstrategiaAsignacion):
+    """Entre las candidatas (ya admisibles por diámetro), la de mayor déficit.
+
+    Prioriza jaulas paradas; luego el mayor déficit de stock
+    (``_BUFFER_CRC_SIZE`` − CRC − cilindros ya destinados en camino);
+    desempate por número de jaula (menor primero) para ser determinista.
+    """
+
+    clave, etiqueta = "jaula_mas_necesitada", "Jaula más necesitada"
+
+    def asignar(self, cilindro, jaulas_candidatas, taller):
+        # El déficit es buffer − (CRC + en_camino); el término "buffer" es igual
+        # para todas las candidatas, así que ordenar por menor (CRC + en_camino)
+        # equivale a mayor déficit (la más necesitada), sin depender del buffer.
+        def _orden(j: int):
+            jaula = taller.jaulas[j]
+            parada = 0 if getattr(jaula, "parada", False) else 1  # paradas primero
+            en_camino = sum(
+                1 for c in taller.cilindros.values()
+                if c.jaula_destino == j and c.estado in _ESTADOS_EN_CAMINO
+            )
+            comprometidos = len(jaula.cilindros_crc) + en_camino
+            return (parada, comprometidos, j)  # menor tupla = más necesitada
+
+        return min(jaulas_candidatas, key=_orden)
+
+
+ESTRATEGIAS_ASIGNACION: Dict[str, EstrategiaAsignacion] = {
+    e.clave: e for e in (
+        _JaulaMasNecesitada(),
+    )
+}
+ESTRATEGIA_ASIGNACION_DEFECTO = "jaula_mas_necesitada"

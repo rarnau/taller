@@ -22,11 +22,13 @@ SALIDA = os.path.join(os.path.dirname(__file__), "simulacion_caso_parada.xlsx")
 
 stock = []
 
-def add(cid, diam, estado, jaula=None, pos=None):
+def add(cid, diam, estado, jaula=None, pos=None, perfil=None):
+    # "Perfil" es opcional: si se omite, el motor lo deriva del perfil de la
+    # jaula asignada (config/user_config.json). Se incluye aquí por completitud.
     stock.append({
         "ID_Cilindro": cid, "Diámetro_mm": diam, "Estado": estado,
         "Jaula_Asignada": jaula, "Posición": pos,
-        "mm_a_Rectificar": None, "Tipo_Rectificado": None,
+        "mm_a_Rectificar": None, "Tipo_Rectificado": None, "Perfil": perfil,
     })
 
 # Jaula 1 (520-533): pareja + CRC + disponibles -> cambia normal

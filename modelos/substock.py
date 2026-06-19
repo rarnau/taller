@@ -16,7 +16,8 @@ class SubStock:
     a este SubStock si se cumple: hasta < d <= desde.
     """
 
-    def __init__(self, nombre: str, id_substock: int, desde: float, hasta: float, jaula_asignada: int = 0):
+    def __init__(self, nombre: str, id_substock: int, desde: float, hasta: float,
+                 jaula_asignada: int = 0, perfil=None):
         if desde < hasta:
             raise ValueError(
                 f"SubStock '{nombre}': 'desde' ({desde}) debe ser >= 'hasta' ({hasta}). "
@@ -27,6 +28,7 @@ class SubStock:
         self.desde = desde      # límite superior (mayor diámetro, inclusive)
         self.hasta = hasta      # límite inferior (menor diámetro, exclusive)
         self.jaula_asignada = jaula_asignada
+        self.perfil = perfil    # perfil (bombatura) requerido por la jaula; None = cualquiera
 
     def contiene_diametro(self, diametro: float) -> bool:
         """Devuelve True si el diámetro pertenece al rango (hasta, desde]."""

@@ -15,11 +15,17 @@ from config.tema import (
 from config.persistencia import (
     guardar_config, obtener_rangos, obtener_maquinas, obtener_config_global,
     obtener_tiempo_enfriado, obtener_max_iteraciones, verificar_coherencia,
+    obtener_estrategia_asignacion,
 )
 from modelos.enums import TipoRectificado
+from modelos.estrategias import ESTRATEGIAS_ASIGNACION
 from modelos import turnos as turnos_mod
 
 _TIPOS_RECT = [t.value for t in TipoRectificado]
+# Estrategias de asignación: etiqueta visible ↔ clave persistida (como el combo
+# de selección en gui/app.py). La GUI muestra la etiqueta y guarda la clave.
+_ASIGNACION_ETIQUETAS = {e.etiqueta: clave for clave, e in ESTRATEGIAS_ASIGNACION.items()}
+_ASIGNACION_CLAVE_A_ETIQUETA = {clave: e.etiqueta for clave, e in ESTRATEGIAS_ASIGNACION.items()}
 
 
 def _card(parent, titulo, subtitulo=None):
@@ -81,6 +87,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._entry_enfriado = None
         # Entries de parámetros de simulación
         self._entry_max_iter = None
+        self._combo_asignacion = None
         self._label_estado = None
         self._feedback_after = None   # id del timer que borra el feedback transitorio
 
@@ -133,7 +140,8 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
         cab = ctk.CTkFrame(cuerpo_r, fg_color="transparent")
         cab.pack(fill="x", pady=(0, 6))
-        for txt, w in [("Jaula", 70), ("Desde (mín, mm)", 140), ("Hasta (máx, mm)", 140)]:
+        for txt, w in [("Jaula", 70), ("Desde (mín, mm)", 140), ("Hasta (máx, mm)", 140),
+                       ("Perfil", 90)]:
             ctk.CTkLabel(
                 cab, text=txt, width=w, anchor="w",
                 font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold"),
@@ -182,9 +190,20 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         cuerpo_p = _card(
             col_der,
             "Parámetros de Simulación",
-            "Tope de iteraciones del motor de simulación.",
+            "Tope de iteraciones del motor y estrategia de asignación de jaula destino.",
         )
         self._entry_max_iter = _fila_param(cuerpo_p, "Máximo de iteraciones")
+
+        # Estrategia de asignación de jaula destino (combo etiqueta↔clave).
+        fila_asig = ctk.CTkFrame(cuerpo_p, fg_color="transparent")
+        fila_asig.pack(fill="x", pady=3)
+        ctk.CTkLabel(
+            fila_asig, text="Estrategia de asignación", width=220, anchor="w", text_color=FG,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
+        ).pack(side="left", padx=4)
+        self._combo_asignacion = ctk.CTkComboBox(
+            fila_asig, values=list(_ASIGNACION_ETIQUETAS.keys()), width=240, state="readonly")
+        self._combo_asignacion.pack(side="left", padx=4)
 
         # Footer: guardar + estado
         footer = ctk.CTkFrame(self, fg_color="transparent")
@@ -231,13 +250,14 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
 
     # ── Filas de rangos ──────────────────────────────────────────────────
 
-    def _crear_fila_rango(self, jaula, minimo="", maximo=""):
-        """Crea una fila de SubStock para una jaula fija: Jaula | Desde | Hasta.
+    def _crear_fila_rango(self, jaula, minimo="", maximo="", perfil=""):
+        """Crea una fila de SubStock para una jaula fija: Jaula | Desde | Hasta | Perfil.
 
         El número de jaula **no es editable** (es una etiqueta): las filas se
         crean/eliminan al cambiar «Cantidad de jaulas». Solo se editan los
-        límites. ``minimo`` es el límite inferior (interno: ``hasta``),
-        ``maximo`` el superior (interno: ``desde``).
+        límites y el perfil. ``minimo`` es el límite inferior (interno:
+        ``hasta``), ``maximo`` el superior (interno: ``desde``). ``perfil`` es
+        opcional (vacío = sin perfil exigido).
         """
         fila = ctk.CTkFrame(self._cont_rangos, fg_color="transparent")
         fila.pack(fill="x", pady=3)
@@ -257,8 +277,13 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             e_max.insert(0, str(maximo))
         e_max.pack(side="left", padx=4)
 
-        # Registro: (jaula:int, e_min=hasta interno, e_max=desde interno, fila)
-        self._filas_rangos.append((int(jaula), e_min, e_max, fila))
+        e_perfil = ctk.CTkEntry(fila, width=90, justify="center")
+        if perfil not in ("", None):
+            e_perfil.insert(0, str(perfil))
+        e_perfil.pack(side="left", padx=4)
+
+        # Registro: (jaula:int, e_min=hasta interno, e_max=desde interno, e_perfil, fila)
+        self._filas_rangos.append((int(jaula), e_min, e_max, e_perfil, fila))
 
     def _on_cambio_cantidad_jaulas(self, event=None):
         """Sincroniza las filas de SubStock cuando cambia «Cantidad de jaulas»."""
@@ -279,7 +304,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         n = max(0, int(n))
         actual = len(self._filas_rangos)
         if n < actual:
-            for _jaula, _e_min, _e_max, fila in self._filas_rangos[n:]:
+            for _jaula, _e_min, _e_max, _e_perfil, fila in self._filas_rangos[n:]:
                 fila.destroy()
             del self._filas_rangos[n:]
         else:
@@ -436,7 +461,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         n = max(n, 1)
         for jaula in range(1, n + 1):
             r = rangos_cfg.get(jaula, {})
-            self._crear_fila_rango(jaula, r.get("hasta", ""), r.get("desde", ""))
+            self._crear_fila_rango(jaula, r.get("hasta", ""), r.get("desde", ""), r.get("perfil", ""))
 
         # Máquinas
         for *_, fila in self._filas_maquinas:
@@ -459,6 +484,9 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._entry_enfriado.insert(0, f"{obtener_tiempo_enfriado(cfg):.1f}")
         self._entry_max_iter.delete(0, "end")
         self._entry_max_iter.insert(0, str(obtener_max_iteraciones(cfg)))
+        clave_asig = obtener_estrategia_asignacion(cfg)
+        self._combo_asignacion.set(_ASIGNACION_CLAVE_A_ETIQUETA.get(
+            clave_asig, next(iter(_ASIGNACION_ETIQUETAS))))
 
     # ── Guardado ─────────────────────────────────────────────────────────
 
@@ -480,6 +508,8 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self.app.user_cfg["rangos"] = rangos
         self.app.user_cfg["tiempo_enfriado_h"] = tiempo_enfriado
         self.app.user_cfg["max_iteraciones"] = max_iter
+        self.app.user_cfg["estrategia_asignacion"] = _ASIGNACION_ETIQUETAS.get(
+            self._combo_asignacion.get(), next(iter(_ASIGNACION_ETIQUETAS.values())))
         self.app.user_cfg.pop("prioridades_maquinas", None)  # esquema viejo, ya migrado
         guardar_config(self.app.user_cfg)
 
@@ -537,10 +567,10 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         (la misma verificación compartida con el CLI).
         """
         rangos = []
-        # Tuple: (jaula, e_min, e_max, fila)
+        # Tuple: (jaula, e_min, e_max, e_perfil, fila)
         # e_min = "Desde (mín)" en UI = hasta interno (lower bound)
         # e_max = "Hasta (máx)" en UI = desde interno (upper bound)
-        for jaula, e_min, e_max, _ in self._filas_rangos:
+        for jaula, e_min, e_max, e_perfil, _ in self._filas_rangos:
             min_txt = e_min.get().strip()
             max_txt = e_max.get().strip()
             try:
@@ -554,7 +584,11 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
                 raise ValueError(
                     f"Jaula {jaula}: 'Hasta (máx)' ({desde}) debe ser mayor que 'Desde (mín)' ({hasta})."
                 )
-            rangos.append({"jaula": jaula, "desde": desde, "hasta": hasta})
+            r = {"jaula": jaula, "desde": desde, "hasta": hasta}
+            perfil = e_perfil.get().strip()
+            if perfil:
+                r["perfil"] = perfil
+            rangos.append(r)
 
         if not rangos:
             raise ValueError("Debe definir al menos un rango de jaula.")

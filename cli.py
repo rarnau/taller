@@ -13,8 +13,8 @@ Subcomandos::
     cli.py config show | export <json> | import <json> | import-excel <excel>
     cli.py config global [--diametro-max --diametro-min --crc-min --jaulas]
     cli.py config maquina list|add|remove|set [flags]
-    cli.py config jaula   list|set|remove     [flags]
-    cli.py config sim [--tiempo-enfriado --max-iteraciones]
+    cli.py config jaula   list|set|remove     [flags, set acepta --perfil]
+    cli.py config sim [--tiempo-enfriado --max-iteraciones --estrategia-asignacion]
 """
 import argparse
 import json
@@ -27,10 +27,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import persistencia as cfgmod
 from config.persistencia import (cargar_config, guardar_config, obtener_maquinas,
                                   obtener_max_iteraciones, obtener_rangos,
-                                  obtener_tiempo_enfriado)
+                                  obtener_tiempo_enfriado, obtener_estrategia_asignacion)
 from modelos.enums import TipoRectificado
 from modelos.kpis import calcular_kpis
-from modelos.estrategias import ESTRATEGIAS_SELECCION
+from modelos.estrategias import ESTRATEGIAS_SELECCION, ESTRATEGIAS_ASIGNACION
 from modelos.taller import TallerCilindros
 from modelos import turnos as turnos_mod
 
@@ -211,10 +211,12 @@ def _cmd_config(args) -> int:
 
         if sub == "sim":
             cfgmod.set_sim(cfg, tiempo_enfriado=args.tiempo_enfriado,
-                           max_iteraciones=args.max_iteraciones)
+                           max_iteraciones=args.max_iteraciones,
+                           estrategia_asignacion=args.estrategia_asignacion)
             guardar_config(cfg)
             print(f"Parámetros de simulación: tiempo_enfriado_h="
-                  f"{obtener_tiempo_enfriado(cfg)}, max_iteraciones={obtener_max_iteraciones(cfg)}")
+                  f"{obtener_tiempo_enfriado(cfg)}, max_iteraciones={obtener_max_iteraciones(cfg)}, "
+                  f"estrategia_asignacion={obtener_estrategia_asignacion(cfg)}")
             return 0
 
         if sub == "maquina":
@@ -280,10 +282,12 @@ def _cmd_config_jaula(args, cfg) -> int:
     accion = args.accion
     if accion == "list":
         for r in obtener_rangos(cfg):
-            print(f"  Jaula {r['jaula']}: {r['hasta']} < d ≤ {r['desde']} mm")
+            perfil = r.get("perfil")
+            extra = f" | perfil {perfil}" if perfil not in (None, "") else ""
+            print(f"  Jaula {r['jaula']}: {r['hasta']} < d ≤ {r['desde']} mm{extra}")
         return 0
     if accion == "set":
-        cfgmod.set_rango(cfg, args.jaula, args.desde, args.hasta)
+        cfgmod.set_rango(cfg, args.jaula, args.desde, args.hasta, perfil=args.perfil)
         guardar_config(cfg)
         print(f"Rango de la jaula {args.jaula} actualizado.")
         _avisar_incoherencias(cfg)
@@ -349,6 +353,8 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_simcfg = csub.add_parser("sim", help="Edita los parámetros de simulación.")
     p_simcfg.add_argument("--tiempo-enfriado", type=float)
     p_simcfg.add_argument("--max-iteraciones", type=int)
+    p_simcfg.add_argument("--estrategia-asignacion", choices=list(ESTRATEGIAS_ASIGNACION.keys()),
+                          help="Estrategia de asignación de jaula destino al rectificar.")
 
     p_maq = csub.add_parser("maquina", help="Gestiona máquinas (list/add/remove/set).")
     p_maq.add_argument("accion", choices=["list", "add", "remove", "set"])
@@ -368,6 +374,7 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_jau.add_argument("--jaula", type=int)
     p_jau.add_argument("--desde", type=float)
     p_jau.add_argument("--hasta", type=float)
+    p_jau.add_argument("--perfil", help="Perfil (bombatura) de la jaula; \"\" lo quita.")
 
     return parser
 

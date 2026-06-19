@@ -59,6 +59,7 @@ DEFAULTS: Dict[str, Any] = {
     ],
     "tiempo_enfriado_h": 0.0,
     "max_iteraciones": 10000,
+    "estrategia_asignacion": "jaula_mas_necesitada",
 }
 
 
@@ -163,6 +164,11 @@ def obtener_max_iteraciones(cfg: Dict[str, Any]) -> int:
     return int(cfg.get("max_iteraciones", DEFAULTS["max_iteraciones"]))
 
 
+def obtener_estrategia_asignacion(cfg: Dict[str, Any]) -> str:
+    """Devuelve la clave de la estrategia de asignación de jaula destino."""
+    return str(cfg.get("estrategia_asignacion", DEFAULTS["estrategia_asignacion"]))
+
+
 # ── Mutadores (capa única de CRUD usada por el CLI y la GUI) ──────────────────
 
 def set_config_global(cfg: Dict[str, Any], *, diametro_maximo=None, diametro_minimo=None,
@@ -259,18 +265,32 @@ def remove_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:
     return cfg
 
 
-def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float) -> Dict[str, Any]:
-    """Crea o actualiza el rango de una jaula. Valida ``desde > hasta``."""
+def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float,
+              perfil: Optional[str] = None) -> Dict[str, Any]:
+    """Crea o actualiza el rango de una jaula. Valida ``desde > hasta``.
+
+    ``perfil`` es el perfil (bombatura) exigido por la jaula. Si es ``None`` se
+    conserva el perfil ya existente (no se borra al editar sólo el rango); para
+    quitarlo pásese cadena vacía ``""``.
+    """
     jaula = int(jaula)
     desde, hasta = float(desde), float(hasta)
     if desde <= hasta:
         raise ValueError(f"Jaula {jaula}: 'desde' ({desde}) debe ser mayor que 'hasta' ({hasta}).")
+    perfil_norm = None if perfil in (None, "") else str(perfil)
     rangos = cfg.setdefault("rangos", [])
     for r in rangos:
         if int(r["jaula"]) == jaula:
             r["desde"], r["hasta"] = desde, hasta
+            if perfil == "":
+                r.pop("perfil", None)
+            elif perfil is not None:
+                r["perfil"] = perfil_norm
             return cfg
-    rangos.append({"jaula": jaula, "desde": desde, "hasta": hasta})
+    nuevo = {"jaula": jaula, "desde": desde, "hasta": hasta}
+    if perfil_norm is not None:
+        nuevo["perfil"] = perfil_norm
+    rangos.append(nuevo)
     rangos.sort(key=lambda r: int(r["jaula"]))
     return cfg
 
@@ -332,7 +352,8 @@ def verificar_coherencia(cfg: Dict[str, Any]) -> None:
         raise ValueError(" ".join(problemas))
 
 
-def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None) -> Dict[str, Any]:
+def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
+            estrategia_asignacion=None) -> Dict[str, Any]:
     """Actualiza los parámetros de simulación indicados."""
     if tiempo_enfriado is not None:
         t = round(float(tiempo_enfriado), 1)
@@ -344,6 +365,8 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None) 
         if n <= 0:
             raise ValueError("El máximo de iteraciones debe ser mayor que 0.")
         cfg["max_iteraciones"] = n
+    if estrategia_asignacion is not None:
+        cfg["estrategia_asignacion"] = str(estrategia_asignacion)
     return cfg
 
 
