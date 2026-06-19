@@ -469,12 +469,23 @@ class TallerCilindros:
                     continue
                 break
 
-            # Una jaula no puede arrancar con menos de una pareja completa.
+            # Una jaula no puede arrancar con menos de una pareja completa
+            # ("pareja completa o nada"): si no se llegó a _BUFFER_CRC_SIZE, se
+            # vacían los cilindros parciales ya instalados al buffer CRC de la
+            # jaula (quedan comprometidos a ella y _instalar_pareja_o_parar los
+            # tomará primero al reactivar). Así la jaula PARADA arranca con 0
+            # trabajando, sin el estado híbrido (parada + 1 trabajando).
             if len(jaula.cilindros_trabajando) < _BUFFER_CRC_SIZE:
+                parciales = jaula.cilindros_trabajando
+                jaula.cilindros_trabajando = []
+                for cil in parciales:
+                    cil.estado = EstadoCilindro.CRC
+                    jaula.cilindros_crc.append(cil)
                 jaula.parada = True
                 logger.warning(
-                    "Jaula %s arranca PARADA: solo %d cilindro(s) en su rango de diámetros.",
-                    j_id, len(jaula.cilindros_trabajando)
+                    "Jaula %s arranca PARADA: solo %d cilindro(s) en su rango de "
+                    "diámetros (movidos al CRC a la espera de pareja).",
+                    j_id, len(parciales)
                 )
 
     def _instalar_en_jaula(self, cil: Cilindro, jaula_id: int, tiempo: datetime, motivo: str) -> None:

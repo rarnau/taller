@@ -66,3 +66,8 @@ def test_snapshots_consistentes(nombre):
 
         # 7. El detalle de máquinas cubre exactamente el parque de máquinas.
         assert set(sn.detalle_maquinas) == set(taller.maquinas), f"{ctx}: detalle_maquinas no cubre el parque de máquinas"
+
+        # 8. "Pareja completa o nada": una jaula PARADA no puede tener cilindros
+        #    trabajando (ni siquiera 1). Estado híbrido prohibido por invariante.
+        for j_id in sn.jaulas_paradas:
+            assert not sn.detalle_jaulas.get(j_id), f"{ctx}: jaula {j_id} PARADA con cilindros trabajando (estado híbrido)"
