@@ -24,7 +24,7 @@ Esquemas viejos (sin ``config_global``/``maquinas`` y con el dict suelto
 import json
 import os
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(_DIR, "user_config.json")
@@ -36,7 +36,7 @@ _TASAS_DEFECTO = {
     "desbaste": {"mm": 5.0, "tiempo_min": 480},
 }
 
-DEFAULTS: Dict[str, Any] = {
+DEFAULTS: dict[str, Any] = {
     "config_global": {
         "diametro_maximo": 575.0,
         "diametro_minimo": 520.0,
@@ -65,32 +65,32 @@ DEFAULTS: Dict[str, Any] = {
 
 # ── Carga / guardado ─────────────────────────────────────────────────────────
 
-def cargar_config() -> Dict[str, Any]:
+def cargar_config() -> dict[str, Any]:
     """Carga la configuración de usuario, migrando esquemas viejos.
 
     Devuelve los valores por defecto si el archivo no existe o es inválido.
     """
     if os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(CONFIG_PATH, encoding="utf-8") as f:
                 return migrar(json.load(f))
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             pass
     return _copia_defaults()
 
 
-def guardar_config(cfg: Dict[str, Any]) -> None:
+def guardar_config(cfg: dict[str, Any]) -> None:
     """Guarda la configuración de usuario en disco."""
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
 
 
-def _copia_defaults() -> Dict[str, Any]:
+def _copia_defaults() -> dict[str, Any]:
     """Copia profunda de los valores por defecto (para no mutar el módulo)."""
     return json.loads(json.dumps(DEFAULTS))
 
 
-def migrar(cfg: Dict[str, Any]) -> Dict[str, Any]:
+def migrar(cfg: dict[str, Any]) -> dict[str, Any]:
     """Completa claves faltantes desde DEFAULTS y migra el esquema viejo.
 
     - Rellena ``config_global``, ``maquinas`` y ``rangos`` si faltan.
@@ -122,14 +122,14 @@ def migrar(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 # ── Getters ──────────────────────────────────────────────────────────────────
 
-def obtener_config_global(cfg: Dict[str, Any]) -> Dict[str, Any]:
+def obtener_config_global(cfg: dict[str, Any]) -> dict[str, Any]:
     """Devuelve los parámetros globales del taller."""
     cg = dict(DEFAULTS["config_global"])
     cg.update(cfg.get("config_global", {}))
     return cg
 
 
-def obtener_maquinas(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+def obtener_maquinas(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     """Devuelve la lista de máquinas con sus tasas y prioridad.
 
     Si la clave falta, devuelve una **copia** de los defaults (nunca la
@@ -139,7 +139,7 @@ def obtener_maquinas(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     return maquinas if maquinas is not None else _copia_defaults()["maquinas"]
 
 
-def obtener_rangos(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+def obtener_rangos(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     """Devuelve los rangos de diámetros por jaula desde la configuración.
 
     Si la clave falta, devuelve una **copia** de los defaults (nunca la
@@ -149,30 +149,30 @@ def obtener_rangos(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rangos if rangos is not None else _copia_defaults()["rangos"]
 
 
-def obtener_prioridades(cfg: Dict[str, Any]) -> Dict[str, str]:
+def obtener_prioridades(cfg: dict[str, Any]) -> dict[str, str]:
     """Devuelve las prioridades por máquina (derivadas de la lista de máquinas)."""
     return {m["nombre"]: m.get("prioridad", "produccion") for m in obtener_maquinas(cfg)}
 
 
-def obtener_tiempo_enfriado(cfg: Dict[str, Any]) -> float:
+def obtener_tiempo_enfriado(cfg: dict[str, Any]) -> float:
     """Devuelve el tiempo de enfriado (horas) tras retirar un cilindro de la jaula."""
     return float(cfg.get("tiempo_enfriado_h", DEFAULTS["tiempo_enfriado_h"]))
 
 
-def obtener_max_iteraciones(cfg: Dict[str, Any]) -> int:
+def obtener_max_iteraciones(cfg: dict[str, Any]) -> int:
     """Devuelve el máximo de iteraciones del bucle de simulación."""
     return int(cfg.get("max_iteraciones", DEFAULTS["max_iteraciones"]))
 
 
-def obtener_estrategia_asignacion(cfg: Dict[str, Any]) -> str:
+def obtener_estrategia_asignacion(cfg: dict[str, Any]) -> str:
     """Devuelve la clave de la estrategia de asignación de jaula destino."""
     return str(cfg.get("estrategia_asignacion", DEFAULTS["estrategia_asignacion"]))
 
 
 # ── Mutadores (capa única de CRUD usada por el CLI y la GUI) ──────────────────
 
-def set_config_global(cfg: Dict[str, Any], *, diametro_maximo=None, diametro_minimo=None,
-                      tiempo_traslado_crc_min=None, cantidad_jaulas=None) -> Dict[str, Any]:
+def set_config_global(cfg: dict[str, Any], *, diametro_maximo=None, diametro_minimo=None,
+                      tiempo_traslado_crc_min=None, cantidad_jaulas=None) -> dict[str, Any]:
     """Actualiza los campos indicados de ``config_global`` (los None se ignoran)."""
     cg = obtener_config_global(cfg)
     if diametro_maximo is not None:
@@ -187,16 +187,16 @@ def set_config_global(cfg: Dict[str, Any], *, diametro_maximo=None, diametro_min
     return cfg
 
 
-def _buscar_maquina(cfg: Dict[str, Any], nombre: str) -> Optional[Dict[str, Any]]:
+def _buscar_maquina(cfg: dict[str, Any], nombre: str) -> dict[str, Any] | None:
     for m in cfg.setdefault("maquinas", []):
         if m["nombre"] == nombre:
             return m
     return None
 
 
-def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: float,
+def add_maquina(cfg: dict[str, Any], nombre: str, *, prod_mm: float, prod_min: float,
                 desb_mm: float, desb_min: float, prioridad: str = "produccion",
-                turnos: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                turnos: dict[str, Any] | None = None) -> dict[str, Any]:
     """Agrega una máquina nueva. Lanza ValueError si el nombre ya existe.
 
     ``turnos`` (esquema de trabajo) es opcional; si se omite, la máquina opera
@@ -207,7 +207,7 @@ def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: f
         raise ValueError("El nombre de la máquina no puede estar vacío.")
     if _buscar_maquina(cfg, nombre):
         raise ValueError(f"Ya existe una máquina llamada '{nombre}'.")
-    maq: Dict[str, Any] = {
+    maq: dict[str, Any] = {
         "nombre": nombre,
         "prioridad": prioridad,
         "tasas": {
@@ -221,9 +221,9 @@ def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: f
     return cfg
 
 
-def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None,
+def set_maquina(cfg: dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None,
                 desb_mm=None, desb_min=None, prioridad=None,
-                turnos: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                turnos: dict[str, Any] | None = None) -> dict[str, Any]:
     """Modifica los campos indicados de una máquina existente.
 
     ``turnos`` reemplaza el esquema de trabajo cuando no es None.
@@ -249,13 +249,13 @@ def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None
     return cfg
 
 
-def obtener_turnos(cfg: Dict[str, Any], nombre: str) -> Optional[Dict[str, Any]]:
+def obtener_turnos(cfg: dict[str, Any], nombre: str) -> dict[str, Any] | None:
     """Devuelve el esquema de turnos de una máquina (None = 24/7 o inexistente)."""
     maq = _buscar_maquina(cfg, nombre)
     return maq.get("turnos") if maq else None
 
 
-def remove_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:
+def remove_maquina(cfg: dict[str, Any], nombre: str) -> dict[str, Any]:
     """Elimina una máquina por nombre. Lanza ValueError si no existe."""
     maqs = cfg.setdefault("maquinas", [])
     nuevas = [m for m in maqs if m["nombre"] != nombre]
@@ -265,8 +265,8 @@ def remove_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:
     return cfg
 
 
-def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float,
-              perfil: Optional[str] = None) -> Dict[str, Any]:
+def set_rango(cfg: dict[str, Any], jaula: int, desde: float, hasta: float,
+              perfil: str | None = None) -> dict[str, Any]:
     """Crea o actualiza el rango de una jaula. Valida ``desde > hasta``.
 
     ``perfil`` es el perfil (bombatura) exigido por la jaula. Si es ``None`` se
@@ -295,7 +295,7 @@ def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float,
     return cfg
 
 
-def remove_rango(cfg: Dict[str, Any], jaula: int) -> Dict[str, Any]:
+def remove_rango(cfg: dict[str, Any], jaula: int) -> dict[str, Any]:
     """Elimina el rango de una jaula por número."""
     jaula = int(jaula)
     rangos = cfg.setdefault("rangos", [])
@@ -308,7 +308,7 @@ def remove_rango(cfg: Dict[str, Any], jaula: int) -> Dict[str, Any]:
 
 # ── Coherencia jaulas ⇄ rangos (fuente única usada por CLI y GUI) ─────────────
 
-def problemas_coherencia(cfg: Dict[str, Any]) -> List[str]:
+def problemas_coherencia(cfg: dict[str, Any]) -> list[str]:
     """Lista los problemas de coherencia entre ``cantidad_jaulas`` y los rangos.
 
     Una config coherente tiene **exactamente un rango por jaula**, con números de
@@ -329,7 +329,7 @@ def problemas_coherencia(cfg: Dict[str, Any]) -> List[str]:
     esperadas = set(range(1, n + 1))
     presentes = set(jaulas)
 
-    problemas: List[str] = []
+    problemas: list[str] = []
     dups = sorted(j for j, c in Counter(jaulas).items() if c > 1)
     faltan = sorted(esperadas - presentes)
     sobran = sorted(presentes - esperadas)
@@ -345,15 +345,15 @@ def problemas_coherencia(cfg: Dict[str, Any]) -> List[str]:
     return problemas
 
 
-def verificar_coherencia(cfg: Dict[str, Any]) -> None:
+def verificar_coherencia(cfg: dict[str, Any]) -> None:
     """Lanza ``ValueError`` si ``cfg`` es incoherente (ver ``problemas_coherencia``)."""
     problemas = problemas_coherencia(cfg)
     if problemas:
         raise ValueError(" ".join(problemas))
 
 
-def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
-            estrategia_asignacion=None) -> Dict[str, Any]:
+def set_sim(cfg: dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
+            estrategia_asignacion=None) -> dict[str, Any]:
     """Actualiza los parámetros de simulación indicados."""
     if tiempo_enfriado is not None:
         t = round(float(tiempo_enfriado), 1)
@@ -372,7 +372,7 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
 
 # ── Importación desde Excel de 4 hojas (siembra / migración) ──────────────────
 
-def cfg_desde_excel(ruta_excel: str) -> Dict[str, Any]:
+def cfg_desde_excel(ruta_excel: str) -> dict[str, Any]:
     """Extrae ``config_global`` y ``maquinas`` de un Excel con las hojas viejas.
 
     Lee las hojas ``Configuración`` y ``Máquinas`` de un archivo en formato
@@ -397,7 +397,7 @@ def cfg_desde_excel(ruta_excel: str) -> Dict[str, Any]:
 
     if "Máquinas" in xl.sheet_names:
         df = xl.parse("Máquinas")
-        maquinas: Dict[str, Dict[str, Any]] = {}
+        maquinas: dict[str, dict[str, Any]] = {}
         for _, row in df.iterrows():
             nombre = str(row["Máquina"])
             tipo = str(row["Tipo_Rectificado"])

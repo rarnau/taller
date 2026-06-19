@@ -24,7 +24,20 @@ pip install -r requirements-dev.txt   # adds pytest
 python -m pytest                       # runs tests/
 ```
 
-`tests/_escenarios.py` defines scenarios (PARADA, cooling, the 140-cylinder week, several strategies) and a deterministic `fingerprint()` (KPIs + snapshot count + alerts + final per-cylinder state). `tests/test_regresion.py` compares each run against `tests/golden_master.json`. When a behavior change is **intended**, regenerate the baseline on purpose with `python tests/_generar_golden.py`; otherwise a failing test means the engine changed behavior. There are no linters configured.
+`tests/_escenarios.py` defines scenarios (PARADA, cooling, the 140-cylinder week, several strategies) and a deterministic `fingerprint()` (KPIs + snapshot count + alerts + final per-cylinder state). `tests/test_regresion.py` compares each run against `tests/golden_master.json`. When a behavior change is **intended**, regenerate the baseline on purpose with `python tests/_generar_golden.py`; otherwise a failing test means the engine changed behavior.
+
+### Linting (ruff)
+
+`ruff` is configured in `pyproject.toml` (`[tool.ruff]`, rules `E`/`F`/`I`/`UP`/`B`, `line-length = 100`). It is a dev-only dependency (`requirements-dev.txt`).
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .          # report
+ruff check . --fix    # apply safe fixes (imports, annotations, ordering)
+ruff format .         # optional black-style formatter (not applied to the codebase yet)
+```
+
+`F403`/`F405` are ignored globally (`from config.tema import *` is intentional) and `F401` is ignored in `__init__.py` (package re-exports). A handful of advisory findings remain unfixed (compact one-liners with `;`, `raise ... from`, etc.) — clean up opportunistically, not in bulk. After any `--fix`/`format`, run `python -m pytest` to confirm the golden master is unchanged.
 
 ## Architecture Overview
 

@@ -13,10 +13,9 @@ Si un cambio de comportamiento es *esperado*, regenerar el golden a propósito::
 import json
 
 import pytest
-
 from _escenarios import ESCENARIOS, GOLDEN_PATH, ejecutar_escenario, fingerprint
 
-with open(GOLDEN_PATH, "r", encoding="utf-8") as _f:
+with open(GOLDEN_PATH, encoding="utf-8") as _f:
     _GOLDEN = json.load(_f)
 
 

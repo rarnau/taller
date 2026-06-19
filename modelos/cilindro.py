@@ -2,7 +2,8 @@
 Modelo que representa un cilindro físico en el taller.
 """
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any
+
 from .enums import EstadoCilindro, TipoRectificado
 
 
@@ -27,32 +28,32 @@ class Cilindro:
         id_cilindro: str,
         diametro: float,
         estado: EstadoCilindro = EstadoCilindro.DISPONIBLE,
-        jaula: Optional[int] = None,
-        posicion: Optional[int] = None
+        jaula: int | None = None,
+        posicion: int | None = None
     ):
         self.id: str = id_cilindro
         self.diametro: float = diametro
         self.diametro_original: float = diametro
         self.estado: EstadoCilindro = estado
-        self.jaula: Optional[int] = jaula
-        self.posicion: Optional[int] = posicion
+        self.jaula: int | None = jaula
+        self.posicion: int | None = posicion
 
         # Información de rectificado en curso
-        self.maquina_actual: Optional[str] = None
-        self.rectificado_inicio: Optional[datetime] = None
-        self.rectificado_fin: Optional[datetime] = None
-        self.tipo_rectificado_actual: Optional[TipoRectificado] = None
+        self.maquina_actual: str | None = None
+        self.rectificado_inicio: datetime | None = None
+        self.rectificado_fin: datetime | None = None
+        self.tipo_rectificado_actual: TipoRectificado | None = None
         self.mm_a_rectificar: float = 0.0
 
         # Perfil (bombatura) físico del cilindro: propiedad "pegajosa" que sólo
         # cambia al rectificar (= perfil de la jaula destino elegida). None = sin
         # perfil definido. jaula_destino marca la jaula a la que se lo destinó al
         # iniciar el rectificado (None = stock sin destino, p. ej. el inicial).
-        self.perfil: Optional[str] = None
-        self.jaula_destino: Optional[int] = None
+        self.perfil: str | None = None
+        self.jaula_destino: int | None = None
 
         # Historial de eventos para trazabilidad
-        self.historial: List[Dict[str, Any]] = []
+        self.historial: list[dict[str, Any]] = []
 
     def registrar_evento(self, tiempo: datetime, evento: str, detalle: str = "") -> None:
         """Añade una entrada al historial del cilindro."""

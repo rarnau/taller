@@ -31,7 +31,6 @@ modelar la tasa de falla de las máquinas.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
 
 # Horas [inicio, fin) de cada turno; fin <= inicio indica cruce de medianoche.
 TURNOS = [(6, 14), (14, 22), (22, 6)]
@@ -42,16 +41,16 @@ NUM_TURNOS = len(TURNOS)
 DIAS = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"]
 DIAS_NOMBRES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-Turnos = Dict[str, List[bool]]
-Grilla = List[List[bool]]
+Turnos = dict[str, list[bool]]
+Grilla = list[list[bool]]
 
 
-def _filas(rows: List[List[bool]]) -> Turnos:
+def _filas(rows: list[list[bool]]) -> Turnos:
     """Construye un dict de turnos a partir de 7 filas de 3 booleanos."""
     return {DIAS[i]: list(rows[i]) for i in range(7)}
 
 
-PRESETS: Dict[str, Turnos] = {
+PRESETS: dict[str, Turnos] = {
     "24x7": _filas([[True] * 3 for _ in range(7)]),
     "off": _filas([[False] * 3 for _ in range(7)]),
     "lv3": _filas([[True] * 3 if i < 5 else [False] * 3 for i in range(7)]),
@@ -59,7 +58,7 @@ PRESETS: Dict[str, Turnos] = {
 PRESET_LABELS = {"24x7": "24/7", "off": "Apagada", "lv3": "L–V 3 turnos"}
 
 
-def normalizar(turnos: Optional[Turnos]) -> Turnos:
+def normalizar(turnos: Turnos | None) -> Turnos:
     """Devuelve un dict completo (7 días × 3 booleanos), tolerando entradas parciales.
 
     ``None`` se interpreta como 24/7 (todos los turnos activos).
@@ -74,7 +73,7 @@ def normalizar(turnos: Optional[Turnos]) -> Turnos:
     return out
 
 
-def expandir(turnos: Optional[Turnos]) -> Grilla:
+def expandir(turnos: Turnos | None) -> Grilla:
     """Expande la config de turnos a una grilla horaria semanal 7×24 de booleanos.
 
     ``grilla[dia][hora]`` es ``True`` si la máquina está operativa esa hora.
@@ -98,7 +97,7 @@ def expandir(turnos: Optional[Turnos]) -> Grilla:
     return grilla
 
 
-def es_completo(turnos: Optional[Turnos]) -> bool:
+def es_completo(turnos: Turnos | None) -> bool:
     """``True`` si el esquema equivale a 24/7 (todos los turnos activos)."""
     t = normalizar(turnos)
     return all(all(t[d]) for d in DIAS)
@@ -126,13 +125,13 @@ def parse_compacto(s: str) -> Turnos:
     return turnos
 
 
-def format_compacto(turnos: Optional[Turnos]) -> str:
+def format_compacto(turnos: Turnos | None) -> str:
     """Serializa los turnos al formato compacto de :func:`parse_compacto`."""
     t = normalizar(turnos)
     return " ".join("".join("1" if x else "0" for x in t[d]) for d in DIAS)
 
 
-def resumen(turnos: Optional[Turnos]) -> str:
+def resumen(turnos: Turnos | None) -> str:
     """Etiqueta corta legible del esquema de turnos (para GUI/CLI)."""
     if turnos is None or es_completo(turnos):
         return "24/7"

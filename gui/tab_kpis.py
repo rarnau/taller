@@ -1,7 +1,8 @@
 """KPIs adaptados."""
 import customtkinter as ctk
-from modelos.kpis import calcular_kpis
+
 from config.tema import *
+from modelos.kpis import calcular_kpis
 
 
 def _mezclar(c1, c2, t):

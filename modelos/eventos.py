@@ -2,7 +2,8 @@
 Definición de eventos y estados instantáneos (snapshots) de la simulación.
 """
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 from .enums import TipoRectificado
 
 
@@ -29,11 +30,11 @@ class EventoCambio:
 class Alerta:
     """Notificación generada durante la simulación (INFO, WARNING o CRITICO)."""
 
-    def __init__(self, tiempo: datetime, tipo: str, mensaje: str, jaula: Optional[int] = None):
+    def __init__(self, tiempo: datetime, tipo: str, mensaje: str, jaula: int | None = None):
         self.tiempo: datetime = tiempo
         self.tipo: str = tipo       # "INFO" | "WARNING" | "CRITICO"
         self.mensaje: str = mensaje
-        self.jaula: Optional[int] = jaula
+        self.jaula: int | None = jaula
 
 
 class Snapshot:
@@ -46,26 +47,26 @@ class Snapshot:
         self.tiempo: datetime = tiempo
 
         # Conteos globales por estado
-        self.conteo_por_estado: Dict[str, int] = {}
+        self.conteo_por_estado: dict[str, int] = {}
         self.cantidad_disponibles: int = 0
         self.cantidad_crc_total: int = 0
         self.cantidad_bajas: int = 0
         self.maquinas_ocupadas: int = 0
 
         # Conteos por SubStock
-        self.conteo_por_substock: Dict[str, Dict[str, int]] = {}
-        self.disponibles_por_substock: Dict[str, int] = {}
+        self.conteo_por_substock: dict[str, dict[str, int]] = {}
+        self.disponibles_por_substock: dict[str, int] = {}
 
         # Conteo de CRC por jaula
-        self.crc_por_jaula: Dict[int, int] = {}
+        self.crc_por_jaula: dict[int, int] = {}
 
         # Jaulas detenidas (PARADA) en este instante por falta de stock
-        self.jaulas_paradas: List[int] = []
+        self.jaulas_paradas: list[int] = []
 
         # Detalle para visualización en tiempo real
-        self.detalle_jaulas: Dict[int, List[Dict[str, Any]]] = {}       # {jaula_id: [{"id", "d"}]}
-        self.detalle_crc: Dict[int, List[Dict[str, Any]]] = {}          # {jaula_id: [{"id", "d"}]}
-        self.detalle_maquinas: Dict[str, Optional[Dict[str, Any]]] = {} # {maq_id: {"id","d","progreso"} | None}
-        self.detalle_maquinas_operativa: Dict[str, bool] = {}           # {maq_id: dentro de turno operativo}
-        self.detalle_cola_rectificado: List[Dict[str, Any]] = []        # [{"id", "d"}]
-        self.detalle_enfriando: List[Dict[str, Any]] = []               # [{"id", "d"}]
+        self.detalle_jaulas: dict[int, list[dict[str, Any]]] = {}       # {jaula_id: [{"id", "d"}]}
+        self.detalle_crc: dict[int, list[dict[str, Any]]] = {}          # {jaula_id: [{"id", "d"}]}
+        self.detalle_maquinas: dict[str, dict[str, Any] | None] = {} # {maq_id: {"id","d","progreso"} | None}
+        self.detalle_maquinas_operativa: dict[str, bool] = {}           # {maq_id: dentro de turno operativo}
+        self.detalle_cola_rectificado: list[dict[str, Any]] = []        # [{"id", "d"}]
+        self.detalle_enfriando: list[dict[str, Any]] = []               # [{"id", "d"}]

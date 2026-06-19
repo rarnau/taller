@@ -15,6 +15,7 @@ Bandas (definidas en el test, aquí solo de referencia):
   Jaula 4: 555 < d ≤ 575  perfil 3
 """
 import os
+
 import pandas as pd
 
 SALIDA = os.path.join(os.path.dirname(__file__), "simulacion_caso_perfiles.xlsx")

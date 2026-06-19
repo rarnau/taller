@@ -20,24 +20,31 @@ import argparse
 import json
 import os
 import sys
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import persistencia as cfgmod
-from config.persistencia import (cargar_config, guardar_config, obtener_maquinas,
-                                  obtener_max_iteraciones, obtener_rangos,
-                                  obtener_tiempo_enfriado, obtener_estrategia_asignacion)
-from modelos.enums import TipoRectificado
-from modelos.kpis import calcular_kpis
-from modelos.estrategias import ESTRATEGIAS_SELECCION, ESTRATEGIAS_ASIGNACION
-from modelos.taller import TallerCilindros
+from config.persistencia import (
+    cargar_config,
+    guardar_config,
+    obtener_estrategia_asignacion,
+    obtener_maquinas,
+    obtener_max_iteraciones,
+    obtener_rangos,
+    obtener_tiempo_enfriado,
+)
 from modelos import turnos as turnos_mod
+from modelos.enums import TipoRectificado
+from modelos.estrategias import ESTRATEGIAS_ASIGNACION, ESTRATEGIAS_SELECCION
+from modelos.kpis import calcular_kpis
+from modelos.taller import TallerCilindros
 
 _TIPOS_RECT = [t.value for t in TipoRectificado]
 
 
-def _resolver_turnos(args) -> Optional[Dict[str, Any]]:
+def _resolver_turnos(args) -> dict[str, Any] | None:
     """Obtiene el esquema de turnos desde --turnos-preset o --turnos (o None)."""
     if getattr(args, "turnos_preset", None):
         return {k: list(v) for k, v in turnos_mod.PRESETS[args.turnos_preset].items()}
@@ -48,7 +55,7 @@ def _resolver_turnos(args) -> Optional[Dict[str, Any]]:
 
 # ── Núcleo reutilizable (sin argparse) ───────────────────────────────────────
 
-def construir_taller(cfg: Dict[str, Any], ruta_excel: str) -> TallerCilindros:
+def construir_taller(cfg: dict[str, Any], ruta_excel: str) -> TallerCilindros:
     """Construye un taller configurado y con los datos del Excel cargados.
 
     Aplica primero la configuración estructural (``configurar``) y luego los
@@ -64,10 +71,10 @@ def construir_taller(cfg: Dict[str, Any], ruta_excel: str) -> TallerCilindros:
 
 
 def ejecutar_simulacion(ruta_excel: str, estrategia: str = "mayor_diametro",
-                        config_path: Optional[str] = None,
-                        callback_log: Optional[Callable[[str], None]] = print,
-                        tiempo_enfriado: Optional[float] = None,
-                        max_iteraciones: Optional[int] = None) -> TallerCilindros:
+                        config_path: str | None = None,
+                        callback_log: Callable[[str], None] | None = print,
+                        tiempo_enfriado: float | None = None,
+                        max_iteraciones: int | None = None) -> TallerCilindros:
     """Carga datos + configuración, ejecuta la simulación y devuelve el taller.
 
     Replica la orquestación de ``App._simular()`` pero sin GUI. ``tiempo_enfriado``
@@ -89,10 +96,10 @@ def ejecutar_simulacion(ruta_excel: str, estrategia: str = "mayor_diametro",
     return taller
 
 
-def _cargar_config(config_path: Optional[str]) -> Dict[str, Any]:
+def _cargar_config(config_path: str | None) -> dict[str, Any]:
     """Carga la configuración del JSON indicado, o la de usuario por defecto."""
     if config_path:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             return cfgmod.migrar(json.load(f))
     return cargar_config()
 
@@ -105,7 +112,7 @@ def _escribir_json(obj: Any, ruta: str) -> None:
 
 # ── Formato de salida ────────────────────────────────────────────────────────
 
-def _formatear_resumen(kpis: Dict[str, Any]) -> str:
+def _formatear_resumen(kpis: dict[str, Any]) -> str:
     """Bloque legible de KPIs para imprimir en consola."""
     lineas = [
         "",
@@ -163,7 +170,7 @@ def _cmd_simular(args) -> int:
 
 # ── Comando: config ───────────────────────────────────────────────────────────
 
-def _print_config(cfg: Dict[str, Any]) -> None:
+def _print_config(cfg: dict[str, Any]) -> None:
     print(json.dumps(cfg, ensure_ascii=False, indent=2))
 
 
@@ -180,7 +187,7 @@ def _cmd_config(args) -> int:
         return 0
 
     if sub == "import":
-        with open(args.ruta, "r", encoding="utf-8") as f:
+        with open(args.ruta, encoding="utf-8") as f:
             cfg = cfgmod.migrar(json.load(f))
         guardar_config(cfg)
         print(f"Configuración importada desde: {args.ruta}")
@@ -379,7 +386,7 @@ def _construir_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     parser = _construir_parser()
     args = parser.parse_args(argv)
 

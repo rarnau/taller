@@ -8,18 +8,33 @@ configuración.
 """
 import customtkinter as ctk
 
-from config.tema import (
-    BG_CARD, FG, FG2, ACCENT, GREEN, RED, FONT_FAMILY,
-    FONT_SIZE, FONT_SIZE_MD, FONT_SIZE_LG, BTN_BLUE, BTN_BLUE_HOVER,
-)
 from config.persistencia import (
-    guardar_config, obtener_rangos, obtener_maquinas, obtener_config_global,
-    obtener_tiempo_enfriado, obtener_max_iteraciones, verificar_coherencia,
+    guardar_config,
+    obtener_config_global,
     obtener_estrategia_asignacion,
+    obtener_maquinas,
+    obtener_max_iteraciones,
+    obtener_rangos,
+    obtener_tiempo_enfriado,
+    verificar_coherencia,
 )
+from config.tema import (
+    ACCENT,
+    BG_CARD,
+    BTN_BLUE,
+    BTN_BLUE_HOVER,
+    FG,
+    FG2,
+    FONT_FAMILY,
+    FONT_SIZE,
+    FONT_SIZE_LG,
+    FONT_SIZE_MD,
+    GREEN,
+    RED,
+)
+from modelos import turnos as turnos_mod
 from modelos.enums import TipoRectificado
 from modelos.estrategias import ESTRATEGIAS_ASIGNACION
-from modelos import turnos as turnos_mod
 
 _TIPOS_RECT = [t.value for t in TipoRectificado]
 # Estrategias de asignación: etiqueta visible ↔ clave persistida (como el combo

@@ -1,0 +1,17 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = ["datos/*.xlsx", "config/user_config.json"]
+
+[tool.ruff.lint]
+# E/F = pycodestyle+pyflakes, I = orden de imports, UP = pyupgrade, B = bugbear
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501",   # largo de linea (lo maneja el formatter, no el linter)
+    "F403",   # 'from config.tema import *' es un patron intencional del proyecto
+    "F405",   # nombres que pueden venir de ese import *
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Los __init__.py re-exportan la API publica del paquete a proposito.
+"__init__.py" = ["F401"]

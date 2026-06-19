@@ -16,6 +16,7 @@ configuración del taller (parámetros globales, máquinas y rangos) vive en
 config/user_config.json y se gestiona desde la pantalla Configuración o el CLI.
 """
 import os
+
 import pandas as pd
 
 SALIDA = os.path.join(os.path.dirname(__file__), "simulacion_caso_parada.xlsx")

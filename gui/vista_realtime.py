@@ -2,8 +2,8 @@
 Componentes visuales para la representación en tiempo real del taller.
 """
 import customtkinter as ctk
-from config.tema import *
 
+from config.tema import *
 
 # Alto (px) del área de cada barra del gráfico de stock disponible por jaula.
 _ALTO_BARRA = 90

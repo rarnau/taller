@@ -3,9 +3,10 @@ Modelo de una máquina rectificadora de cilindros.
 """
 from bisect import bisect_right
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, Tuple
-from .enums import EstadoCilindro, TipoRectificado
+from typing import Any
+
 from .cilindro import Cilindro
+from .enums import EstadoCilindro, TipoRectificado
 
 
 class MaquinaRectificadora:
@@ -22,20 +23,20 @@ class MaquinaRectificadora:
     def __init__(self, nombre: str):
         self.nombre: str = nombre
         self.ocupada: bool = False
-        self.cilindro_actual: Optional[Cilindro] = None
-        self.tiempo_fin_rectificado: Optional[datetime] = None
+        self.cilindro_actual: Cilindro | None = None
+        self.tiempo_fin_rectificado: datetime | None = None
 
         # {tipo_str: {"mm": float, "t_min": float, "rate": float}}
-        self.tasas_rectificado: Dict[str, Dict[str, float]] = {}
+        self.tasas_rectificado: dict[str, dict[str, float]] = {}
         self.prioridad_defecto: TipoRectificado = TipoRectificado.PRODUCCION
 
-        self.historial_trabajo: List[Dict[str, Any]] = []
+        self.historial_trabajo: list[dict[str, Any]] = []
         self.tiempo_total_ocupada_min: float = 0.0
 
         # Esquema de trabajo: grilla horaria semanal 7×24 de booleanos
         # (grilla[weekday][hora]). None = siempre operativa (24/7), que reproduce
         # exactamente el comportamiento histórico. Ver modelos/turnos.py.
-        self.grilla_operativa: Optional[List[List[bool]]] = None
+        self.grilla_operativa: list[list[bool]] | None = None
         # Minutos de trabajo (tiempo operativo) del rectificado en curso; sirve
         # de denominador para el progreso del snapshot.
         self.minutos_trabajo_actual: float = 0.0
@@ -47,9 +48,9 @@ class MaquinaRectificadora:
         # iniciar_rectificado y el progreso por snapshot se resuelve por bisect
         # (O(log h)) en vez de recorrer la grilla cada vez. Con grilla 24/7 los
         # hitos quedan None y el progreso es reloj directo.
-        self._inicio_rectificado: Optional[datetime] = None
-        self._hitos_t: Optional[List[datetime]] = None
-        self._hitos_min: Optional[List[float]] = None
+        self._inicio_rectificado: datetime | None = None
+        self._hitos_t: list[datetime] | None = None
+        self._hitos_min: list[float] | None = None
 
     def configurar_tasa(self, tipo: str, mm_removidos: float, tiempo_minutos: float) -> None:
         """Registra la velocidad de rectificado para un tipo de pase."""
@@ -112,7 +113,7 @@ class MaquinaRectificadora:
 
     def _construir_hitos_progreso(
         self, inicio: datetime, total_min: float
-    ) -> Tuple[List[datetime], List[float]]:
+    ) -> tuple[list[datetime], list[float]]:
         """Tabla de hitos (frontera_horaria, minutos_operativos_acumulados).
 
         Recorre ``inicio → fin`` hora por hora consumiendo solo las horas
@@ -125,8 +126,8 @@ class MaquinaRectificadora:
         Es la única fuente del fin operativo (ver ``calcular_fin_operativo``).
         Solo tiene sentido con ``grilla_operativa is not None`` y ``total_min > 0``.
         """
-        hitos_t: List[datetime] = [inicio]
-        hitos_min: List[float] = [0.0]
+        hitos_t: list[datetime] = [inicio]
+        hitos_min: list[float] = [0.0]
         restante = total_min
         acum = 0.0
         t = inicio
@@ -180,7 +181,7 @@ class MaquinaRectificadora:
             consumido += (tiempo - base).total_seconds() / 60.0
         return min(consumido, self._hitos_min[-1])
 
-    def proxima_apertura(self, desde: datetime) -> Optional[datetime]:
+    def proxima_apertura(self, desde: datetime) -> datetime | None:
         """Próximo instante operativo a partir de ``desde`` (None si nunca lo está)."""
         if self.grilla_operativa is None or self.esta_operativa(desde):
             return desde
@@ -198,7 +199,7 @@ class MaquinaRectificadora:
         tiempo_actual: datetime,
         tipo: TipoRectificado,
         mm: float,
-        perfil: Optional[str] = None
+        perfil: str | None = None
     ) -> None:
         """Inicia el proceso de rectificado para un cilindro.
 
@@ -248,7 +249,7 @@ class MaquinaRectificadora:
         })
         self.tiempo_total_ocupada_min += duracion_minutos
 
-    def finalizar_rectificado(self, tiempo_actual: datetime) -> Optional[Cilindro]:
+    def finalizar_rectificado(self, tiempo_actual: datetime) -> Cilindro | None:
         """Finaliza el proceso actual, actualiza el cilindro y libera la máquina."""
         if not self.ocupada or not self.cilindro_actual:
             return None

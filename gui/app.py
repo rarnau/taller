@@ -3,29 +3,29 @@ Ventana principal mejorada con CustomTkinter.
 """
 import os
 import threading
-import time
-import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
+import customtkinter as ctk
 import matplotlib
+
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from config.tema import *
 from config.persistencia import cargar_config
-from modelos.estrategias import ESTRATEGIAS_SELECCION
-from modelos.taller import TallerCilindros
+from config.tema import *
+from gui.dashboard_detalle import crear_dashboard_detalle
+from gui.dashboard_principal import crear_dashboard_principal
+from gui.tab_config import crear_tab_configuracion
 
 # Cada pestaña es un componente de display puro; App es el único que conoce
 # tanto el modelo (TallerCilindros) como la UI y los conecta.
 from gui.tab_consola import crear_consola
-from gui.vista_realtime import VistaRealTime
-from gui.dashboard_principal import crear_dashboard_principal
-from gui.dashboard_detalle import crear_dashboard_detalle
-from gui.tab_tabla import llenar_tabla
 from gui.tab_kpis import llenar_kpis
-from gui.tab_config import crear_tab_configuracion
+from gui.tab_tabla import llenar_tabla
+from gui.vista_realtime import VistaRealTime
+from modelos.estrategias import ESTRATEGIAS_SELECCION
+from modelos.taller import TallerCilindros
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")

@@ -11,9 +11,9 @@ sus conteos, KPIs derivados incoherentes, ceros colados en los SubStock), con
 mensajes legibles en lugar de un hash que cambia sin más.
 """
 import pytest
+from _escenarios import ESCENARIOS, ejecutar_escenario
 
 from modelos.enums import EstadoCilindro
-from _escenarios import ESCENARIOS, ejecutar_escenario
 
 # Campos que la GUI lee de cada Snapshot (vista_realtime / dashboards).
 _CAMPOS_GUI = {

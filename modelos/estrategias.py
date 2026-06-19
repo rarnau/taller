@@ -6,7 +6,6 @@ YA filtrada por prioridad de la máquina y devuelve el cilindro a rectificar.
 Para agregar una estrategia nueva: subclasar EstrategiaSeleccion y registrarla
 en ESTRATEGIAS_SELECCION; la GUI y el CLI la toman de ahí.
 """
-from typing import Dict, List, Optional
 
 from .cilindro import Cilindro
 from .enums import EstadoCilindro, TipoRectificado
@@ -19,7 +18,7 @@ class EstrategiaSeleccion:
     clave: str = ""
     etiqueta: str = ""
 
-    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
+    def seleccionar(self, cola: list[Cilindro], maquina: MaquinaRectificadora | None) -> Cilindro:
         raise NotImplementedError
 
 
@@ -56,7 +55,7 @@ class _MenorMmDesbasteFifoProduccion(EstrategiaSeleccion):
         return cola[0]
 
 
-ESTRATEGIAS_SELECCION: Dict[str, EstrategiaSeleccion] = {
+ESTRATEGIAS_SELECCION: dict[str, EstrategiaSeleccion] = {
     e.clave: e for e in (
         _MayorDiametro(),
         _MenorDiametro(),
@@ -91,7 +90,7 @@ class EstrategiaAsignacion:
     clave: str = ""
     etiqueta: str = ""
 
-    def asignar(self, cilindro: Cilindro, jaulas_candidatas: List[int], taller) -> int:
+    def asignar(self, cilindro: Cilindro, jaulas_candidatas: list[int], taller) -> int:
         raise NotImplementedError
 
 
@@ -122,7 +121,7 @@ class _JaulaMasNecesitada(EstrategiaAsignacion):
         return min(jaulas_candidatas, key=_orden)
 
 
-ESTRATEGIAS_ASIGNACION: Dict[str, EstrategiaAsignacion] = {
+ESTRATEGIAS_ASIGNACION: dict[str, EstrategiaAsignacion] = {
     e.clave: e for e in (
         _JaulaMasNecesitada(),
     )

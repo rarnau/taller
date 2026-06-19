@@ -2,12 +2,24 @@
 from datetime import timedelta
 
 import numpy as np
+from matplotlib.dates import DateFormatter, date2num
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
-from matplotlib.dates import DateFormatter, date2num
 from matplotlib.patches import Patch
-from config.tema import (BG, BG2, BG3, FG, FG2, ACCENT, GREEN, ORANGE, RED, RED_DARK,
-                          PURPLE, COLORES_ESTADO, SS_COLORS, TIPO_RECT_COLORS)
+
+from config.tema import (
+    ACCENT,
+    BG2,
+    BG3,
+    COLORES_ESTADO,
+    FG,
+    GREEN,
+    ORANGE,
+    PURPLE,
+    RED,
+    RED_DARK,
+    TIPO_RECT_COLORS,
+)
 from modelos.kpis import calcular_kpis
 
 

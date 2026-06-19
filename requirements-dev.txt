@@ -1,3 +1,4 @@
 # Dependencias solo para desarrollo/tests (no para ejecutar la app).
 -r requirements.txt
 pytest>=8.0
+ruff>=0.6

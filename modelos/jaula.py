@@ -2,7 +2,7 @@
 Representa una jaula de laminación.
 """
 from datetime import datetime
-from typing import List, Optional
+
 from .cilindro import Cilindro
 
 
@@ -17,10 +17,10 @@ class Jaula:
 
     def __init__(self, numero: int):
         self.numero = numero
-        self.cilindros_trabajando: List[Cilindro] = []
-        self.cilindros_crc: List[Cilindro] = []
+        self.cilindros_trabajando: list[Cilindro] = []
+        self.cilindros_crc: list[Cilindro] = []
         self.parada: bool = False
-        self.parada_desde: Optional[datetime] = None
+        self.parada_desde: datetime | None = None
 
     def __repr__(self):
         estado = " PARADA" if self.parada else ""

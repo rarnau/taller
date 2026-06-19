@@ -1,8 +1,10 @@
 """Tabla adaptada."""
 import tkinter as tk
 from tkinter import ttk
+
 import customtkinter as ctk
-from config.tema import BG, BG2, BG3, FG, FG2, ACCENT, FONT_FAMILY, FONT_SIZE, TABLE_ROW_COLORS
+
+from config.tema import TABLE_ROW_COLORS
 from modelos.enums import EstadoCilindro
 
 

@@ -1,6 +1,6 @@
 """Consola adaptada."""
-import customtkinter as ctk
 from tkinter import scrolledtext
+
 from config.tema import FG, FONT_MONO, FONT_SIZE
 
 

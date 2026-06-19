@@ -1,12 +1,12 @@
 """Cálculo de KPIs de una simulación ya ejecutada (sin dependencias de GUI)."""
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 
 from modelos.enums import EstadoCilindro
 
 
-def calcular_kpis(taller) -> Dict[str, Any]:
+def calcular_kpis(taller) -> dict[str, Any]:
     """Devuelve los KPIs de una simulación ya ejecutada.
 
     Única fuente de verdad para las métricas: la GUI (tab KPIs) y el CLI la
@@ -42,8 +42,8 @@ def calcular_kpis(taller) -> Dict[str, Any]:
     calendario_min = horizonte_h * 60
     t0 = taller.snapshots[0].tiempo if taller.snapshots else None
     t1 = taller.snapshots[-1].tiempo if taller.snapshots else None
-    utilizacion_maquinas: Dict[str, float] = {}
-    utilizacion_neta: Dict[str, float] = {}
+    utilizacion_maquinas: dict[str, float] = {}
+    utilizacion_neta: dict[str, float] = {}
     for nombre, mq in taller.maquinas.items():
         op_min = mq.minutos_operativos_entre(t0, t1) if t0 is not None else 0.0
         disp = (op_min / calendario_min * 100) if calendario_min > 0 else 0.0
