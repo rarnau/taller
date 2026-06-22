@@ -3,19 +3,23 @@
 Concentra todo el flujo del generador sintético de ``Programa_Cambios``:
 
 - **Configuración** del generador (movida desde la pestaña Configuración):
-  algoritmo, umbral de desbaste, horizonte y régimen de turnos del laminador.
-- **Adaptación**: subir historia (refit incremental o desde cero) e información
-  útil del modelo aprendido y persistido.
-- **Generación**: seed reproducible + botón para generar y simular.
-- **Timeline** de los cambios generados, por jaula, sombreando los tramos en que
-  la línea quedó PARADA (reusa ``_marcar_paradas`` del dashboard principal).
+  algoritmo, umbral de desbaste, ventana de fechas (inicio/fin) y régimen de
+  turnos del laminador.
+- **Adaptación**: subir historia (refit incremental o desde cero), información
+  útil del modelo y un popup para elegir modelo, reajustarlo y previsualizar.
+- **Generación**: seed reproducible; "Generar cambios" los deja disponibles (la
+  simulación se ejecuta aparte desde el panel lateral) o se sube un Excel de cambios.
+- **Timeline** de los cambios generados, por jaula, sombreando en gris los días
+  sin turno (no se trabaja) y en rojo los tramos con la línea PARADA (tras simular;
+  reusa ``_marcar_paradas`` del dashboard principal).
 
 Como ``tab_config``, este widget lee/escribe ``app.user_cfg`` y opera sobre
 ``app.taller``; la App sigue siendo la dueña del modelo y la simulación.
 """
 import customtkinter as ctk
 import pandas as pd
-from tkinter import filedialog, messagebox
+from datetime import timedelta
+from tkinter import filedialog, messagebox, ttk
 
 from matplotlib.figure import Figure
 from matplotlib.dates import DateFormatter
@@ -52,6 +56,61 @@ def _card(parent, titulo, **pack_kw):
     cuerpo = ctk.CTkFrame(card, fg_color="transparent")
     cuerpo.pack(fill="both", expand=True, padx=16, pady=(0, 12))
     return cuerpo
+
+
+def _tramos_sin_turno(grilla, t0, t1):
+    """Tramos (inicio, fin) en [t0, t1) no operativos del régimen de cambios.
+
+    Análogo a ``dashboard_principal._tramos_parada_maquina`` pero sobre la grilla
+    del laminador. Devuelve [] con régimen 24/7 (``grilla is None``).
+    """
+    if grilla is None:
+        return []
+    tramos = []
+    t = t0.replace(minute=0, second=0, microsecond=0)
+    ini = None
+    while t < t1:
+        if not grilla[t.weekday()][t.hour]:
+            if ini is None:
+                ini = max(t, t0)
+        elif ini is not None:
+            tramos.append((ini, t))
+            ini = None
+        t += timedelta(hours=1)
+    if ini is not None:
+        tramos.append((ini, t1))
+    return tramos
+
+
+def _resumen_modelo(m):
+    """Texto con los parámetros aprendidos de un modelo (para label y popup)."""
+    if not m:
+        return "Sin adaptación."
+    jaulas = m.get("jaulas", {})
+    por_jaula = []
+    for j in sorted(jaulas, key=int):
+        mj = jaulas[j]
+        if "duracion" in mj:  # empírico: muestras acumuladas
+            por_jaula.append(f"  jaula {j}: {len(mj['duracion'])} campañas")
+        else:  # markov: estados + transiciones
+            n = sum(len(s.get("duracion", [])) for s in mj.get("muestras", {}).values())
+            est = len(mj.get("muestras", {}))
+            trans = sum(len(d) for d in mj.get("transiciones", {}).values())
+            por_jaula.append(f"  jaula {j}: {n} campañas, {est} estados, {trans} transiciones")
+    fmin = (m.get("fecha_min") or "—")[:10]
+    fmax = (m.get("fecha_max") or "—")[:10]
+    return (f"Generador: {m.get('clave')}\n"
+            f"Filas acumuladas: {m.get('n_filas', 0)}\n"
+            f"Período: {fmin} → {fmax}\n" + "\n".join(por_jaula))
+
+
+def _leer_historia(fp):
+    """Lee una historia desde CSV o Excel (hoja 'Historia' o la primera)."""
+    if fp.lower().endswith(".csv"):
+        return pd.read_csv(fp)
+    xl = pd.ExcelFile(fp, engine="openpyxl")
+    hoja = "Historia" if "Historia" in xl.sheet_names else xl.sheet_names[0]
+    return xl.parse(hoja)
 
 
 def _fila_entry(parent, etiqueta, ayuda=None, ancho=110):
@@ -97,7 +156,8 @@ class TabGeneracion(ctk.CTkFrame):
             fila_gen, values=list(_GEN_ETIQUETAS.keys()), width=210, state="readonly")
         self._combo_generador.pack(side="left", padx=4)
         self._entry_umbral = _fila_entry(cfg, "Umbral desbaste", "mm")
-        self._entry_horizonte = _fila_entry(cfg, "Horizonte", "días")
+        self._entry_fecha_ini = _fila_entry(cfg, "Fecha inicio", "YYYY-MM-DD")
+        self._entry_fecha_fin = _fila_entry(cfg, "Fecha fin", "YYYY-MM-DD")
         fila_tc = ctk.CTkFrame(cfg, fg_color="transparent")
         fila_tc.pack(fill="x", pady=2)
         ctk.CTkLabel(fila_tc, text="Turnos (cambios)", width=150, anchor="w", text_color=FG,
@@ -119,6 +179,12 @@ class TabGeneracion(ctk.CTkFrame):
         self._chk_reiniciar.pack(anchor="w", pady=(0, 4))
         ctk.CTkButton(adap, text="📈 Subir historia", height=30,
                       command=self._subir_historia).pack(fill="x", pady=2)
+        self._btn_ajustar = ctk.CTkButton(
+            adap, text="🔍 Ver / ajustar adaptación", height=30, state="disabled",
+            fg_color="transparent", border_width=1, border_color=ACCENT,
+            text_color=ACCENT, hover_color=BG_CARD,
+            command=self._abrir_popup_adaptacion)
+        self._btn_ajustar.pack(fill="x", pady=2)
         self._label_modelo = ctk.CTkLabel(
             adap, text="", anchor="w", justify="left",
             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE), text_color=FG2)
@@ -135,10 +201,14 @@ class TabGeneracion(ctk.CTkFrame):
         ctk.CTkButton(gen, text="🎲 Nueva seed", height=26,
                       fg_color="transparent", border_width=1, border_color=ACCENT,
                       text_color=ACCENT, command=self._nueva_seed).pack(fill="x", pady=2)
-        ctk.CTkButton(gen, text="▶ Generar cambios y simular", height=34,
+        ctk.CTkButton(gen, text="▶ Generar cambios", height=34,
                       font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD, weight="bold"),
                       fg_color=GREEN, hover_color="#2BB46B",
-                      command=self._generar_cambios).pack(fill="x", pady=(4, 0))
+                      command=self._generar_cambios).pack(fill="x", pady=(4, 2))
+        ctk.CTkButton(gen, text="📁 Subir Excel de cambios", height=30,
+                      fg_color="transparent", border_width=1, border_color=ACCENT,
+                      text_color=ACCENT, hover_color=BG_CARD,
+                      command=self._subir_cambios).pack(fill="x", pady=2)
         self._label_estado = ctk.CTkLabel(
             gen, text="", anchor="w", justify="left",
             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE), text_color=FG2)
@@ -160,10 +230,14 @@ class TabGeneracion(ctk.CTkFrame):
             gc["generador"], next(iter(_GEN_ETIQUETAS))))
         self._entry_umbral.delete(0, "end")
         self._entry_umbral.insert(0, f"{float(gc['umbral_desbaste_mm']):.1f}")
-        self._entry_horizonte.delete(0, "end")
-        self._entry_horizonte.insert(0, str(int(gc["horizonte_dias"])))
+        self._entry_fecha_ini.delete(0, "end")
+        self._entry_fecha_ini.insert(0, gc.get("fecha_inicio") or "")
+        self._entry_fecha_fin.delete(0, "end")
+        self._entry_fecha_fin.insert(0, gc.get("fecha_fin") or "")
         self._turnos_holder[0] = obtener_turnos_cambios(cfg)
         self._btn_turnos.configure(text=turnos_mod.resumen(self._turnos_holder[0]))
+        if self.app._historia_df is not None:
+            self._btn_ajustar.configure(state="normal")
         self._actualizar_label_modelo()
 
     def _actualizar_label_modelo(self):
@@ -173,23 +247,7 @@ class TabGeneracion(ctk.CTkFrame):
             self._label_modelo.configure(
                 text="Sin adaptación.\nSuba una historia para entrenar el modelo.")
             return
-        jaulas = m.get("jaulas", {})
-        por_jaula = []
-        for j in sorted(jaulas, key=int):
-            mj = jaulas[j]
-            # nº de campañas observadas por jaula (empírico: muestras; markov: conteos)
-            n = len(mj.get("duracion", [])) if "duracion" in mj else \
-                sum(len(s.get("duracion", [])) for s in mj.get("muestras", {}).values())
-            por_jaula.append(f"  jaula {j}: {n} campañas")
-        txt = (f"Generador: {m.get('clave')}\n"
-               f"Filas acumuladas: {m.get('n_filas', 0)}\n"
-               f"Período: {self._fmt_fecha(m.get('fecha_min'))} → {self._fmt_fecha(m.get('fecha_max'))}\n"
-               + "\n".join(por_jaula))
-        self._label_modelo.configure(text=txt)
-
-    @staticmethod
-    def _fmt_fecha(iso):
-        return (iso or "—")[:10]
+        self._label_modelo.configure(text=_resumen_modelo(m))
 
     # ── Acciones ─────────────────────────────────────────────────────────
 
@@ -204,12 +262,21 @@ class TabGeneracion(ctk.CTkFrame):
             generador = _GEN_ETIQUETAS.get(
                 self._combo_generador.get(), next(iter(_GEN_ETIQUETAS.values())))
             umbral = float(self._entry_umbral.get().strip())
-            horizonte = int(float(self._entry_horizonte.get().strip()))
+            fecha_ini = self._entry_fecha_ini.get().strip()
+            fecha_fin = self._entry_fecha_fin.get().strip()
+            # Validar formato de fecha (si no están vacías).
+            for f in (fecha_ini, fecha_fin):
+                if f:
+                    pd.to_datetime(f)
             set_generador_cambios(self.app.user_cfg, generador=generador,
-                                  umbral_desbaste=umbral, horizonte_dias=horizonte)
+                                  umbral_desbaste=umbral,
+                                  fecha_inicio=fecha_ini, fecha_fin=fecha_fin)
             set_turnos_cambios(self.app.user_cfg, self._turnos_holder[0])
-        except (ValueError, TypeError):
-            self._estado("Valores inválidos: revise umbral (mm) y horizonte (días).", error=True)
+        except ValueError as e:
+            self._estado(str(e), error=True)
+            return
+        except Exception:
+            self._estado("Valores inválidos: revise umbral (mm) y fechas (YYYY-MM-DD).", error=True)
             return
         guardar_config(self.app.user_cfg)
         self.app.taller.configurar(self.app.user_cfg)
@@ -223,12 +290,9 @@ class TabGeneracion(ctk.CTkFrame):
         if not fp:
             return
         try:
-            if fp.lower().endswith(".csv"):
-                historia = pd.read_csv(fp)
-            else:
-                xl = pd.ExcelFile(fp, engine="openpyxl")
-                hoja = "Historia" if "Historia" in xl.sheet_names else xl.sheet_names[0]
-                historia = xl.parse(hoja)
+            historia = _leer_historia(fp)
+            self.app._historia_df = historia  # se conserva para el popup de ajuste
+            self._btn_ajustar.configure(state="normal")
             reiniciar = bool(self._chk_reiniciar.get())
             previo = None if reiniciar else self.app._modelo_gen
             # Se ajusta con el generador configurado; si no coincide con la clave del
@@ -240,14 +304,18 @@ class TabGeneracion(ctk.CTkFrame):
             self._actualizar_label_modelo()
             modo = "desde cero" if reiniciar else "incremental"
             self.app._log(f"Historia adaptada ({modo}): {self.app._modelo_gen['n_filas']} filas acumuladas.")
-            self._estado(f"✓ Adaptación {modo} ({self.app._modelo_gen['n_filas']} filas).", error=False)
+            self._estado(f"✓ Adaptación {modo} ({self.app._modelo_gen['n_filas']} filas). "
+                         f"Use 'Ver / ajustar' para previsualizar.", error=False)
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo adaptar la historia: {e}")
 
     def _generar_cambios(self):
-        """Genera el Programa_Cambios, dibuja el timeline y dispara la simulación."""
+        """Genera el Programa_Cambios, lo deja disponible y dibuja el timeline.
+
+        **No** simula: la simulación se ejecuta aparte desde el botón lateral.
+        """
         if self.app._stock_df is None:
-            messagebox.showwarning("Atención", "Primero cargue un Excel (para el stock).")
+            messagebox.showwarning("Atención", "Primero cargue el stock desde la pestaña Inventario.")
             return
         if not self.app._modelo_gen:
             messagebox.showwarning("Atención", "No hay modelo adaptado. Suba una historia primero.")
@@ -259,21 +327,139 @@ class TabGeneracion(ctk.CTkFrame):
             return
         try:
             cambios = gencambios.generar_cambios(self.app._modelo_gen, self.app.user_cfg, seed=seed)
-            self.app._cambios_generados = cambios
-            self.app.taller.configurar(self.app.user_cfg)
-            self.app.taller.cargar_datos_desde_dataframes(self.app._stock_df, cambios)
-            for aviso in self.app.taller.avisos_carga:
-                self.app._log(aviso)
-            self.app._sincronizar_vista_con_taller()
-            self.app._refrescar_combo_substocks()
-            self.refrescar_timeline()  # timeline inmediato (sin paradas aún)
-            self._estado(f"✓ {len(cambios)} cambios (seed={seed}). Simulando paradas…", error=False)
+            self._aplicar_cambios(cambios)
+            self._estado(f"✓ {len(cambios)} cambios (seed={seed}). "
+                         f"Ejecute la simulación desde el panel lateral.", error=False)
             self.app._log(f"Generados {len(cambios)} cambios (seed={seed}).")
-            # La simulación (en hilo) calcula las paradas; al terminar refresca el
-            # timeline vía App._simular_finalizado → refrescar_timeline().
-            self.app._simular()
         except Exception as e:
             messagebox.showerror("Error", f"No se pudieron generar los cambios: {e}")
+
+    def _subir_cambios(self):
+        """Carga un Programa_Cambios desde un Excel y lo deja disponible."""
+        if self.app._stock_df is None:
+            messagebox.showwarning("Atención", "Primero cargue el stock desde la pestaña Inventario.")
+            return
+        fp = filedialog.askopenfilename(
+            title="Seleccionar Excel de cambios (hoja Programa_Cambios)",
+            filetypes=[("Excel", "*.xlsx *.xls")])
+        if not fp:
+            return
+        try:
+            xl = pd.ExcelFile(fp, engine="openpyxl")
+            hoja = "Programa_Cambios" if "Programa_Cambios" in xl.sheet_names else xl.sheet_names[0]
+            cambios = xl.parse(hoja)
+            faltan = [c for c in gencambios.COLUMNAS_SALIDA if c not in cambios.columns]
+            if faltan:
+                raise ValueError(f"Faltan columnas en Programa_Cambios: {faltan}")
+            self._aplicar_cambios(cambios[gencambios.COLUMNAS_SALIDA])
+            self._estado(f"✓ {len(cambios)} cambios cargados del Excel. "
+                         f"Ejecute la simulación desde el panel lateral.", error=False)
+            self.app._log(f"Cambios cargados del Excel: {len(cambios)}.")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar el Excel de cambios: {e}")
+
+    def _aplicar_cambios(self, cambios):
+        """Deja los cambios disponibles, arma el taller con el stock y refresca el timeline."""
+        self.app._cambios_generados = cambios
+        self.app.taller.configurar(self.app.user_cfg)
+        self.app.taller.cargar_datos_desde_dataframes(self.app._stock_df, cambios)
+        for aviso in self.app.taller.avisos_carga:
+            self.app._log(aviso)
+        self.app._sincronizar_vista_con_taller()
+        self.app._refrescar_combo_substocks()
+        self.refrescar_timeline()  # sin paradas aún (no se simuló)
+
+    # ── Popup de previsualización + ajuste del modelo ────────────────────
+
+    def _abrir_popup_adaptacion(self):
+        """Popup para elegir modelo, reajustarlo sobre la historia y previsualizar."""
+        if self.app._historia_df is None:
+            messagebox.showinfo("Adaptación", "Suba una historia primero.")
+            return
+        win = ctk.CTkToplevel(self)
+        win.title("Ver / ajustar adaptación")
+        win.configure(fg_color=BG_CARD)
+        win.geometry("780x600")
+        win.transient(self.winfo_toplevel())
+        win.grab_set()
+
+        temp = {"modelo": None}  # modelo temporal en memoria (no persiste hasta Aplicar)
+
+        top = ctk.CTkFrame(win, fg_color="transparent")
+        top.pack(fill="x", padx=16, pady=(14, 6))
+        ctk.CTkLabel(top, text="Modelo:", text_color=FG).pack(side="left")
+        combo = ctk.CTkComboBox(top, values=list(_GEN_ETIQUETAS.keys()), width=260, state="readonly")
+        combo.set(self._combo_generador.get())
+        combo.pack(side="left", padx=8)
+        btn_ajustar = ctk.CTkButton(top, text="Ajustar", width=100)
+        btn_ajustar.pack(side="left", padx=4)
+
+        ctk.CTkLabel(win, text="Parámetros aprendidos (cambian según el modelo):",
+                     anchor="w", text_color=FG2).pack(fill="x", padx=16, pady=(6, 0))
+        params = ctk.CTkTextbox(win, height=150)
+        params.pack(fill="x", padx=16, pady=(0, 8))
+
+        ctk.CTkLabel(win, text="Previsualización temporal de cambios:",
+                     anchor="w", text_color=FG2).pack(fill="x", padx=16)
+        body = ctk.CTkFrame(win)
+        body.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        cols = ("Fecha_Hora", "Jaula", "Tipo", "mm")
+        tree = ttk.Treeview(body, columns=cols, show="headings", height=8, style="Treeview")
+        for c in cols:
+            tree.heading(c, text=c)
+            tree.column(c, width=160, anchor="center")
+        vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        tree.pack(fill="both", expand=True)
+
+        acc = ctk.CTkFrame(win, fg_color="transparent")
+        acc.pack(fill="x", padx=16, pady=(0, 14))
+        btn_cerrar = ctk.CTkButton(acc, text="Cerrar", width=100, fg_color="transparent",
+                                   border_width=1, border_color=FG2, text_color=FG2,
+                                   hover_color=BG_CARD, command=win.destroy)
+        btn_cerrar.pack(side="right", padx=4)
+        btn_apply = ctk.CTkButton(acc, text="Aplicar", width=120, state="disabled",
+                                  fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER)
+        btn_apply.pack(side="right", padx=4)
+
+        def _ajustar():
+            clave = _GEN_ETIQUETAS.get(combo.get(), next(iter(_GEN_ETIQUETAS.values())))
+            try:
+                modelo = gencambios.ajustar_modelo(self.app._historia_df, self.app.user_cfg, clave=clave)
+                temp["modelo"] = modelo
+                params.delete("1.0", "end")
+                params.insert("1.0", _resumen_modelo(modelo))
+                try:
+                    seed = int(self._entry_seed.get().strip())
+                except ValueError:
+                    seed = 0
+                preview = gencambios.generar_cambios(modelo, self.app.user_cfg, seed=seed)
+                tree.delete(*tree.get_children())
+                for _, r in preview.iterrows():
+                    tree.insert("", "end", values=(
+                        pd.to_datetime(r["Fecha_Hora"]).strftime("%Y-%m-%d %H:%M"),
+                        int(r["Jaula"]), r["Tipo_Rectificado"], r["mm_a_Rectificar"]))
+                btn_apply.configure(state="normal")
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo ajustar/previsualizar: {e}", parent=win)
+
+        def _aplicar():
+            if temp["modelo"] is None:
+                return
+            self.app._modelo_gen = temp["modelo"]
+            modmod.guardar_modelo(temp["modelo"])
+            set_generador_cambios(self.app.user_cfg, generador=temp["modelo"]["clave"])
+            guardar_config(self.app.user_cfg)
+            self._combo_generador.set(_GEN_CLAVE_A_ETIQUETA.get(
+                temp["modelo"]["clave"], next(iter(_GEN_ETIQUETAS))))
+            self._actualizar_label_modelo()
+            self.app._log(f"Adaptación aplicada: modelo {temp['modelo']['clave']}.")
+            win.destroy()
+
+        btn_ajustar.configure(command=_ajustar)
+        btn_apply.configure(command=_aplicar)
+        _ajustar()  # ajuste inicial con el modelo preseleccionado
 
     # ── Timeline ─────────────────────────────────────────────────────────
 
@@ -306,6 +492,17 @@ class TabGeneracion(ctk.CTkFrame):
 
         n_jaulas = max(taller.cantidad_jaulas, int(cambios["Jaula"].max()))
         fechas = pd.to_datetime(cambios["Fecha_Hora"])
+
+        # Sombrear los días/tramos sin turno del laminador (no se trabaja). Se
+        # dibuja primero para que quede por detrás de los puntos y las paradas.
+        grilla = gencambios.grilla_cambios_desde_cfg(self.app.user_cfg)
+        hay_sin_turno = False
+        if grilla is not None and len(fechas):
+            t0, t1 = fechas.min(), fechas.max() + pd.Timedelta(hours=1)
+            for ini, fin in _tramos_sin_turno(grilla, t0, t1):
+                ax.axvspan(ini, fin, color=FG2, alpha=0.13, zorder=0)
+                hay_sin_turno = True
+
         for tipo, color in TIPO_RECT_COLORS.items():
             mask = cambios["Tipo_Rectificado"] == tipo
             if mask.any():
@@ -324,6 +521,8 @@ class TabGeneracion(ctk.CTkFrame):
         ax.invert_yaxis()
         ax.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
         handles, labels = ax.get_legend_handles_labels()
+        if hay_sin_turno:
+            handles.append(Patch(facecolor=FG2, alpha=0.13, label="Sin turno (no se trabaja)"))
         if snaps and any(getattr(s, "jaulas_paradas", []) for s in snaps):
             handles.append(Patch(facecolor=RED, alpha=0.18, label="Línea parada"))
         ax.legend(handles=handles, loc="upper right", fontsize=8,

@@ -66,7 +66,19 @@ def test_set_generador_cambios():
     cfg = {}
     p.set_generador_cambios(cfg, generador="markov", umbral_desbaste=2.5, horizonte_dias=14)
     gc = p.obtener_generador_cambios(cfg)
-    assert gc == {"generador": "markov", "umbral_desbaste_mm": 2.5, "horizonte_dias": 14}
+    assert gc["generador"] == "markov"
+    assert gc["umbral_desbaste_mm"] == 2.5
+    assert gc["horizonte_dias"] == 14
+
+
+def test_set_generador_cambios_fechas():
+    cfg = {}
+    p.set_generador_cambios(cfg, fecha_inicio="2026-01-05", fecha_fin="2026-01-19")
+    gc = p.obtener_generador_cambios(cfg)
+    assert gc["fecha_inicio"] == "2026-01-05" and gc["fecha_fin"] == "2026-01-19"
+    # cadena vacía limpia la fecha
+    p.set_generador_cambios(cfg, fecha_inicio="")
+    assert p.obtener_generador_cambios(cfg)["fecha_inicio"] is None
 
 
 def test_set_generador_cambios_valida():
@@ -74,6 +86,8 @@ def test_set_generador_cambios_valida():
         p.set_generador_cambios({}, umbral_desbaste=-1)
     with pytest.raises(ValueError):
         p.set_generador_cambios({}, horizonte_dias=0)
+    with pytest.raises(ValueError):  # fin <= inicio
+        p.set_generador_cambios({}, fecha_inicio="2026-01-19", fecha_fin="2026-01-05")
 
 
 def test_turnos_cambios_24x7_no_persiste():

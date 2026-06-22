@@ -423,17 +423,19 @@ def _cmd_generar_cambios(args) -> int:
                   file=sys.stderr)
             return 2
 
-    inicio = None
-    if args.inicio:
-        try:
+    inicio = fin = None
+    try:
+        if args.inicio:
             inicio = pd.to_datetime(args.inicio).to_pydatetime()
-        except Exception:
-            print(f"Error: fecha de inicio inválida: {args.inicio}", file=sys.stderr)
-            return 2
+        if args.fin:
+            fin = pd.to_datetime(args.fin).to_pydatetime()
+    except Exception:
+        print(f"Error: fecha inválida (--inicio/--fin).", file=sys.stderr)
+        return 2
 
     seed = gencambios.resolver_seed(args.seed)
     gen = gencambios.obtener_generador(args.generador or modelo.get("clave"))
-    cambios_df = gen.generar(modelo, cfg, seed=seed, inicio=inicio,
+    cambios_df = gen.generar(modelo, cfg, seed=seed, inicio=inicio, fin=fin,
                              horizonte_dias=args.horizonte_dias,
                              grilla_cambios=gencambios.grilla_cambios_desde_cfg(cfg))
 
@@ -450,11 +452,14 @@ def _cmd_generar_cambios(args) -> int:
 def _cmd_config_generador(args, cfg) -> int:
     cfgmod.set_generador_cambios(cfg, generador=args.generador,
                                  umbral_desbaste=args.umbral_desbaste,
-                                 horizonte_dias=args.horizonte_dias)
+                                 horizonte_dias=args.horizonte_dias,
+                                 fecha_inicio=args.fecha_inicio,
+                                 fecha_fin=args.fecha_fin)
     guardar_config(cfg)
     gc = cfgmod.obtener_generador_cambios(cfg)
     print(f"Generador de cambios: generador={gc['generador']}, "
-          f"umbral_desbaste_mm={gc['umbral_desbaste_mm']}, horizonte_dias={gc['horizonte_dias']}")
+          f"umbral_desbaste_mm={gc['umbral_desbaste_mm']}, "
+          f"fecha_inicio={gc.get('fecha_inicio')}, fecha_fin={gc.get('fecha_fin')}")
     return 0
 
 
@@ -545,7 +550,9 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_gen.add_argument("--generador", choices=list(gencambios.GENERADORES_CAMBIOS))
     p_gen.add_argument("--umbral-desbaste", type=float,
                        help="mm a partir del cual el cambio se clasifica 'desbaste'.")
-    p_gen.add_argument("--horizonte-dias", type=int)
+    p_gen.add_argument("--horizonte-dias", type=int, help="(legacy) ventana en días.")
+    p_gen.add_argument("--fecha-inicio", help="Fecha de inicio de la generación (ISO YYYY-MM-DD).")
+    p_gen.add_argument("--fecha-fin", help="Fecha de fin de la generación (ISO YYYY-MM-DD).")
 
     p_tc = csub.add_parser("turnos-cambios", help="Régimen de turnos del laminador (cambios).")
     p_tc.add_argument("--turnos", metavar="COMPACTO",
@@ -568,9 +575,10 @@ def _construir_parser() -> argparse.ArgumentParser:
                       help="Historia opcional: si se pasa (o --ajustar), re-ajusta antes de generar.")
     p_gc.add_argument("--generador", choices=list(gencambios.GENERADORES_CAMBIOS))
     p_gc.add_argument("--seed", type=int, help="Seed (por defecto aleatoria reproducible).")
-    p_gc.add_argument("--horizonte-dias", type=int)
+    p_gc.add_argument("--horizonte-dias", type=int, help="(legacy) ventana en días desde --inicio.")
     p_gc.add_argument("--umbral-desbaste", type=float)
-    p_gc.add_argument("--inicio", help="Fecha/hora de inicio del horizonte (ISO).")
+    p_gc.add_argument("--inicio", help="Fecha/hora de inicio de la ventana (ISO).")
+    p_gc.add_argument("--fin", help="Fecha/hora de fin de la ventana (ISO).")
     p_gc.add_argument("--ajustar", action="store_true",
                       help="Re-ajusta el modelo con la historia antes de generar.")
     p_gc.add_argument("--salida", metavar="RUTA.xlsx", help="Excel de salida (si se omite, imprime).")

@@ -80,6 +80,26 @@ def test_persistencia_round_trip(tmp_path, monkeypatch):
     assert mg.cargar_modelo() is None
 
 
+# ── Ventana de generación (fecha_inicio / fecha_fin) ─────────────────────────
+
+def test_ventana_fechas_del_cfg():
+    cfg = _cfg()
+    p.set_generador_cambios(cfg, fecha_inicio="2026-01-05", fecha_fin="2026-01-12")
+    m = g.ajustar_modelo(_historia(), cfg, clave="empirico")
+    df = g.generar_cambios(m, cfg, seed=7)  # sin inicio/fin: los toma del cfg
+    fechas = pd.to_datetime(df["Fecha_Hora"])
+    assert (fechas >= pd.Timestamp("2026-01-05")).all()
+    assert (fechas < pd.Timestamp("2026-01-12")).all()
+
+
+def test_fin_explicito_pisa_cfg():
+    cfg = _cfg()
+    p.set_generador_cambios(cfg, fecha_inicio="2026-01-05", fecha_fin="2026-02-01")
+    m = g.ajustar_modelo(_historia(), cfg, clave="empirico")
+    corto = g.generar_cambios(m, cfg, seed=7, inicio=_INICIO, fin=datetime(2026, 1, 8))
+    assert (pd.to_datetime(corto["Fecha_Hora"]) < pd.Timestamp("2026-01-08")).all()
+
+
 # ── Determinismo ─────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("clave", ["empirico", "markov"])

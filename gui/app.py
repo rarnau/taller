@@ -18,6 +18,7 @@ from config.tema import *
 from config.persistencia import cargar_config
 from config import modelo_generador as modmod
 from modelos.estrategias import ESTRATEGIAS_SELECCION
+from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
 
 # Cada pestaña es un componente de display puro; App es el único que conoce
@@ -26,7 +27,7 @@ from gui.tab_consola import crear_consola
 from gui.vista_realtime import VistaRealTime
 from gui.dashboard_principal import crear_dashboard_principal
 from gui.dashboard_detalle import crear_dashboard_detalle
-from gui.tab_tabla import llenar_tabla
+from gui.tab_tabla import crear_tab_inventario
 from gui.tab_kpis import llenar_kpis
 from gui.tab_config import crear_tab_configuracion
 from gui.tab_generacion import crear_tab_generacion
@@ -56,12 +57,12 @@ class App(ctk.CTk):
         # en el JSON y se aplica con un único configurar(); el Excel solo aporta
         # datos. configurar() debe ir antes de cualquier cargar_datos().
         self.taller.configurar(self.user_cfg)
-        self.archivo_cargado = None
 
-        # Generador de cambios: modelo aprendido persistido + cambios sintéticos.
-        # Si _cambios_generados está activo, la simulación usa ese Programa_Cambios
-        # (con el stock del Excel) en vez de la hoja Programa_Cambios del Excel.
+        # Flujo desacoplado: el stock se carga desde la pestaña Inventario
+        # (``_stock_df``) y los cambios se generan/suben desde la pestaña
+        # Generación (``_cambios_generados``); la simulación combina ambos.
         self._modelo_gen = modmod.cargar_modelo()
+        self._historia_df = None      # última historia subida (para el popup de ajuste)
         self._stock_df = None
         self._cambios_generados = None
 
@@ -89,9 +90,8 @@ class App(ctk.CTk):
         self.logo_label = ctk.CTkLabel(self.sidebar, text="SIMULADOR\nCILINDROS", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
-        self.btn_cargar = ctk.CTkButton(self.sidebar, text="Cargar Excel", command=self._cargar)
-        self.btn_cargar.grid(row=1, column=0, padx=20, pady=10)
-
+        # El stock se carga desde la pestaña Inventario y los cambios desde
+        # Generación; el sidebar solo dispara la simulación y exporta.
         self.label_estrat = ctk.CTkLabel(self.sidebar, text="Estrategia de rectificado:", anchor="w")
         self.label_estrat.grid(row=2, column=0, padx=20, pady=(10, 0))
         # El combo muestra etiquetas legibles; se mapean a la clave de estrategia
@@ -111,7 +111,7 @@ class App(ctk.CTk):
         # lugar de un overlay sobre la Vista Real. Se oculta al cargar/simular.
         self.hint_inicio = ctk.CTkLabel(
             self.sidebar,
-            text="Cargue un Excel y ejecute la\nsimulación para comenzar.",
+            text="Cargue el stock en Inventario,\ngenere/suba los cambios en\nGeneración y ejecute la simulación.",
             font=ctk.CTkFont(size=FONT_SIZE_SM),
             text_color=FG_DIM,
             justify="center",
@@ -154,6 +154,9 @@ class App(ctk.CTk):
         self.tab_cfg = self.tabview.add("Configuración")
         self.tab_log = self.tabview.add("Consola")
 
+        # Pestaña de inventario (carga de stock + vista inicial/final + descarga)
+        self.inv_widget = crear_tab_inventario(self.tab_tabla, self)
+
         # Pestaña de configuración (globales + máquinas + rangos + sim, CRUD completo)
         self.cfg_widget = crear_tab_configuracion(self.tab_cfg, self)
 
@@ -188,35 +191,38 @@ class App(ctk.CTk):
             self.log_w.insert("end", m + "\n")
             self.log_w.see("end")
 
-    def _cargar(self):
-        fp = filedialog.askopenfilename(title="Seleccionar Excel de Datos", filetypes=[("Excel", "*.xlsx *.xls")])
-        if not fp: return
+    def cargar_stock_desde(self, fp):
+        """Carga **solo el stock** (hoja Stock_Inicial) desde un Excel.
+
+        Llamado por la pestaña Inventario. Arma el taller con el stock y un
+        Programa_Cambios vacío (los cambios llegan luego desde Generación), y
+        descarta cualquier cambio sintético de una corrida previa.
+        """
         try:
             # configurar() (globales + máquinas + rangos + sim) debe ir antes de
-            # cargar_datos(): el stock necesita la cantidad de jaulas y el mínimo.
+            # cargar_datos_*(): el stock necesita la cantidad de jaulas y el mínimo.
             self.taller.configurar(self.user_cfg)
-            self.taller.cargar_datos(fp)
-            self.archivo_cargado = fp
-            # Guardar el stock para el generador y descartar cambios sintéticos
-            # de una corrida previa (este Excel trae su propio Programa_Cambios).
-            self._stock_df = pd.read_excel(fp, sheet_name="Stock_Inicial")
+            stock_df = pd.read_excel(fp, sheet_name="Stock_Inicial")
+            cambios_vacios = pd.DataFrame(columns=gencambios.COLUMNAS_SALIDA)
+            self.taller.cargar_datos_desde_dataframes(stock_df, cambios_vacios)
+            self._stock_df = stock_df
             self._cambios_generados = None
-            self.status_label.configure(text=f"Cargado: {os.path.basename(fp)}")
-            self._log(f"Archivo cargado: {fp}")
+            self.status_label.configure(text=f"Stock cargado: {os.path.basename(fp)}")
+            self._log(f"Stock cargado: {fp}")
             for aviso in self.taller.avisos_carga:
                 self._log(aviso)
             self.cfg_widget.refrescar()
             self._sincronizar_vista_con_taller()
             self._refrescar_combo_substocks()
-            # Nuevo Excel ⇒ se descartan los cambios sintéticos: limpiar el timeline.
+            # Stock nuevo ⇒ se descartan los cambios: limpiar el timeline.
             if getattr(self, "gen_widget", None) is not None:
                 self.gen_widget.refrescar_timeline()
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo cargar el archivo: {e}")
+            messagebox.showerror("Error", f"No se pudo cargar el stock: {e}")
 
     def _simular(self):
-        if not self.archivo_cargado and self._cambios_generados is None:
-            messagebox.showwarning("Atención", "Primero debe cargar un archivo Excel.")
+        if self._stock_df is None:
+            messagebox.showwarning("Atención", "Primero cargue el stock desde la pestaña Inventario.")
             return
         if getattr(self, "_simulando", False):
             return
@@ -242,13 +248,14 @@ class App(ctk.CTk):
         """Corre carga + simulación fuera del hilo de Tk (no toca widgets)."""
         try:
             # Resetear estado del taller: configurar() (globales + máquinas +
-            # rangos + sim) antes de recargar los datos. Si hay un Programa_Cambios
-            # sintético activo, se usa con el stock del Excel; si no, el Excel completo.
+            # rangos + sim) antes de recargar los datos. Se combina el stock
+            # (Inventario) con los cambios (Generación); si no hay cambios, se
+            # simula con un Programa_Cambios vacío.
             self.taller.configurar(self.user_cfg)
-            if self._cambios_generados is not None:
-                self.taller.cargar_datos_desde_dataframes(self._stock_df, self._cambios_generados)
-            else:
-                self.taller.cargar_datos(self.archivo_cargado)
+            cambios = self._cambios_generados
+            if cambios is None:
+                cambios = pd.DataFrame(columns=gencambios.COLUMNAS_SALIDA)
+            self.taller.cargar_datos_desde_dataframes(self._stock_df, cambios)
             self.taller.simular(estrategia=estrat, callback_log=self._log_async)
         except Exception as e:
             self.after(0, lambda err=e: self._simular_error(err))
@@ -276,15 +283,15 @@ class App(ctk.CTk):
         # Reconstruir frames de jaulas y rectificadoras de la Vista Real
         self._sincronizar_vista_con_taller()
 
-        # Actualizar otras pestañas
-        llenar_tabla(self.tab_tabla, self.taller)
+        # Actualizar otras pestañas (Inventario: ya hay "Stock final")
+        self.inv_widget.refrescar()
         llenar_kpis(self.tab_kpis, self.taller)
 
         self._refrescar_combo_substocks()
         self._render_dashboard()
         self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
-        # Si los cambios fueron sintéticos, el timeline ya puede sombrear las paradas.
-        if getattr(self, "gen_widget", None) is not None and self._cambios_generados is not None:
+        # El timeline ya puede sombrear las paradas calculadas por la simulación.
+        if getattr(self, "gen_widget", None) is not None:
             self.gen_widget.refrescar_timeline()
         self._log("Simulación finalizada. Use los controles de reproducción para ver los resultados.")
 

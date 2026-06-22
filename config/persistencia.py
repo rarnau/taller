@@ -66,7 +66,11 @@ DEFAULTS: Dict[str, Any] = {
     "generador_cambios": {
         "generador": "empirico",
         "umbral_desbaste_mm": 1.0,
-        "horizonte_dias": 7,
+        # Ventana de generación (ISO YYYY-MM-DD). None ⇒ se usa una ventana por
+        # defecto (o el legacy ``horizonte_dias``) al generar.
+        "fecha_inicio": None,
+        "fecha_fin": None,
+        "horizonte_dias": 7,  # legacy: fallback si no hay fecha_inicio/fecha_fin
     },
 }
 
@@ -391,8 +395,13 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
 
 
 def set_generador_cambios(cfg: Dict[str, Any], *, generador=None,
-                          umbral_desbaste=None, horizonte_dias=None) -> Dict[str, Any]:
-    """Actualiza los campos indicados de la config del generador de cambios."""
+                          umbral_desbaste=None, horizonte_dias=None,
+                          fecha_inicio=None, fecha_fin=None) -> Dict[str, Any]:
+    """Actualiza los campos indicados de la config del generador de cambios.
+
+    ``fecha_inicio``/``fecha_fin`` son cadenas ISO ``YYYY-MM-DD`` (o ``""`` para
+    limpiar). Si ambas vienen no vacías se valida ``fin > inicio``.
+    """
     gc = obtener_generador_cambios(cfg)
     if generador is not None:
         gc["generador"] = str(generador)
@@ -406,6 +415,13 @@ def set_generador_cambios(cfg: Dict[str, Any], *, generador=None,
         if h <= 0:
             raise ValueError("El horizonte en días debe ser mayor que 0.")
         gc["horizonte_dias"] = h
+    if fecha_inicio is not None:
+        gc["fecha_inicio"] = str(fecha_inicio).strip() or None
+    if fecha_fin is not None:
+        gc["fecha_fin"] = str(fecha_fin).strip() or None
+    fi, ff = gc.get("fecha_inicio"), gc.get("fecha_fin")
+    if fi and ff and not (ff > fi):
+        raise ValueError("La fecha fin debe ser posterior a la fecha inicio.")
     cfg["generador_cambios"] = gc
     return cfg
 
