@@ -15,10 +15,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pandas as pd
 
 from config.tema import *
-from config.persistencia import cargar_config, obtener_generador_cambios
+from config.persistencia import cargar_config
 from config import modelo_generador as modmod
 from modelos.estrategias import ESTRATEGIAS_SELECCION
-from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
 
 # Cada pestaña es un componente de display puro; App es el único que conoce
@@ -30,6 +29,7 @@ from gui.dashboard_detalle import crear_dashboard_detalle
 from gui.tab_tabla import llenar_tabla
 from gui.tab_kpis import llenar_kpis
 from gui.tab_config import crear_tab_configuracion
+from gui.tab_generacion import crear_tab_generacion
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -84,7 +84,7 @@ class App(ctk.CTk):
     def _create_sidebar(self):
         self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(13, weight=1)
+        self.sidebar.grid_rowconfigure(11, weight=1)
 
         self.logo_label = ctk.CTkLabel(self.sidebar, text="SIMULADOR\nCILINDROS", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
@@ -107,11 +107,6 @@ class App(ctk.CTk):
         self.btn_exportar = ctk.CTkButton(self.sidebar, text="Exportar Resultados", command=self._exportar)
         self.btn_exportar.grid(row=5, column=0, padx=20, pady=10)
 
-        # Generador de cambios sintéticos: subir historia adapta (refit) el modelo
-        # persistido; generar cambios produce un Programa_Cambios reproducible por
-        # seed que se usa con el stock del Excel cargado.
-        self._crear_panel_generador(row=6)
-
         # Hint guía cuando aún no hay datos: acompaña a los botones de acción en
         # lugar de un overlay sobre la Vista Real. Se oculta al cargar/simular.
         self.hint_inicio = ctk.CTkLabel(
@@ -121,11 +116,11 @@ class App(ctk.CTk):
             text_color=FG_DIM,
             justify="center",
         )
-        self.hint_inicio.grid(row=7, column=0, padx=20, pady=(0, 10))
+        self.hint_inicio.grid(row=6, column=0, padx=20, pady=(0, 10))
 
         # Controles de Reproducción
         self.repro_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.repro_frame.grid(row=8, column=0, padx=20, pady=20)
+        self.repro_frame.grid(row=7, column=0, padx=20, pady=20)
 
         self.btn_play = ctk.CTkButton(self.repro_frame, text="▶ Play", width=60, command=self._toggle_playback)
         self.btn_play.grid(row=0, column=0, padx=5)
@@ -134,57 +129,14 @@ class App(ctk.CTk):
         self.btn_stop.grid(row=0, column=1, padx=5)
 
         self.label_vel = ctk.CTkLabel(self.sidebar, text="Velocidad: 1x")
-        self.label_vel.grid(row=9, column=0, padx=20, pady=0)
+        self.label_vel.grid(row=8, column=0, padx=20, pady=0)
         self.slider_vel = ctk.CTkSlider(self.sidebar, from_=1, to=100, number_of_steps=99, command=self._change_speed)
         self.slider_vel.set(10)  # 10/10 = 1.0x
-        self.slider_vel.grid(row=10, column=0, padx=20, pady=10)
+        self.slider_vel.grid(row=9, column=0, padx=20, pady=10)
 
         self.slider_progreso = ctk.CTkSlider(self.sidebar, from_=0, to=100, command=self._seek_simulation)
         self.slider_progreso.set(0)
-        self.slider_progreso.grid(row=11, column=0, padx=20, pady=10)
-
-    def _crear_panel_generador(self, row):
-        """Panel del sidebar para adaptar el modelo y generar cambios sintéticos."""
-        import random
-
-        frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        frame.grid(row=row, column=0, padx=12, pady=(4, 6), sticky="ew")
-
-        ctk.CTkLabel(frame, text="Generador de cambios", anchor="w",
-                     font=ctk.CTkFont(size=FONT_SIZE_SM, weight="bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
-
-        self.chk_reiniciar = ctk.CTkCheckBox(frame, text="reiniciar adaptación",
-                                             font=ctk.CTkFont(size=FONT_SIZE_SM))
-        self.chk_reiniciar.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 4))
-
-        self.btn_historia = ctk.CTkButton(frame, text="Subir historia", height=28,
-                                          command=self._subir_historia)
-        self.btn_historia.grid(row=2, column=0, columnspan=2, sticky="ew", pady=2)
-
-        # Seed + botón de regeneración aleatoria.
-        ctk.CTkLabel(frame, text="Seed", anchor="w",
-                     font=ctk.CTkFont(size=FONT_SIZE_SM)).grid(row=3, column=0, sticky="w")
-        self.entry_seed = ctk.CTkEntry(frame, width=90, justify="center")
-        self.entry_seed.insert(0, str(random.randint(0, 999999)))
-        self.entry_seed.grid(row=3, column=1, sticky="e", pady=2)
-        self.btn_seed = ctk.CTkButton(
-            frame, text="🎲 Nueva seed", height=24,
-            fg_color="transparent", border_width=1, border_color=ACCENT,
-            text_color=ACCENT, command=self._nueva_seed)
-        self.btn_seed.grid(row=4, column=0, columnspan=2, sticky="ew", pady=2)
-
-        self.btn_generar = ctk.CTkButton(frame, text="Generar cambios", height=28,
-                                         fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER,
-                                         command=self._generar_cambios)
-        self.btn_generar.grid(row=5, column=0, columnspan=2, sticky="ew", pady=2)
-
-        self.label_modelo = ctk.CTkLabel(
-            frame, text="", anchor="w", justify="left",
-            font=ctk.CTkFont(size=FONT_SIZE_SM), text_color=FG_DIM)
-        self.label_modelo.grid(row=6, column=0, columnspan=2, sticky="w", pady=(2, 0))
-        frame.grid_columnconfigure(0, weight=1)
-        self._actualizar_label_modelo()
+        self.slider_progreso.grid(row=10, column=0, padx=20, pady=10)
 
     def _create_main_content(self):
         self.tabview = ctk.CTkTabview(self)
@@ -198,11 +150,15 @@ class App(ctk.CTk):
         self.tab_det = self.tabview.add("Análisis")
         self.tab_tabla = self.tabview.add("Inventario")
         self.tab_kpis = self.tabview.add("KPIs")
+        self.tab_gen = self.tabview.add("Generación de Cambios")
         self.tab_cfg = self.tabview.add("Configuración")
         self.tab_log = self.tabview.add("Consola")
 
         # Pestaña de configuración (globales + máquinas + rangos + sim, CRUD completo)
         self.cfg_widget = crear_tab_configuracion(self.tab_cfg, self)
+
+        # Pestaña de generación de cambios (config del generador + adaptación + timeline)
+        self.gen_widget = crear_tab_generacion(self.tab_gen, self)
 
         # Dashboard: barra de control con selector de SubStock para la evolución temporal
         self.dash_ctrl = ctk.CTkFrame(self.tab_dash, fg_color="transparent")
@@ -252,82 +208,11 @@ class App(ctk.CTk):
             self.cfg_widget.refrescar()
             self._sincronizar_vista_con_taller()
             self._refrescar_combo_substocks()
+            # Nuevo Excel ⇒ se descartan los cambios sintéticos: limpiar el timeline.
+            if getattr(self, "gen_widget", None) is not None:
+                self.gen_widget.refrescar_timeline()
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar el archivo: {e}")
-
-    # ── Generador de cambios sintéticos ──────────────────────────────────────
-
-    def _nueva_seed(self):
-        import random
-        self.entry_seed.delete(0, "end")
-        self.entry_seed.insert(0, str(random.randint(0, 999999)))
-
-    def _actualizar_label_modelo(self):
-        """Refresca el resumen del modelo persistido (filas, jaulas, generador)."""
-        m = self._modelo_gen
-        if not m:
-            txt = "Sin adaptación: suba historia."
-        else:
-            jaulas = ", ".join(sorted(m.get("jaulas", {}), key=int)) or "-"
-            txt = (f"Modelo {m.get('clave')}: {m.get('n_filas', 0)} filas\n"
-                   f"jaulas {jaulas}")
-        self.label_modelo.configure(text=txt)
-
-    def _subir_historia(self):
-        """Carga un histórico y adapta (refit o desde cero) el modelo persistido."""
-        fp = filedialog.askopenfilename(
-            title="Seleccionar historia (CSV o Excel)",
-            filetypes=[("Datos", "*.csv *.xlsx *.xls")])
-        if not fp:
-            return
-        try:
-            if fp.lower().endswith(".csv"):
-                historia = pd.read_csv(fp)
-            else:
-                xl = pd.ExcelFile(fp, engine="openpyxl")
-                hoja = "Historia" if "Historia" in xl.sheet_names else xl.sheet_names[0]
-                historia = xl.parse(hoja)
-            reiniciar = bool(self.chk_reiniciar.get())
-            previo = None if reiniciar else self._modelo_gen
-            # Se ajusta con el generador configurado; si no coincide con la clave
-            # del modelo previo, ajustar_modelo arranca de cero (no mezcla claves).
-            clave = obtener_generador_cambios(self.user_cfg)["generador"]
-            self._modelo_gen = gencambios.ajustar_modelo(
-                historia, self.user_cfg, clave=clave, modelo_previo=previo)
-            modmod.guardar_modelo(self._modelo_gen)
-            self._actualizar_label_modelo()
-            modo = "desde cero" if reiniciar else "incremental"
-            self._log(f"Historia adaptada ({modo}): {self._modelo_gen['n_filas']} filas acumuladas.")
-            self.status_label.configure(text=f"Modelo adaptado ({modo}).")
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo adaptar la historia: {e}")
-
-    def _generar_cambios(self):
-        """Genera un Programa_Cambios reproducible y arma el taller con el stock cargado."""
-        if self._stock_df is None:
-            messagebox.showwarning("Atención", "Primero cargue un Excel (para el stock).")
-            return
-        if not self._modelo_gen:
-            messagebox.showwarning("Atención", "No hay modelo adaptado. Suba una historia primero.")
-            return
-        try:
-            seed = int(self.entry_seed.get().strip())
-        except ValueError:
-            messagebox.showwarning("Atención", "La seed debe ser un número entero.")
-            return
-        try:
-            cambios = gencambios.generar_cambios(self._modelo_gen, self.user_cfg, seed=seed)
-            self._cambios_generados = cambios
-            self.taller.configurar(self.user_cfg)
-            self.taller.cargar_datos_desde_dataframes(self._stock_df, cambios)
-            for aviso in self.taller.avisos_carga:
-                self._log(aviso)
-            self._sincronizar_vista_con_taller()
-            self._refrescar_combo_substocks()
-            self._log(f"Generados {len(cambios)} cambios (seed={seed}). Ejecute la simulación.")
-            self.status_label.configure(text=f"Cambios generados (seed={seed}): {len(cambios)}.")
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudieron generar los cambios: {e}")
 
     def _simular(self):
         if not self.archivo_cargado and self._cambios_generados is None:
@@ -398,6 +283,9 @@ class App(ctk.CTk):
         self._refrescar_combo_substocks()
         self._render_dashboard()
         self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
+        # Si los cambios fueron sintéticos, el timeline ya puede sombrear las paradas.
+        if getattr(self, "gen_widget", None) is not None and self._cambios_generados is not None:
+            self.gen_widget.refrescar_timeline()
         self._log("Simulación finalizada. Use los controles de reproducción para ver los resultados.")
 
         self.btn_simular.configure(state="normal")
