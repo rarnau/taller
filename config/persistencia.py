@@ -60,6 +60,14 @@ DEFAULTS: Dict[str, Any] = {
     "tiempo_enfriado_h": 0.0,
     "max_iteraciones": 10000,
     "estrategia_asignacion": "jaula_mas_necesitada",
+    # Generador sintético del Programa_Cambios a partir de la historia real.
+    # ``turnos_cambios`` (régimen propio del laminador) se omite ⇒ 24/7; sólo se
+    # persiste el dict compacto cuando no es 24/7 (igual que los turnos de máquina).
+    "generador_cambios": {
+        "generador": "empirico",
+        "umbral_desbaste_mm": 1.0,
+        "horizonte_dias": 7,
+    },
 }
 
 
@@ -167,6 +175,18 @@ def obtener_max_iteraciones(cfg: Dict[str, Any]) -> int:
 def obtener_estrategia_asignacion(cfg: Dict[str, Any]) -> str:
     """Devuelve la clave de la estrategia de asignación de jaula destino."""
     return str(cfg.get("estrategia_asignacion", DEFAULTS["estrategia_asignacion"]))
+
+
+def obtener_generador_cambios(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Devuelve la config del generador de cambios (merge con los defaults)."""
+    gc = dict(DEFAULTS["generador_cambios"])
+    gc.update(cfg.get("generador_cambios", {}))
+    return gc
+
+
+def obtener_turnos_cambios(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Devuelve el régimen de turnos de los cambios (None = 24/7)."""
+    return cfg.get("turnos_cambios")
 
 
 # ── Mutadores (capa única de CRUD usada por el CLI y la GUI) ──────────────────
@@ -367,6 +387,37 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
         cfg["max_iteraciones"] = n
     if estrategia_asignacion is not None:
         cfg["estrategia_asignacion"] = str(estrategia_asignacion)
+    return cfg
+
+
+def set_generador_cambios(cfg: Dict[str, Any], *, generador=None,
+                          umbral_desbaste=None, horizonte_dias=None) -> Dict[str, Any]:
+    """Actualiza los campos indicados de la config del generador de cambios."""
+    gc = obtener_generador_cambios(cfg)
+    if generador is not None:
+        gc["generador"] = str(generador)
+    if umbral_desbaste is not None:
+        u = float(umbral_desbaste)
+        if u < 0:
+            raise ValueError("El umbral de desbaste no puede ser negativo.")
+        gc["umbral_desbaste_mm"] = u
+    if horizonte_dias is not None:
+        h = int(horizonte_dias)
+        if h <= 0:
+            raise ValueError("El horizonte en días debe ser mayor que 0.")
+        gc["horizonte_dias"] = h
+    cfg["generador_cambios"] = gc
+    return cfg
+
+
+def set_turnos_cambios(cfg: Dict[str, Any],
+                       turnos: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Fija el régimen de turnos de los cambios; ``None``/24-7 quita la clave."""
+    from modelos import turnos as turnos_mod  # import local: evita ciclo de carga
+    if turnos is None or turnos_mod.es_completo(turnos):
+        cfg.pop("turnos_cambios", None)
+    else:
+        cfg["turnos_cambios"] = turnos
     return cfg
 
 

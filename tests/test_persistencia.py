@@ -51,3 +51,42 @@ def test_cantidad_invalida():
 def test_verificar_lanza_valueerror():
     with pytest.raises(ValueError):
         p.verificar_coherencia(_cfg(2, [1]))
+
+
+# ── Config del generador de cambios y régimen de turnos ──────────────────────
+
+def test_migrar_rellena_generador_cambios():
+    cfg = p.migrar({})  # config vacía
+    gc = p.obtener_generador_cambios(cfg)
+    assert gc["generador"] == "empirico"
+    assert "umbral_desbaste_mm" in gc and "horizonte_dias" in gc
+
+
+def test_set_generador_cambios():
+    cfg = {}
+    p.set_generador_cambios(cfg, generador="markov", umbral_desbaste=2.5, horizonte_dias=14)
+    gc = p.obtener_generador_cambios(cfg)
+    assert gc == {"generador": "markov", "umbral_desbaste_mm": 2.5, "horizonte_dias": 14}
+
+
+def test_set_generador_cambios_valida():
+    with pytest.raises(ValueError):
+        p.set_generador_cambios({}, umbral_desbaste=-1)
+    with pytest.raises(ValueError):
+        p.set_generador_cambios({}, horizonte_dias=0)
+
+
+def test_turnos_cambios_24x7_no_persiste():
+    from modelos import turnos as t
+    cfg = {"turnos_cambios": {"x": 1}}
+    p.set_turnos_cambios(cfg, t.PRESETS["24x7"])  # equivalente a 24/7 ⇒ quita la clave
+    assert "turnos_cambios" not in cfg
+    assert p.obtener_turnos_cambios(cfg) is None
+
+
+def test_turnos_cambios_persiste_si_no_es_completo():
+    from modelos import turnos as t
+    cfg = {}
+    turnos = t.parse_compacto("100 100 100 100 100 000 000")
+    p.set_turnos_cambios(cfg, turnos)
+    assert p.obtener_turnos_cambios(cfg) == turnos

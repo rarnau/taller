@@ -31,6 +31,7 @@ modelar la tasa de falla de las máquinas.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 # Horas [inicio, fin) de cada turno; fin <= inicio indica cruce de medianoche.
@@ -130,6 +131,49 @@ def format_compacto(turnos: Optional[Turnos]) -> str:
     """Serializa los turnos al formato compacto de :func:`parse_compacto`."""
     t = normalizar(turnos)
     return " ".join("".join("1" if x else "0" for x in t[d]) for d in DIAS)
+
+
+# ── Bordes de turno (para el generador de cambios) ───────────────────────────
+#
+# El desmontaje/cambio total de una pareja coincide con el **fin de un turno**, y
+# el montaje de la nueva pareja con la **primera hora del siguiente turno
+# operativo**. Estas dos funciones son puras (operan sobre la grilla, sin estado
+# de máquina) y las comparte el generador de ``Programa_Cambios``.
+
+_BORDES_SET = {ini for ini, _ in TURNOS}  # {6, 14, 22}: horas de inicio de turno
+
+
+def proximo_borde_turno(dt: datetime) -> datetime:
+    """Menor frontera de turno (06/14/22) ``>= dt`` → instante de desmontaje.
+
+    Si ``dt`` ya cae exactamente sobre una frontera (hora 06/14/22 sin minutos),
+    se devuelve tal cual; si no, se redondea hacia arriba a la próxima frontera.
+    """
+    if (dt.hour in _BORDES_SET and dt.minute == 0
+            and dt.second == 0 and dt.microsecond == 0):
+        return dt
+    t = dt.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    while t.hour not in _BORDES_SET:
+        t += timedelta(hours=1)
+    return t
+
+
+def proximo_inicio_operativo(grilla: Optional[Grilla], dt: datetime) -> Optional[datetime]:
+    """Primera hora **operativa** del régimen ``>= dt`` → instante de montaje.
+
+    Misma lógica que ``MaquinaRectificadora.proxima_apertura`` pero como función
+    pura sobre la grilla. Con ``grilla is None`` (24/7) devuelve ``dt`` sin
+    cambios; devuelve ``None`` si el régimen nunca está operativo.
+    """
+    if grilla is None or grilla[dt.weekday()][dt.hour]:
+        return dt
+    t = dt.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    limite = dt + timedelta(days=8)  # una semana cubre el ciclo completo
+    while t < limite:
+        if grilla[t.weekday()][t.hour]:
+            return t
+        t += timedelta(hours=1)
+    return None
 
 
 def resumen(turnos: Optional[Turnos]) -> str:
