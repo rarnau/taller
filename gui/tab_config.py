@@ -15,22 +15,18 @@ from config.tema import (
 from config.persistencia import (
     guardar_config, obtener_rangos, obtener_maquinas, obtener_config_global,
     obtener_tiempo_enfriado, obtener_max_iteraciones, verificar_coherencia,
-    obtener_estrategia_asignacion, obtener_generador_cambios, obtener_turnos_cambios,
-    set_generador_cambios, set_turnos_cambios,
+    obtener_estrategia_asignacion,
 )
 from modelos.enums import TipoRectificado
 from modelos.estrategias import ESTRATEGIAS_ASIGNACION
-from modelos.generador_cambios import GENERADORES_CAMBIOS
 from modelos import turnos as turnos_mod
+from gui.editor_turnos import abrir_editor_turnos
 
 _TIPOS_RECT = [t.value for t in TipoRectificado]
 # Estrategias de asignación: etiqueta visible ↔ clave persistida (como el combo
 # de selección en gui/app.py). La GUI muestra la etiqueta y guarda la clave.
 _ASIGNACION_ETIQUETAS = {e.etiqueta: clave for clave, e in ESTRATEGIAS_ASIGNACION.items()}
 _ASIGNACION_CLAVE_A_ETIQUETA = {clave: e.etiqueta for clave, e in ESTRATEGIAS_ASIGNACION.items()}
-# Generadores de cambios: etiqueta visible ↔ clave persistida.
-_GEN_ETIQUETAS = {g.etiqueta: clave for clave, g in GENERADORES_CAMBIOS.items()}
-_GEN_CLAVE_A_ETIQUETA = {clave: g.etiqueta for clave, g in GENERADORES_CAMBIOS.items()}
 
 
 def _card(parent, titulo, subtitulo=None):
@@ -93,12 +89,6 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         # Entries de parámetros de simulación
         self._entry_max_iter = None
         self._combo_asignacion = None
-        # Generador de cambios (régimen de turnos propio del laminador)
-        self._combo_generador = None
-        self._entry_umbral = None
-        self._entry_horizonte = None
-        self._turnos_cambios_holder = [None]  # estado mutable; None = 24/7
-        self._btn_turnos_cambios = None
         self._label_estado = None
         self._feedback_after = None   # id del timer que borra el feedback transitorio
 
@@ -215,43 +205,6 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             "Tope de iteraciones del motor.",
         )
         self._entry_max_iter = _fila_param(cuerpo_p, "Máximo de iteraciones")
-
-        # Sección 5: Generador de cambios sintético (columna derecha)
-        cuerpo_gc = _card(
-            col_der,
-            "Generador de Cambios",
-            "Algoritmo que aprende de la historia para sintetizar el Programa_Cambios, "
-            "umbral de clasificación de desbaste y régimen de turnos del laminador.",
-        )
-        fila_gen = ctk.CTkFrame(cuerpo_gc, fg_color="transparent")
-        fila_gen.pack(fill="x", pady=3)
-        ctk.CTkLabel(
-            fila_gen, text="Generador", width=220, anchor="w", text_color=FG,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
-        ).pack(side="left", padx=4)
-        self._combo_generador = ctk.CTkComboBox(
-            fila_gen, values=list(_GEN_ETIQUETAS.keys()), width=260, state="readonly")
-        self._combo_generador.pack(side="left", padx=4)
-
-        self._entry_umbral = _fila_param(
-            cuerpo_gc, "Umbral de desbaste (mm)", "sobre este, el cambio es 'desbaste'")
-        self._entry_horizonte = _fila_param(
-            cuerpo_gc, "Horizonte (días)", "días a generar por corrida")
-
-        fila_tc = ctk.CTkFrame(cuerpo_gc, fg_color="transparent")
-        fila_tc.pack(fill="x", pady=3)
-        ctk.CTkLabel(
-            fila_tc, text="Régimen de turnos (cambios)", width=220, anchor="w", text_color=FG,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
-        ).pack(side="left", padx=4)
-        self._btn_turnos_cambios = ctk.CTkButton(
-            fila_tc, text=turnos_mod.resumen(None), width=140,
-            fg_color="transparent", border_width=1, border_color=ACCENT,
-            text_color=ACCENT, hover_color=BG_CARD,
-            command=lambda: self._abrir_editor_turnos(
-                self._turnos_cambios_holder, self._btn_turnos_cambios),
-        )
-        self._btn_turnos_cambios.pack(side="left", padx=4)
 
         # Footer: guardar + estado
         footer = ctk.CTkFrame(self, fg_color="transparent")
@@ -409,71 +362,8 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._filas_maquinas.remove(registro)
 
     def _abrir_editor_turnos(self, turnos_holder, btn_turnos):
-        """Abre un popup con la grilla 7 días × 3 turnos y presets."""
-        win = ctk.CTkToplevel(self)
-        win.title("Esquema de turnos")
-        win.configure(fg_color=BG_CARD)
-        win.transient(self.winfo_toplevel())
-        win.grab_set()
-
-        t_actual = turnos_mod.normalizar(turnos_holder[0])
-        # vars[dia][turno] = BooleanVar
-        variables = {d: [ctk.BooleanVar(value=t_actual[d][i]) for i in range(turnos_mod.NUM_TURNOS)]
-                     for d in turnos_mod.DIAS}
-
-        ctk.CTkLabel(
-            win, text="Marque los turnos operativos por día (T3 22–06 cubre la madrugada siguiente).",
-            text_color=FG2, font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE),
-        ).grid(row=0, column=0, columnspan=4, padx=16, pady=(14, 8), sticky="w")
-
-        for c, etiqueta in enumerate(turnos_mod.TURNO_LABELS):
-            ctk.CTkLabel(
-                win, text=etiqueta, text_color=FG2,
-                font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold"),
-            ).grid(row=1, column=c + 1, padx=8, pady=2)
-
-        for r, dia in enumerate(turnos_mod.DIAS):
-            ctk.CTkLabel(
-                win, text=turnos_mod.DIAS_NOMBRES[r], width=90, anchor="w", text_color=FG,
-                font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
-            ).grid(row=r + 2, column=0, padx=(16, 8), pady=2, sticky="w")
-            for c in range(turnos_mod.NUM_TURNOS):
-                ctk.CTkCheckBox(win, text="", variable=variables[dia][c], width=24).grid(
-                    row=r + 2, column=c + 1, padx=8, pady=2)
-
-        def _aplicar_preset(clave):
-            preset = turnos_mod.PRESETS[clave]
-            for d in turnos_mod.DIAS:
-                for i in range(turnos_mod.NUM_TURNOS):
-                    variables[d][i].set(preset[d][i])
-
-        presets_fila = ctk.CTkFrame(win, fg_color="transparent")
-        presets_fila.grid(row=9, column=0, columnspan=4, padx=16, pady=(10, 4), sticky="w")
-        for clave in ("24x7", "off", "lv3"):
-            ctk.CTkButton(
-                presets_fila, text=turnos_mod.PRESET_LABELS[clave], width=110, height=28,
-                fg_color="transparent", border_width=1, border_color=ACCENT,
-                text_color=ACCENT, hover_color=BG_CARD,
-                command=lambda k=clave: _aplicar_preset(k),
-            ).pack(side="left", padx=4)
-
-        def _aceptar():
-            nuevo = {d: [variables[d][i].get() for i in range(turnos_mod.NUM_TURNOS)]
-                     for d in turnos_mod.DIAS}
-            # 24/7 se guarda como None para mantener limpia la configuración.
-            turnos_holder[0] = None if turnos_mod.es_completo(nuevo) else nuevo
-            btn_turnos.configure(text=turnos_mod.resumen(turnos_holder[0]))
-            win.destroy()
-
-        acciones = ctk.CTkFrame(win, fg_color="transparent")
-        acciones.grid(row=10, column=0, columnspan=4, padx=16, pady=(8, 16), sticky="e")
-        ctk.CTkButton(acciones, text="Cancelar", width=100, height=30,
-                      fg_color="transparent", border_width=1, border_color=FG2,
-                      text_color=FG2, hover_color=BG_CARD,
-                      command=win.destroy).pack(side="left", padx=4)
-        ctk.CTkButton(acciones, text="Aceptar", width=100, height=30,
-                      fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER,
-                      command=_aceptar).pack(side="left", padx=4)
+        """Abre el popup compartido de edición de turnos (grilla 7×3 + presets)."""
+        abrir_editor_turnos(self, turnos_holder, btn_turnos)
 
     # ── Refresco desde la configuración actual ───────────────────────────
 
@@ -536,18 +426,6 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._combo_asignacion.set(_ASIGNACION_CLAVE_A_ETIQUETA.get(
             clave_asig, next(iter(_ASIGNACION_ETIQUETAS))))
 
-        # Generador de cambios + régimen de turnos del laminador
-        gc = obtener_generador_cambios(cfg)
-        self._combo_generador.set(_GEN_CLAVE_A_ETIQUETA.get(
-            gc["generador"], next(iter(_GEN_ETIQUETAS))))
-        self._entry_umbral.delete(0, "end")
-        self._entry_umbral.insert(0, f"{float(gc['umbral_desbaste_mm']):.1f}")
-        self._entry_horizonte.delete(0, "end")
-        self._entry_horizonte.insert(0, str(int(gc["horizonte_dias"])))
-        self._turnos_cambios_holder[0] = obtener_turnos_cambios(cfg)
-        self._btn_turnos_cambios.configure(
-            text=turnos_mod.resumen(self._turnos_cambios_holder[0]))
-
     # ── Guardado ─────────────────────────────────────────────────────────
 
     def _guardar(self):
@@ -556,7 +434,6 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             rangos = self._recoger_rangos()
             maquinas = self._recoger_maquinas()
             tiempo_enfriado, max_iter = self._recoger_parametros()
-            generador, umbral_desb, horizonte = self._recoger_generador()
             # Coherencia jaulas ⇄ rangos: validar el candidato ANTES de persistir
             # (misma verificación que usa el CLI), para no guardar un estado roto.
             verificar_coherencia({"config_global": config_global, "rangos": rangos})
@@ -571,9 +448,6 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self.app.user_cfg["max_iteraciones"] = max_iter
         self.app.user_cfg["estrategia_asignacion"] = _ASIGNACION_ETIQUETAS.get(
             self._combo_asignacion.get(), next(iter(_ASIGNACION_ETIQUETAS.values())))
-        set_generador_cambios(self.app.user_cfg, generador=generador,
-                              umbral_desbaste=umbral_desb, horizonte_dias=horizonte)
-        set_turnos_cambios(self.app.user_cfg, self._turnos_cambios_holder[0])
         self.app.user_cfg.pop("prioridades_maquinas", None)  # esquema viejo, ya migrado
         guardar_config(self.app.user_cfg)
 
@@ -657,24 +531,6 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         if not rangos:
             raise ValueError("Debe definir al menos un rango de jaula.")
         return rangos
-
-    def _recoger_generador(self):
-        """Lee y valida la config del generador: clave, umbral (≥0) y horizonte (>0)."""
-        generador = _GEN_ETIQUETAS.get(
-            self._combo_generador.get(), next(iter(_GEN_ETIQUETAS.values())))
-        try:
-            umbral = float(self._entry_umbral.get().strip())
-        except ValueError:
-            raise ValueError("Umbral de desbaste inválido: debe ser un número (p. ej. 1.0).")
-        if umbral < 0:
-            raise ValueError("El umbral de desbaste no puede ser negativo.")
-        try:
-            horizonte = int(float(self._entry_horizonte.get().strip()))
-        except ValueError:
-            raise ValueError("Horizonte inválido: debe ser un entero de días.")
-        if horizonte <= 0:
-            raise ValueError("El horizonte en días debe ser mayor que 0.")
-        return generador, umbral, horizonte
 
     def _recoger_maquinas(self):
         maquinas = []
