@@ -16,17 +16,18 @@ Concentra todo el flujo del generador sintético de ``Programa_Cambios``:
 Como ``tab_config``, este widget lee/escribe ``app.user_cfg`` y opera sobre
 ``app.taller``; la App sigue siendo la dueña del modelo y la simulación.
 """
+import statistics
 import customtkinter as ctk
 import pandas as pd
 from datetime import timedelta
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 
 from matplotlib.figure import Figure
 from matplotlib.dates import DateFormatter
 from matplotlib.patches import Patch
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from config.tema import (BG_CARD, FG, FG2, ACCENT, GREEN, RED, FONT_FAMILY,
+from config.tema import (BG_CARD, FG, FG2, FG_DIM, ACCENT, GREEN, RED, FONT_FAMILY,
                          FONT_SIZE, FONT_SIZE_MD, FONT_SIZE_LG, BTN_BLUE,
                          BTN_BLUE_HOVER, TIPO_RECT_COLORS)
 from config.persistencia import (guardar_config, obtener_generador_cambios,
@@ -38,6 +39,7 @@ from modelos.generador_cambios import GENERADORES_CAMBIOS
 from modelos import turnos as turnos_mod
 from gui.editor_turnos import abrir_editor_turnos
 from gui.dashboard_principal import _marcar_paradas
+from gui.calendario import SelectorFecha
 
 # Generadores: etiqueta visible ↔ clave persistida (la GUI muestra la etiqueta).
 _GEN_ETIQUETAS = {g.etiqueta: clave for clave, g in GENERADORES_CAMBIOS.items()}
@@ -104,6 +106,43 @@ def _resumen_modelo(m):
             f"Período: {fmin} → {fmax}\n" + "\n".join(por_jaula))
 
 
+def _muestras_jaula(mj):
+    """(duraciones, desbastes) acumulados de una jaula, sea empírico o markov."""
+    if "duracion" in mj:  # empírico: muestras directas
+        return list(mj.get("duracion", [])), list(mj.get("desbaste", []))
+    dur, desb = [], []  # markov: acumuladas dentro de cada estado
+    for s in mj.get("muestras", {}).values():
+        dur.extend(s.get("duracion", []))
+        desb.extend(s.get("desbaste", []))
+    return dur, desb
+
+
+def _parametros_modelo(m, umbral):
+    """Parámetros aprendidos de un modelo como dict ordenado {nombre: valor_str}.
+
+    Agregados **independientes del tipo de modelo** (campañas, duración y desbaste
+    medios, % desbaste por jaula) para poder comparar 'antes → después' aunque el
+    modelo cambie de empírico a markov.
+    """
+    params = {}
+    if not m:
+        return params
+    params["Filas acumuladas"] = str(m.get("n_filas", 0))
+    jaulas = m.get("jaulas", {})
+    params["Jaulas con datos"] = str(len(jaulas))
+    umbral = float(umbral)
+    for j in sorted(jaulas, key=int):
+        dur, desb = _muestras_jaula(jaulas[j])
+        params[f"Jaula {j} · campañas"] = str(len(dur))
+        params[f"Jaula {j} · duración media (h)"] = (
+            f"{statistics.fmean(dur):.1f}" if dur else "—")
+        params[f"Jaula {j} · desbaste medio (mm)"] = (
+            f"{statistics.fmean(desb):.2f}" if desb else "—")
+        params[f"Jaula {j} · % desbaste"] = (
+            f"{100 * sum(1 for x in desb if x > umbral) / len(desb):.0f}%" if desb else "—")
+    return params
+
+
 def _leer_historia(fp):
     """Lee una historia desde CSV o Excel (hoja 'Historia' o la primera)."""
     if fp.lower().endswith(".csv"):
@@ -127,6 +166,17 @@ def _fila_entry(parent, etiqueta, ayuda=None, ancho=110):
     return entry
 
 
+def _fila_fecha(parent, etiqueta):
+    """Fila etiqueta + selector de fecha con calendario inline; devuelve el selector."""
+    fila = ctk.CTkFrame(parent, fg_color="transparent")
+    fila.pack(fill="x", pady=2)
+    ctk.CTkLabel(fila, text=etiqueta, width=150, anchor="w", text_color=FG,
+                 font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE)).pack(side="left")
+    sel = SelectorFecha(fila, width=110)
+    sel.pack(side="left", padx=4)
+    return sel
+
+
 class TabGeneracion(ctk.CTkFrame):
     """Editor + generador + timeline del Programa_Cambios sintético."""
 
@@ -147,7 +197,7 @@ class TabGeneracion(ctk.CTkFrame):
         top.pack(fill="x", padx=10, pady=(10, 4))
 
         cfg = _card(top, "Configuración del generador",
-                    side="left", fill="both", expand=True, padx=(0, 6), anchor="n")
+                    side="left", fill="x", expand=True, padx=(0, 6), anchor="n")
         fila_gen = ctk.CTkFrame(cfg, fg_color="transparent")
         fila_gen.pack(fill="x", pady=2)
         ctk.CTkLabel(fila_gen, text="Algoritmo", width=150, anchor="w", text_color=FG,
@@ -156,8 +206,8 @@ class TabGeneracion(ctk.CTkFrame):
             fila_gen, values=list(_GEN_ETIQUETAS.keys()), width=210, state="readonly")
         self._combo_generador.pack(side="left", padx=4)
         self._entry_umbral = _fila_entry(cfg, "Umbral desbaste", "mm")
-        self._entry_fecha_ini = _fila_entry(cfg, "Fecha inicio", "YYYY-MM-DD")
-        self._entry_fecha_fin = _fila_entry(cfg, "Fecha fin", "YYYY-MM-DD")
+        self._entry_fecha_ini = _fila_fecha(cfg, "Fecha inicio")
+        self._entry_fecha_fin = _fila_fecha(cfg, "Fecha fin")
         fila_tc = ctk.CTkFrame(cfg, fg_color="transparent")
         fila_tc.pack(fill="x", pady=2)
         ctk.CTkLabel(fila_tc, text="Turnos (cambios)", width=150, anchor="w", text_color=FG,
@@ -173,7 +223,7 @@ class TabGeneracion(ctk.CTkFrame):
                       command=self._guardar_config).pack(anchor="w", pady=(8, 0))
 
         adap = _card(top, "Adaptación (modelo aprendido)",
-                     side="left", fill="both", expand=True, padx=6, anchor="n")
+                     side="left", fill="x", expand=True, padx=6, anchor="n")
         self._chk_reiniciar = ctk.CTkCheckBox(adap, text="reiniciar adaptación (desde cero)",
                                               font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE))
         self._chk_reiniciar.pack(anchor="w", pady=(0, 4))
@@ -191,24 +241,28 @@ class TabGeneracion(ctk.CTkFrame):
         self._label_modelo.pack(anchor="w", fill="x", pady=(6, 0))
 
         gen = _card(top, "Generación",
-                    side="left", fill="both", expand=True, padx=(6, 0), anchor="n")
+                    side="left", fill="x", expand=True, padx=(6, 0), anchor="n")
         fila_seed = ctk.CTkFrame(gen, fg_color="transparent")
         fila_seed.pack(fill="x", pady=2)
         ctk.CTkLabel(fila_seed, text="Seed", width=60, anchor="w", text_color=FG,
                      font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE)).pack(side="left")
         self._entry_seed = ctk.CTkEntry(fila_seed, width=110, justify="center")
         self._entry_seed.pack(side="left", padx=4)
-        ctk.CTkButton(gen, text="🎲 Nueva seed", height=26,
-                      fg_color="transparent", border_width=1, border_color=ACCENT,
-                      text_color=ACCENT, command=self._nueva_seed).pack(fill="x", pady=2)
         ctk.CTkButton(gen, text="▶ Generar cambios", height=34,
                       font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD, weight="bold"),
                       fg_color=GREEN, hover_color="#2BB46B",
                       command=self._generar_cambios).pack(fill="x", pady=(4, 2))
-        ctk.CTkButton(gen, text="📁 Subir Excel de cambios", height=30,
+        # Botones secundarios al mismo nivel (misma fila).
+        fila_sec = ctk.CTkFrame(gen, fg_color="transparent")
+        fila_sec.pack(fill="x", pady=2)
+        ctk.CTkButton(fila_sec, text="🎲 Nueva seed", height=30,
                       fg_color="transparent", border_width=1, border_color=ACCENT,
                       text_color=ACCENT, hover_color=BG_CARD,
-                      command=self._subir_cambios).pack(fill="x", pady=2)
+                      command=self._nueva_seed).pack(side="left", expand=True, fill="x", padx=(0, 3))
+        ctk.CTkButton(fila_sec, text="📁 Subir Excel de cambios", height=30,
+                      fg_color="transparent", border_width=1, border_color=ACCENT,
+                      text_color=ACCENT, hover_color=BG_CARD,
+                      command=self._subir_cambios).pack(side="left", expand=True, fill="x", padx=(3, 0))
         self._label_estado = ctk.CTkLabel(
             gen, text="", anchor="w", justify="left",
             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE), text_color=FG2)
@@ -372,94 +426,164 @@ class TabGeneracion(ctk.CTkFrame):
     # ── Popup de previsualización + ajuste del modelo ────────────────────
 
     def _abrir_popup_adaptacion(self):
-        """Popup para elegir modelo, reajustarlo sobre la historia y previsualizar."""
+        """Popup para elegir modelo, reajustarlo sobre la historia y previsualizar.
+
+        Muestra **qué se está adaptando**, una tabla **Antes → Después** de los
+        parámetros aprendidos (resaltando los que cambian), un botón de **ayuda**
+        que explica cada distribución y un **gráfico** de los cambios previsualizados.
+        """
         if self.app._historia_df is None:
             messagebox.showinfo("Adaptación", "Suba una historia primero.")
             return
         win = ctk.CTkToplevel(self)
         win.title("Ver / ajustar adaptación")
         win.configure(fg_color=BG_CARD)
-        win.geometry("780x600")
+        win.geometry("820x720")
         win.transient(self.winfo_toplevel())
         win.grab_set()
 
-        temp = {"modelo": None}  # modelo temporal en memoria (no persiste hasta Aplicar)
+        # Estado del popup: modelo temporal + figura/canvas del preview (a cerrar).
+        pop = {"modelo": None, "fig": None, "canvas": None}
+        umbral = float(obtener_generador_cambios(self.app.user_cfg)["umbral_desbaste_mm"])
 
+        # ── Selector de modelo + ajustar + ayuda ─────────────────────────────
         top = ctk.CTkFrame(win, fg_color="transparent")
-        top.pack(fill="x", padx=16, pady=(14, 6))
+        top.pack(fill="x", padx=16, pady=(14, 4))
         ctk.CTkLabel(top, text="Modelo:", text_color=FG).pack(side="left")
-        combo = ctk.CTkComboBox(top, values=list(_GEN_ETIQUETAS.keys()), width=260, state="readonly")
+        combo = ctk.CTkComboBox(top, values=list(_GEN_ETIQUETAS.keys()), width=240, state="readonly")
         combo.set(self._combo_generador.get())
         combo.pack(side="left", padx=8)
-        btn_ajustar = ctk.CTkButton(top, text="Ajustar", width=100)
+        btn_ajustar = ctk.CTkButton(top, text="Ajustar", width=90)
         btn_ajustar.pack(side="left", padx=4)
+        ctk.CTkButton(top, text="ⓘ", width=32, fg_color="transparent", border_width=1,
+                      border_color=ACCENT, text_color=ACCENT, hover_color=BG_CARD,
+                      command=lambda: self._mostrar_ayuda_modelos(win)).pack(side="left", padx=4)
 
-        ctk.CTkLabel(win, text="Parámetros aprendidos (cambian según el modelo):",
-                     anchor="w", text_color=FG2).pack(fill="x", padx=16, pady=(6, 0))
-        params = ctk.CTkTextbox(win, height=150)
-        params.pack(fill="x", padx=16, pady=(0, 8))
+        # Qué se está adaptando (modelo + filas de historia + período).
+        lbl_que = ctk.CTkLabel(win, text="", anchor="w", justify="left", text_color=FG,
+                               font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD, weight="bold"))
+        lbl_que.pack(fill="x", padx=16, pady=(2, 4))
 
-        ctk.CTkLabel(win, text="Previsualización temporal de cambios:",
+        # ── Tabla de parámetros: Antes → Después ─────────────────────────────
+        ctk.CTkLabel(win, text="Parámetros aprendidos (antes → después; en verde los que cambian):",
+                     anchor="w", text_color=FG2).pack(fill="x", padx=16, pady=(2, 0))
+        diff_frame = ctk.CTkScrollableFrame(win, height=210, fg_color="#222222")
+        diff_frame.pack(fill="x", padx=16, pady=(2, 8))
+
+        # ── Previsualización como gráfico ────────────────────────────────────
+        ctk.CTkLabel(win, text="Previsualización de cambios generados (gráfico):",
                      anchor="w", text_color=FG2).pack(fill="x", padx=16)
-        body = ctk.CTkFrame(win)
-        body.pack(fill="both", expand=True, padx=16, pady=(0, 8))
-        cols = ("Fecha_Hora", "Jaula", "Tipo", "mm")
-        tree = ttk.Treeview(body, columns=cols, show="headings", height=8, style="Treeview")
-        for c in cols:
-            tree.heading(c, text=c)
-            tree.column(c, width=160, anchor="center")
-        vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=vsb.set)
-        vsb.pack(side="right", fill="y")
-        tree.pack(fill="both", expand=True)
+        chart_holder = ctk.CTkFrame(win, fg_color="transparent")
+        chart_holder.pack(fill="both", expand=True, padx=16, pady=(2, 8))
 
+        # ── Acciones ─────────────────────────────────────────────────────────
         acc = ctk.CTkFrame(win, fg_color="transparent")
         acc.pack(fill="x", padx=16, pady=(0, 14))
         btn_cerrar = ctk.CTkButton(acc, text="Cerrar", width=100, fg_color="transparent",
                                    border_width=1, border_color=FG2, text_color=FG2,
-                                   hover_color=BG_CARD, command=win.destroy)
+                                   hover_color=BG_CARD)
         btn_cerrar.pack(side="right", padx=4)
         btn_apply = ctk.CTkButton(acc, text="Aplicar", width=120, state="disabled",
                                   fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER)
         btn_apply.pack(side="right", padx=4)
 
+        def _render_diff(antes, despues):
+            for w in diff_frame.winfo_children():
+                w.destroy()
+            cab = ("Parámetro", "Antes", "Después")
+            for col, txt in enumerate(cab):
+                ctk.CTkLabel(diff_frame, text=txt, anchor="w", text_color=ACCENT,
+                             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold")
+                             ).grid(row=0, column=col, sticky="w", padx=(0, 24), pady=(0, 2))
+            claves = list(despues.keys()) + [k for k in antes if k not in despues]
+            for i, k in enumerate(claves, start=1):
+                a = antes.get(k, "—")
+                d = despues.get(k, "—")
+                cambia = a != d
+                ctk.CTkLabel(diff_frame, text=k, anchor="w", text_color=FG2,
+                             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE)
+                             ).grid(row=i, column=0, sticky="w", padx=(0, 24))
+                ctk.CTkLabel(diff_frame, text=a, anchor="w", text_color=FG_DIM,
+                             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE)
+                             ).grid(row=i, column=1, sticky="w", padx=(0, 24))
+                ctk.CTkLabel(diff_frame, text=("→ " + d) if cambia else d, anchor="w",
+                             text_color=GREEN if cambia else FG,
+                             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE,
+                                              weight="bold" if cambia else "normal")
+                             ).grid(row=i, column=2, sticky="w")
+
+        def _render_chart(modelo, seed):
+            if pop["canvas"] is not None:
+                pop["canvas"].get_tk_widget().destroy()
+                pop["canvas"] = None
+            if pop["fig"] is not None:
+                import matplotlib.pyplot as plt
+                plt.close(pop["fig"])
+                pop["fig"] = None
+            for w in chart_holder.winfo_children():
+                w.destroy()
+            preview = gencambios.generar_cambios(modelo, self.app.user_cfg, seed=seed)
+            if preview is None or len(preview) == 0:
+                ctk.CTkLabel(chart_holder, text="(sin cambios en la ventana configurada)",
+                             text_color=FG2).pack(pady=20)
+                return
+            pop["fig"] = self._construir_figura(preview, self.app.taller, figsize=(7.6, 3.0))
+            pop["canvas"] = FigureCanvasTkAgg(pop["fig"], master=chart_holder)
+            pop["canvas"].draw()
+            pop["canvas"].get_tk_widget().pack(fill="both", expand=True)
+
         def _ajustar():
             clave = _GEN_ETIQUETAS.get(combo.get(), next(iter(_GEN_ETIQUETAS.values())))
             try:
                 modelo = gencambios.ajustar_modelo(self.app._historia_df, self.app.user_cfg, clave=clave)
-                temp["modelo"] = modelo
-                params.delete("1.0", "end")
-                params.insert("1.0", _resumen_modelo(modelo))
+                pop["modelo"] = modelo
+                etiqueta = _GEN_CLAVE_A_ETIQUETA.get(clave, clave)
+                fmin = (modelo.get("fecha_min") or "—")[:10]
+                fmax = (modelo.get("fecha_max") or "—")[:10]
+                lbl_que.configure(text=f"Adaptando «{etiqueta}» · {modelo.get('n_filas', 0)} "
+                                       f"filas de historia · período {fmin} → {fmax}")
+                _render_diff(_parametros_modelo(self.app._modelo_gen, umbral),
+                             _parametros_modelo(modelo, umbral))
                 try:
                     seed = int(self._entry_seed.get().strip())
                 except ValueError:
                     seed = 0
-                preview = gencambios.generar_cambios(modelo, self.app.user_cfg, seed=seed)
-                tree.delete(*tree.get_children())
-                for _, r in preview.iterrows():
-                    tree.insert("", "end", values=(
-                        pd.to_datetime(r["Fecha_Hora"]).strftime("%Y-%m-%d %H:%M"),
-                        int(r["Jaula"]), r["Tipo_Rectificado"], r["mm_a_Rectificar"]))
+                _render_chart(modelo, seed)
                 btn_apply.configure(state="normal")
             except Exception as e:
                 messagebox.showerror("Error", f"No se pudo ajustar/previsualizar: {e}", parent=win)
 
+        def _cerrar():
+            if pop["fig"] is not None:
+                import matplotlib.pyplot as plt
+                plt.close(pop["fig"])
+            win.destroy()
+
         def _aplicar():
-            if temp["modelo"] is None:
+            if pop["modelo"] is None:
                 return
-            self.app._modelo_gen = temp["modelo"]
-            modmod.guardar_modelo(temp["modelo"])
-            set_generador_cambios(self.app.user_cfg, generador=temp["modelo"]["clave"])
+            self.app._modelo_gen = pop["modelo"]
+            modmod.guardar_modelo(pop["modelo"])
+            set_generador_cambios(self.app.user_cfg, generador=pop["modelo"]["clave"])
             guardar_config(self.app.user_cfg)
             self._combo_generador.set(_GEN_CLAVE_A_ETIQUETA.get(
-                temp["modelo"]["clave"], next(iter(_GEN_ETIQUETAS))))
+                pop["modelo"]["clave"], next(iter(_GEN_ETIQUETAS))))
             self._actualizar_label_modelo()
-            self.app._log(f"Adaptación aplicada: modelo {temp['modelo']['clave']}.")
-            win.destroy()
+            self.app._log(f"Adaptación aplicada: modelo {pop['modelo']['clave']}.")
+            _cerrar()
 
         btn_ajustar.configure(command=_ajustar)
         btn_apply.configure(command=_aplicar)
+        btn_cerrar.configure(command=_cerrar)
+        win.protocol("WM_DELETE_WINDOW", _cerrar)
         _ajustar()  # ajuste inicial con el modelo preseleccionado
+
+    def _mostrar_ayuda_modelos(self, parent):
+        """Muestra una explicación de cada distribución/generador disponible."""
+        bloques = [f"• {g.etiqueta}\n   {g.descripcion}"
+                   for g in GENERADORES_CAMBIOS.values()]
+        messagebox.showinfo("¿Qué hace cada distribución?",
+                            "\n\n".join(bloques), parent=parent)
 
     # ── Timeline ─────────────────────────────────────────────────────────
 
@@ -480,9 +604,9 @@ class TabGeneracion(ctk.CTkFrame):
         self._canvas.draw()
         self._canvas.get_tk_widget().pack(fill="both", expand=True)
 
-    def _construir_figura(self, cambios, taller):
+    def _construir_figura(self, cambios, taller, figsize=(16, 5)):
         """Figura del timeline: un punto por cambio (por jaula) + paradas en rojo."""
-        fig = Figure(figsize=(16, 5), facecolor="#1A1A1A")
+        fig = Figure(figsize=figsize, facecolor="#1A1A1A")
         ax = fig.add_subplot(111)
         ax.set_facecolor("#222222")
         ax.tick_params(colors=FG, labelsize=8)

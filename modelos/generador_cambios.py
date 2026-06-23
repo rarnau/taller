@@ -153,6 +153,7 @@ class GeneradorCambios:
 
     clave: str = ""
     etiqueta: str = ""
+    descripcion: str = ""
 
     # -- Fit -----------------------------------------------------------------
     def _modelo_jaula_vacio(self) -> Dict[str, Any]:
@@ -262,6 +263,12 @@ class _GeneradorEmpirico(GeneradorCambios):
     """Distribuciones empíricas por jaula: muestrea duración y desbaste i.i.d."""
 
     clave, etiqueta = "empirico", "Distribuciones empíricas por jaula"
+    descripcion = (
+        "Aprende, por cada jaula, las distribuciones de duración de campaña y de "
+        "mm desbastados a partir de la historia, y las muestrea de forma "
+        "independiente (i.i.d.): cada cambio se sortea sin mirar el anterior. "
+        "Simple y robusto; ideal cuando no hay correlación entre campañas "
+        "consecutivas.")
 
     def _modelo_jaula_vacio(self) -> Dict[str, Any]:
         return {"duracion": [], "desbaste": []}
@@ -289,6 +296,12 @@ class _GeneradorMarkov(GeneradorCambios):
     """
 
     clave, etiqueta = "markov", "Cadena de Markov por jaula"
+    descripcion = (
+        "Cadena de Markov por jaula: agrupa las campañas en buckets de duración "
+        "y aprende con qué probabilidad una campaña de cierta duración (y tipo) es "
+        "seguida por otra. Captura la correlación entre campañas consecutivas "
+        "(p. ej. que tras una campaña larga suele venir una corta); la duración y "
+        "el desbaste concretos se muestrean de las observaciones de ese estado.")
 
     def _modelo_jaula_vacio(self) -> Dict[str, Any]:
         return {"inicial": {}, "transiciones": {}, "muestras": {}}
