@@ -828,16 +828,10 @@ class TallerCilindros:
             tipo = self._tipo_efectivo(cil, maq)
             nuevo_diam = cil.diametro - mm
 
-            if nuevo_diam < self.diametro_minimo:
-                cil.estado = EstadoCilindro.BAJA
-                cil.registrar_evento(
-                    tiempo, "BAJA",
-                    f"Diámetro proyectado {nuevo_diam:.2f} < {self.diametro_minimo}"
-                )
-                self.alertas.append(Alerta(tiempo, "INFO", f"Cilindro {cil.id} dado de BAJA"))
-                cola.remove(cil)
-                continue
-
+            # Un pase que proyecta diámetro < mínimo NO se da de baja en seco: se
+            # ejecuta el rectificado igual (reduce el diámetro de verdad) y la BAJA
+            # se decide recién al finalizar, en _finalizar_y_continuar, una vez que
+            # el diámetro real quedó por debajo del mínimo ("rectificar y luego BAJA").
             # El motor decide la jaula destino (y por tanto el perfil) con el
             # diámetro proyectado tras el rectificado; la máquina sólo lo aplica.
             _, perfil = self._asignar_jaula_destino(cil, nuevo_diam, tiempo)
@@ -958,6 +952,16 @@ class TallerCilindros:
         simulación (ambos cierran rectificados en curso de idéntica forma).
         """
         cil_terminado = maquina.finalizar_rectificado(tiempo)
+        if cil_terminado and cil_terminado.diametro < self.diametro_minimo:
+            # El pase ya se aplicó (diámetro real reducido): ahora que quedó por
+            # debajo del mínimo, recién se da de BAJA ("rectificar y luego BAJA").
+            cil_terminado.estado = EstadoCilindro.BAJA
+            cil_terminado.registrar_evento(
+                tiempo, "BAJA",
+                f"Diámetro {cil_terminado.diametro:.2f} < {self.diametro_minimo}")
+            self.alertas.append(Alerta(
+                tiempo, "INFO", f"Cilindro {cil_terminado.id} dado de BAJA"))
+            cil_terminado = None  # no tratarlo como Disponible recién llegado
         if (cil_terminado and not self._es_colocable(cil_terminado)
                 and cil_terminado.diametro > self.diametro_minimo):
             # No colocable en ninguna jaula (su perfil/diámetro no entra): en vez

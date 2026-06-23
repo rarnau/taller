@@ -2,9 +2,10 @@
 Ventana principal mejorada con CustomTkinter.
 """
 import os
-import threading
-import time
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import matplotlib
@@ -20,6 +21,7 @@ from config import modelo_generador as modmod
 from modelos.estrategias import ESTRATEGIAS_SELECCION
 from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
+from cli import simular_desde_dataframes
 
 # Cada pestaña es un componente de display puro; App es el único que conoce
 # tanto el modelo (TallerCilindros) como la UI y los conecta.
@@ -31,6 +33,7 @@ from gui.tab_tabla import crear_tab_inventario
 from gui.tab_kpis import llenar_kpis
 from gui.tab_config import crear_tab_configuracion
 from gui.tab_generacion import crear_tab_generacion
+from gui.tab_generacion import _inicios_parada
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -146,9 +149,21 @@ class App(ctk.CTk):
             self._btns_vel[v] = b
         self._set_velocidad(1)
 
+        # Marcadores de parada: una franja fina sobre el slider con un punto por
+        # cada inicio de PARADA; al clickear salta la reproducción a ese momento.
+        bg_sidebar = self.sidebar._apply_appearance_mode(self.sidebar.cget("fg_color"))
+        self.parada_canvas = tk.Canvas(self.sidebar, height=12, highlightthickness=0,
+                                       bg=bg_sidebar)
+        self.parada_canvas.grid(row=9, column=0, padx=20, pady=(8, 0), sticky="ew")
+        self.parada_canvas.bind("<Button-1>", self._click_parada_canvas)
+        self.parada_canvas.bind("<Configure>", lambda _e: self._redibujar_paradas_sidebar())
+        self._paradas_sidebar: list = []  # [(idx, x_px)] de los marcadores dibujados
+
+        # sticky="ew" para que el slider ocupe el mismo ancho que la franja de
+        # marcadores (mismo padx) y los puntos de parada queden alineados con él.
         self.slider_progreso = ctk.CTkSlider(self.sidebar, from_=0, to=100, command=self._seek_simulation)
         self.slider_progreso.set(0)
-        self.slider_progreso.grid(row=9, column=0, padx=20, pady=10)
+        self.slider_progreso.grid(row=10, column=0, padx=20, pady=(0, 10), sticky="ew")
 
     def _create_main_content(self):
         self.tabview = ctk.CTkTabview(self)
@@ -201,6 +216,10 @@ class App(ctk.CTk):
         self.status_bar.grid(row=1, column=0, columnspan=2, sticky="ew")
         self.status_label = ctk.CTkLabel(self.status_bar, text="Listo", font=ctk.CTkFont(size=12))
         self.status_label.pack(side="left", padx=20)
+        # Barra de progreso indeterminada de la simulación (oculta salvo al simular).
+        self.progress_sim = ctk.CTkProgressBar(self.status_bar, width=180, mode="indeterminate")
+        self.progress_sim.pack(side="right", padx=20)
+        self.progress_sim.pack_forget()
 
     def _log(self, m):
         if hasattr(self, 'log_w'):
@@ -244,11 +263,11 @@ class App(ctk.CTk):
         if getattr(self, "_simulando", False):
             return
 
-        # La carga del Excel y la simulación corren en un hilo aparte para no
-        # bloquear el event loop de Tkinter (la ventana se congelaba mientras
-        # tanto). Los logs y la actualización de la UI se marshalan al hilo de
-        # Tk con self.after(); el taller solo se lee desde la UI una vez que el
-        # hilo termina (en _simular_finalizado).
+        # La simulación es CPU-bound en Python puro: un hilo no basta (el GIL
+        # congelaba la ventana). Se corre en un PROCESO aparte
+        # (ProcessPoolExecutor) y se sondea el future con self.after(); la GUI
+        # queda fluida y muestra una barra de progreso indeterminada. El taller
+        # resultante viaja de vuelta por pickle y reemplaza a self.taller.
         # Al simular, el aviso "Configuración guardada..." ya no aplica: borrarlo.
         if getattr(self, "cfg_widget", None) is not None:
             self.cfg_widget._limpiar_feedback()
@@ -256,43 +275,67 @@ class App(ctk.CTk):
         self._simulando = True
         self.btn_simular.configure(state="disabled")
         self.status_label.configure(text="Simulando...")
-        self.update_idletasks()
+        self._mostrar_progreso(True)
 
         estrat = self._estrat_por_etiqueta.get(self.combo_est.get(), "mayor_diametro")
-        threading.Thread(target=self._simular_worker, args=(estrat,), daemon=True).start()
+        cambios = self._cambios_generados
+        if cambios is None:
+            cambios = pd.DataFrame(columns=gencambios.COLUMNAS_SALIDA)
 
-    def _simular_worker(self, estrat):
-        """Corre carga + simulación fuera del hilo de Tk (no toca widgets)."""
-        try:
-            # Resetear estado del taller: configurar() (globales + máquinas +
-            # rangos + sim) antes de recargar los datos. Se combina el stock
-            # (Inventario) con los cambios (Generación); si no hay cambios, se
-            # simula con un Programa_Cambios vacío.
-            self.taller.configurar(self.user_cfg)
-            cambios = self._cambios_generados
-            if cambios is None:
-                cambios = pd.DataFrame(columns=gencambios.COLUMNAS_SALIDA)
-            self.taller.cargar_datos_desde_dataframes(self._stock_df, cambios)
-            self.taller.simular(estrategia=estrat, callback_log=self._log_async)
-        except Exception as e:
-            self.after(0, lambda err=e: self._simular_error(err))
+        # Contexto 'fork': el hijo hereda los módulos ya importados y NO re-importa
+        # gui.app (con 'spawn' se re-ejecutaría el módulo y su Tk). En Linux fork es
+        # el default; se fija explícitamente por robustez.
+        ctx = multiprocessing.get_context("fork")
+        self._sim_executor = ProcessPoolExecutor(max_workers=1, mp_context=ctx)
+        self._sim_future = self._sim_executor.submit(
+            simular_desde_dataframes, self.user_cfg, self._stock_df, cambios, estrat)
+        self.after(100, self._poll_simulacion)
+
+    def _poll_simulacion(self):
+        """Sondea el proceso de simulación sin bloquear el event loop de Tk."""
+        fut = getattr(self, "_sim_future", None)
+        if fut is None:
             return
-        self.after(0, self._simular_finalizado)
+        if not fut.done():
+            self.after(100, self._poll_simulacion)
+            return
+        self._sim_executor.shutdown(wait=False)
+        self._sim_future = None
+        try:
+            taller = fut.result()
+        except Exception as e:
+            self._simular_error(e)
+            return
+        # Reemplazar el taller local por el resultado del proceso hijo.
+        self.taller = taller
+        self._simular_finalizado()
 
-    def _log_async(self, m):
-        """Callback de log seguro para hilos: difiere el insert al hilo de Tk."""
-        self.after(0, lambda: self._log(m))
+    def _mostrar_progreso(self, activo):
+        """Muestra/oculta la barra de progreso indeterminada de la simulación."""
+        if activo:
+            self.progress_sim.pack(side="right", padx=20)
+            self.progress_sim.start()
+        else:
+            self.progress_sim.stop()
+            self.progress_sim.pack_forget()
 
     def _simular_error(self, e):
         self._simulando = False
+        self._mostrar_progreso(False)
         self.btn_simular.configure(state="normal")
         self.status_label.configure(text="Error en la simulación")
         messagebox.showerror("Error", f"No se pudo ejecutar la simulación: {e}")
 
     def _simular_finalizado(self):
+        self._mostrar_progreso(False)
         self.snapshot_actual_idx = 0
         n_snaps = len(self.taller.snapshots)
         self.status_label.configure(text=f"Simulación completada. Snapshots: {n_snaps}")
+
+        # El proceso hijo no transmite logs en vivo: se vuelcan ahora los avisos
+        # de carga del taller resultante.
+        for aviso in self.taller.avisos_carga:
+            self._log(aviso)
 
         self.slider_progreso.configure(from_=0, to=max(0, n_snaps - 1))
         self.slider_progreso.set(0)
@@ -304,6 +347,7 @@ class App(ctk.CTk):
         self.inv_widget.refrescar()
         self._refrescar_combo_substocks()
         self._render_paneles()
+        self._redibujar_paradas_sidebar()
         # El timeline ya puede sombrear las paradas calculadas por la simulación.
         if getattr(self, "gen_widget", None) is not None:
             self.gen_widget.refrescar_timeline()
@@ -311,6 +355,33 @@ class App(ctk.CTk):
 
         self.btn_simular.configure(state="normal")
         self._simulando = False
+
+    def _redibujar_paradas_sidebar(self):
+        """Dibuja un punto por cada inicio de PARADA sobre el slider del sidebar."""
+        cv = getattr(self, "parada_canvas", None)
+        if cv is None:
+            return
+        cv.delete("all")
+        self._paradas_sidebar = []
+        snaps = self.taller.snapshots
+        n = len(snaps)
+        if n < 2:
+            return
+        ancho = cv.winfo_width()
+        if ancho <= 1:  # aún sin layout: reintentar cuando haya ancho
+            self.after(60, self._redibujar_paradas_sidebar)
+            return
+        for _t, idx in _inicios_parada(snaps):
+            x = (idx / (n - 1)) * (ancho - 1)
+            cv.create_polygon(x - 4, 1, x + 4, 1, x, 9, fill=RED, outline=RED_DARK)
+            self._paradas_sidebar.append((idx, x))
+
+    def _click_parada_canvas(self, event):
+        """Salta la reproducción al marcador de parada más cercano al click."""
+        if not self._paradas_sidebar:
+            return
+        idx, _x = min(self._paradas_sidebar, key=lambda p: abs(p[1] - event.x))
+        self.ir_a_momento(idx)
 
     def _sincronizar_vista_con_taller(self) -> None:
         """Actualiza los frames de Vista Real con las jaulas y máquinas del taller cargado."""

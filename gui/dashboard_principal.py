@@ -36,15 +36,18 @@ def rellenar_preview_vacio(fig, celdas, styler):
 
 
 def formatter_tiempo(t0, t1):
-    """DateFormatter para un eje temporal: sin hora si el span supera 7 días.
+    """DateFormatter para un eje temporal, según la longitud del span.
 
     Con ventanas largas las etiquetas ``%d/%m %H:%M`` se solapan; a partir de una
-    semana se muestra sólo el día (``%d/%m``).
+    semana se muestra sólo el día (``%d/%m``) y, si el span supera el año (p.ej.
+    historias multi-anuales), se agrega el año (``%d/%m/%y``) para no perderlo.
     """
     try:
         dias = (t1 - t0).total_seconds() / 86400.0
     except (TypeError, AttributeError):
         dias = 0
+    if dias > 365:
+        return DateFormatter("%d/%m/%y")
     return DateFormatter("%d/%m" if dias > 7 else "%d/%m %H:%M")
 
 

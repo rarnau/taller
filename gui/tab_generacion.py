@@ -178,6 +178,28 @@ def _parametros_modelo(m, umbral):
     return params
 
 
+def _etiqueta_estado(est):
+    """Estado markov ``d{i}:tipo`` → rótulo legible ``<rango horario>·tipo``.
+
+    El ``d{i}`` es un **bucket de duración** (no un "cero"): se traduce a su rango
+    horario usando ``_EDGES_DURACION_H`` para que la tabla no muestre "d0/d1…".
+    """
+    if not isinstance(est, str) or ":" not in est:
+        return str(est)
+    bucket, _, tipo = est.partition(":")
+    edges = gencambios._EDGES_DURACION_H
+    rango = bucket
+    if bucket.startswith("d") and bucket[1:].isdigit():
+        i = int(bucket[1:])
+        if i == 0:
+            rango = f"<{edges[0]:.0f}h"
+        elif i < len(edges):
+            rango = f"{edges[i - 1]:.0f}–{edges[i]:.0f}h"
+        else:
+            rango = f"≥{edges[-1]:.0f}h"
+    return f"{rango}·{tipo}"
+
+
 def _parametros_modelo_especificos(m):
     """Parámetros **propios del tipo de modelo** que se ajustan.
 
@@ -197,14 +219,16 @@ def _parametros_modelo_especificos(m):
             if ini:
                 tot = sum(ini.values())
                 est, cnt = max(ini.items(), key=lambda kv: kv[1])
-                params[f"Jaula {j} · estado inicial"] = f"{est} ({100 * cnt / tot:.0f}%)"
+                params[f"Jaula {j} · estado inicial"] = (
+                    f"{_etiqueta_estado(est)} ({100 * cnt / tot:.0f}%)")
             mejor = None
             for src, dests in mj.get("transiciones", {}).items():
                 for dst, c in dests.items():
                     if mejor is None or c > mejor[2]:
                         mejor = (src, dst, c)
             if mejor:
-                params[f"Jaula {j} · transición top"] = f"{mejor[0]} → {mejor[1]}"
+                params[f"Jaula {j} · transición top"] = (
+                    f"{_etiqueta_estado(mejor[0])} → {_etiqueta_estado(mejor[1])}")
         else:  # empírico
             dur, desb = _muestras_jaula(mj)
             if dur:

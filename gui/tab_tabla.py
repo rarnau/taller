@@ -34,6 +34,8 @@ class TabInventario(ctk.CTkFrame):
         self.app = app
         # col → set de valores permitidos (ausente = sin filtro = todos)
         self._filtros_col: dict = {}
+        self._filtro_panel = None    # panel inline de filtro abierto (o None)
+        self._filtro_binds = False   # binds de cierre creados una sola vez
         self._construir()
         self.refrescar()
 
@@ -94,6 +96,11 @@ class TabInventario(ctk.CTkFrame):
         filas = []
         if self._vista.get() == _VISTA_FINAL:
             taller = self.app.taller
+            # El "stock final" solo tiene sentido tras simular: sin snapshots el
+            # taller solo tiene el stock recién cargado (D Final == D Original), así
+            # que no se muestra como si fuera un resultado.
+            if not taller.snapshots:
+                return cols, filas
             for cil in sorted(taller.cilindros.values(), key=lambda c: c.diametro, reverse=True):
                 ss = taller.obtener_substock_por_diametro(cil.diametro)
                 dg = round(cil.diametro_original - cil.diametro, 2)
@@ -133,6 +140,7 @@ class TabInventario(ctk.CTkFrame):
 
     def _on_cambiar_vista(self):
         cols = self._columnas()
+        self._cerrar_filtro()
         self._filtros_col = {}  # columnas distintas por vista: se reinician los filtros
         self._tree.configure(columns=cols)
         for c in cols:
@@ -153,12 +161,23 @@ class TabInventario(ctk.CTkFrame):
         for fila in filas:
             tag = str(fila[idx_estado]).replace(" ", "_") if idx_estado is not None else ""
             self._tree.insert("", "end", values=fila, tags=(tag,) if tag else ())
-        self._lbl_count.set(f"{len(filas)} cilindros")
+        if (self._vista.get() == _VISTA_FINAL and not filas
+                and not self.app.taller.snapshots):
+            self._lbl_count.set("Ejecute la simulación para ver el stock final")
+        else:
+            self._lbl_count.set(f"{len(filas)} cilindros")
 
     # ── Filtro de columna (estilo Excel) ─────────────────────────────────
 
     def _abrir_filtro(self, col):
-        """Popup con checklist de los valores distintos de ``col`` (autofiltro Excel)."""
+        """Panel **inline** (sin popup) con búsqueda + checklist de valores de ``col``.
+
+        Mismo patrón ``place()``/click-fuera que ``gui/calendario.py``: se dibuja
+        sobre el toplevel, anclado bajo la cabecera clickeada, y se cierra al hacer
+        click fuera o con Escape (binds creados una sola vez). Además del checklist
+        de selección, un buscador filtra los valores por contenido (substring).
+        """
+        self._cerrar_filtro()
         cols, filas = self._filas_crudas()
         idx = cols.index(col)
         valores = sorted({str(f[idx]) for f in filas})
@@ -166,31 +185,47 @@ class TabInventario(ctk.CTkFrame):
             return
         actual = self._filtros_col.get(col)  # set o None (= todos)
 
-        win = ctk.CTkToplevel(self)
-        win.title(f"Filtrar: {col}")
-        win.configure(fg_color=BG_CARD)
-        win.geometry("260x380")
-        win.transient(self.winfo_toplevel())
-        win.grab_set()
+        top = self.winfo_toplevel()
+        panel = ctk.CTkFrame(top, fg_color=BG_CARD, corner_radius=8,
+                             border_width=1, border_color=ACCENT)
+        self._filtro_panel = panel
+
+        ctk.CTkLabel(panel, text=f"Filtrar «{col}»", text_color=FG,
+                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(10, 2))
+
+        # Selección por valor (persiste aunque el buscador oculte algunos valores).
+        vars_val = {val: tk.BooleanVar(value=(actual is None or val in actual))
+                    for val in valores}
+
+        buscar = tk.StringVar()
+        ctk.CTkEntry(panel, textvariable=buscar, width=232,
+                     placeholder_text="Buscar…").pack(padx=12, pady=(0, 6))
 
         chk_all = tk.BooleanVar(value=actual is None)
-        vars_val = {}
 
-        ctk.CTkLabel(win, text=f"Valores de «{col}»", text_color=FG,
-                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(12, 2))
+        def _visibles():
+            t = buscar.get().strip().lower()
+            return [v for v in valores if t in v.lower()] if t else valores
 
         def _toggle_all():
-            for v in vars_val.values():
-                v.set(chk_all.get())
+            for v in _visibles():
+                vars_val[v].set(chk_all.get())
 
-        ctk.CTkCheckBox(win, text="(Seleccionar todo)", variable=chk_all,
+        ctk.CTkCheckBox(panel, text="(Seleccionar todo)", variable=chk_all,
                         command=_toggle_all).pack(anchor="w", padx=12, pady=(0, 4))
-        body = ctk.CTkScrollableFrame(win, fg_color="transparent")
+
+        body = ctk.CTkScrollableFrame(panel, fg_color="transparent", width=230, height=200)
         body.pack(fill="both", expand=True, padx=8, pady=2)
-        for val in valores:
-            v = tk.BooleanVar(value=(actual is None or val in actual))
-            vars_val[val] = v
-            ctk.CTkCheckBox(body, text=val or "(vacío)", variable=v).pack(anchor="w", pady=1)
+
+        def _redibujar(*_a):
+            for w in body.winfo_children():
+                w.destroy()
+            for val in _visibles():
+                ctk.CTkCheckBox(body, text=val or "(vacío)",
+                                variable=vars_val[val]).pack(anchor="w", pady=1)
+
+        buscar.trace_add("write", _redibujar)
+        _redibujar()
 
         def _aplicar():
             sel = {val for val, v in vars_val.items() if v.get()}
@@ -198,23 +233,57 @@ class TabInventario(ctk.CTkFrame):
                 self._filtros_col.pop(col, None)  # nada o todo ⇒ sin filtro
             else:
                 self._filtros_col[col] = sel
+            self._cerrar_filtro()
             self._actualizar_headings()
             self._fill()
-            win.destroy()
 
         def _limpiar():
             self._filtros_col.pop(col, None)
+            self._cerrar_filtro()
             self._actualizar_headings()
             self._fill()
-            win.destroy()
 
-        acc = ctk.CTkFrame(win, fg_color="transparent")
-        acc.pack(fill="x", padx=12, pady=(4, 12))
+        acc = ctk.CTkFrame(panel, fg_color="transparent")
+        acc.pack(fill="x", padx=12, pady=(4, 10))
         ctk.CTkButton(acc, text="Aplicar", width=80, fg_color=BTN_BLUE,
                       hover_color=BTN_BLUE_HOVER, command=_aplicar).pack(side="right", padx=4)
         ctk.CTkButton(acc, text="Limpiar", width=80, fg_color="transparent", border_width=1,
                       border_color=FG2, text_color=FG2, hover_color=BG_CARD,
                       command=_limpiar).pack(side="right", padx=4)
+
+        # Posición: bajo la cabecera de la columna (x = ancho acumulado anterior),
+        # sin desbordar el borde derecho del toplevel.
+        panel.update_idletasks()
+        x_off = sum(int(self._tree.column(c, "width")) for c in cols[:idx])
+        x = (self._tree.winfo_rootx() - top.winfo_rootx()) + x_off
+        y = (self._tree.winfo_rooty() - top.winfo_rooty())
+        x = max(0, min(x, top.winfo_width() - panel.winfo_reqwidth()))
+        panel.place(x=x, y=y)
+        panel.lift()
+
+        # Cierre por click-fuera/Escape: binds del toplevel creados una sola vez
+        # (cada handler corta solo si el panel está cerrado), evitando el footgun
+        # de unbind(seq, funcid). Mismo enfoque que gui/calendario.py.
+        if not self._filtro_binds:
+            top.bind("<Button-1>", self._click_fuera_filtro, add="+")
+            top.bind("<Escape>", lambda _e: self._cerrar_filtro(), add="+")
+            self._filtro_binds = True
+
+    def _cerrar_filtro(self):
+        if self._filtro_panel is not None:
+            self._filtro_panel.destroy()
+            self._filtro_panel = None
+
+    def _click_fuera_filtro(self, event):
+        """Cierra el panel si el click no cayó dentro de él."""
+        if self._filtro_panel is None:
+            return
+        w = event.widget
+        while w is not None:
+            if w is self._filtro_panel:
+                return
+            w = getattr(w, "master", None)
+        self._cerrar_filtro()
 
     # ── Acciones ─────────────────────────────────────────────────────────
 

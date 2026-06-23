@@ -81,6 +81,21 @@ def construir_taller_desde_dataframes(cfg: Dict[str, Any], stock_df: "pd.DataFra
     return taller
 
 
+def simular_desde_dataframes(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
+                             cambios_df: "pd.DataFrame",
+                             estrategia: str = "mayor_diametro") -> TallerCilindros:
+    """Construye el taller desde DataFrames, simula y devuelve el taller resultante.
+
+    Función **a nivel de módulo** y sin GUI: es picklable, así que la GUI la corre
+    en un proceso aparte (``ProcessPoolExecutor``) para no congelar el event loop
+    de Tkinter (el GIL no alcanza con un hilo para una simulación CPU-bound). El
+    taller devuelto (snapshots, cilindros, máquinas, alertas) viaja por pickle.
+    """
+    taller = construir_taller_desde_dataframes(cfg, stock_df, cambios_df)
+    taller.simular(estrategia=estrategia, callback_log=None)
+    return taller
+
+
 def generar_y_construir(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
                         modelo: Dict[str, Any], *, seed: Optional[int] = None,
                         horizonte_dias: Optional[int] = None) -> TallerCilindros:
