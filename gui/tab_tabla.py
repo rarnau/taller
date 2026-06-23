@@ -14,8 +14,7 @@ from tkinter import ttk, filedialog, messagebox
 import customtkinter as ctk
 import pandas as pd
 
-from config.tema import (BG_CARD, ACCENT, BTN_BLUE, BTN_BLUE_HOVER, TABLE_ROW_COLORS)
-from modelos.enums import EstadoCilindro
+from config.tema import (BG_CARD, FG, FG2, ACCENT, BTN_BLUE, BTN_BLUE_HOVER, TABLE_ROW_COLORS)
 
 _VISTA_INICIAL = "Stock inicial"
 _VISTA_FINAL = "Stock final"
@@ -33,6 +32,7 @@ class TabInventario(ctk.CTkFrame):
     def __init__(self, parent, app):
         super().__init__(parent, fg_color="transparent")
         self.app = app
+        self._filtros_col = {}  # col → set de valores permitidos (ausente/None = todos)
         self._construir()
         self.refrescar()
 
@@ -52,11 +52,8 @@ class TabInventario(ctk.CTkFrame):
                         values=[_VISTA_INICIAL, _VISTA_FINAL],
                         command=lambda _v: self._on_cambiar_vista()).pack(side="left", padx=(0, 16))
 
-        ctk.CTkLabel(toolbar, text="Filtrar estado:").pack(side="left", padx=(0, 4))
-        self._filtro = tk.StringVar(value="Todos")
-        ctk.CTkComboBox(toolbar, variable=self._filtro, width=140, state="readonly",
-                        values=["Todos"] + [e.value for e in EstadoCilindro],
-                        command=lambda _v: self._fill()).pack(side="left")
+        ctk.CTkLabel(toolbar, text="Filtros: clic en una cabecera ▾",
+                     text_color=FG2).pack(side="left")
 
         ctk.CTkButton(toolbar, text="⬇ Descargar Excel", width=150,
                       fg_color="transparent", border_width=1, border_color=ACCENT,
@@ -90,16 +87,13 @@ class TabInventario(ctk.CTkFrame):
     def _columnas(self):
         return _COLS_FINAL if self._vista.get() == _VISTA_FINAL else _COLS_INICIAL
 
-    def _filas(self):
-        """Devuelve (columnas, filas) de la vista actual aplicando el filtro de estado."""
+    def _filas_crudas(self):
+        """(columnas, filas) de la vista actual **sin** aplicar los filtros de columna."""
         cols = self._columnas()
-        ef = self._filtro.get()
         filas = []
         if self._vista.get() == _VISTA_FINAL:
             taller = self.app.taller
             for cil in sorted(taller.cilindros.values(), key=lambda c: c.diametro, reverse=True):
-                if ef != "Todos" and cil.estado.value != ef:
-                    continue
                 ss = taller.obtener_substock_por_diametro(cil.diametro)
                 dg = round(cil.diametro_original - cil.diametro, 2)
                 filas.append((cil.id, f"{cil.diametro_original:.1f}", f"{cil.diametro:.1f}",
@@ -110,18 +104,23 @@ class TabInventario(ctk.CTkFrame):
             if df is not None:
                 df = df.sort_values("Diámetro_mm", ascending=False)
                 for _, r in df.iterrows():
-                    estado = str(r.get("Estado", ""))
-                    if ef != "Todos" and estado != ef:
-                        continue
                     jaula = r.get("Jaula_Asignada")
                     perfil = r.get("Perfil")
                     filas.append((
                         str(r.get("ID_Cilindro", "")), f"{float(r.get('Diámetro_mm', 0)):.1f}",
-                        estado,
+                        str(r.get("Estado", "")),
                         "-" if pd.isna(jaula) else int(jaula),
                         "-" if (perfil is None or pd.isna(perfil) or str(perfil) == "") else str(perfil),
                     ))
         return cols, filas
+
+    def _filas_filtradas(self):
+        """(columnas, filas) tras aplicar todos los filtros de columna activos."""
+        cols, filas = self._filas_crudas()
+        idxs = {c: i for i, c in enumerate(cols)}
+        out = [f for f in filas
+               if all((s := self._filtros_col.get(c)) is None or str(f[idxs[c]]) in s for c in cols)]
+        return cols, out
 
     # ── Render ───────────────────────────────────────────────────────────
 
@@ -130,20 +129,88 @@ class TabInventario(ctk.CTkFrame):
 
     def _on_cambiar_vista(self):
         cols = self._columnas()
+        self._filtros_col = {}  # columnas distintas por vista: se reinician los filtros
         self._tree.configure(columns=cols)
         for c in cols:
-            self._tree.heading(c, text=c)
             self._tree.column(c, width=_ANCHOS.get(c, 110), anchor="center")
+        self._actualizar_headings()
         self._fill()
 
+    def _actualizar_headings(self):
+        """Texto de cabecera (con ▾ si hay filtro) + binding de click por columna."""
+        for c in self._columnas():
+            marca = "  ▾" if self._filtros_col.get(c) else ""
+            self._tree.heading(c, text=c + marca, command=lambda col=c: self._abrir_filtro(col))
+
     def _fill(self):
-        cols, filas = self._filas()
+        cols, filas = self._filas_filtradas()
         self._tree.delete(*self._tree.get_children())
-        idx_estado = cols.index("Estado")
+        idx_estado = cols.index("Estado") if "Estado" in cols else None
         for fila in filas:
-            tag = str(fila[idx_estado]).replace(" ", "_")
-            self._tree.insert("", "end", values=fila, tags=(tag,))
+            tag = str(fila[idx_estado]).replace(" ", "_") if idx_estado is not None else ""
+            self._tree.insert("", "end", values=fila, tags=(tag,) if tag else ())
         self._lbl_count.set(f"{len(filas)} cilindros")
+
+    # ── Filtro de columna (estilo Excel) ─────────────────────────────────
+
+    def _abrir_filtro(self, col):
+        """Popup con checklist de los valores distintos de ``col`` (autofiltro Excel)."""
+        cols, filas = self._filas_crudas()
+        idx = cols.index(col)
+        valores = sorted({str(f[idx]) for f in filas})
+        if not valores:
+            return
+        actual = self._filtros_col.get(col)  # set o None (= todos)
+
+        win = ctk.CTkToplevel(self)
+        win.title(f"Filtrar: {col}")
+        win.configure(fg_color=BG_CARD)
+        win.geometry("260x380")
+        win.transient(self.winfo_toplevel())
+        win.grab_set()
+
+        chk_all = tk.BooleanVar(value=actual is None)
+        vars_val = {}
+
+        ctk.CTkLabel(win, text=f"Valores de «{col}»", text_color=FG,
+                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(12, 2))
+
+        def _toggle_all():
+            for v in vars_val.values():
+                v.set(chk_all.get())
+
+        ctk.CTkCheckBox(win, text="(Seleccionar todo)", variable=chk_all,
+                        command=_toggle_all).pack(anchor="w", padx=12, pady=(0, 4))
+        body = ctk.CTkScrollableFrame(win, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=8, pady=2)
+        for val in valores:
+            v = tk.BooleanVar(value=(actual is None or val in actual))
+            vars_val[val] = v
+            ctk.CTkCheckBox(body, text=val or "(vacío)", variable=v).pack(anchor="w", pady=1)
+
+        def _aplicar():
+            sel = {val for val, v in vars_val.items() if v.get()}
+            if not sel or len(sel) == len(valores):
+                self._filtros_col.pop(col, None)  # nada o todo ⇒ sin filtro
+            else:
+                self._filtros_col[col] = sel
+            self._actualizar_headings()
+            self._fill()
+            win.destroy()
+
+        def _limpiar():
+            self._filtros_col.pop(col, None)
+            self._actualizar_headings()
+            self._fill()
+            win.destroy()
+
+        acc = ctk.CTkFrame(win, fg_color="transparent")
+        acc.pack(fill="x", padx=12, pady=(4, 12))
+        ctk.CTkButton(acc, text="Aplicar", width=80, fg_color=BTN_BLUE,
+                      hover_color=BTN_BLUE_HOVER, command=_aplicar).pack(side="right", padx=4)
+        ctk.CTkButton(acc, text="Limpiar", width=80, fg_color="transparent", border_width=1,
+                      border_color=FG2, text_color=FG2, hover_color=BG_CARD,
+                      command=_limpiar).pack(side="right", padx=4)
 
     # ── Acciones ─────────────────────────────────────────────────────────
 
@@ -158,7 +225,7 @@ class TabInventario(ctk.CTkFrame):
         self.refrescar()
 
     def _descargar(self):
-        cols, filas = self._filas()
+        cols, filas = self._filas_filtradas()
         if not filas:
             messagebox.showinfo("Inventario", "No hay datos para descargar.")
             return

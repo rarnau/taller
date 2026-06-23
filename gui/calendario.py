@@ -79,6 +79,21 @@ class SelectorFecha(ctk.CTkFrame):
         top = self.winfo_toplevel()
         self._panel = ctk.CTkFrame(top, fg_color=BG_CARD, corner_radius=8,
                                    border_width=1, border_color=ACCENT)
+        # Header con flechas: se crea UNA sola vez (no se destruye al navegar) para
+        # que el botón clickeado siga existiendo cuando corre _click_fuera.
+        head = ctk.CTkFrame(self._panel, fg_color="transparent")
+        head.pack(fill="x", padx=6, pady=(6, 2))
+        ctk.CTkButton(head, text="‹", width=28, fg_color=BG3, hover_color=ACCENT,
+                      command=self._mes_prev).pack(side="left")
+        self._lbl_mes = ctk.CTkLabel(
+            head, text="", text_color=FG,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold"))
+        self._lbl_mes.pack(side="left", expand=True)
+        ctk.CTkButton(head, text="›", width=28, fg_color=BG3, hover_color=ACCENT,
+                      command=self._mes_next).pack(side="right")
+        # La grilla de días vive en su propio frame; sólo ese se reconstruye.
+        self._grid = ctk.CTkFrame(self._panel, fg_color="transparent")
+        self._grid.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self._dibujar()
         self.update_idletasks()
         x = self._entry.winfo_rootx() - top.winfo_rootx()
@@ -116,33 +131,25 @@ class SelectorFecha(ctk.CTkFrame):
     # ── Dibujo del calendario ────────────────────────────────────────────────
 
     def _dibujar(self):
-        for w in self._panel.winfo_children():
+        # Sólo se reconstruye la grilla de días; el header (con flechas) persiste.
+        for w in self._grid.winfo_children():
             w.destroy()
         y, m = self._vista.year, self._vista.month
-
-        head = ctk.CTkFrame(self._panel, fg_color="transparent")
-        head.grid(row=0, column=0, columnspan=7, sticky="ew", padx=6, pady=(6, 2))
-        ctk.CTkButton(head, text="‹", width=28, fg_color=BG3, hover_color=ACCENT,
-                      command=self._mes_prev).pack(side="left")
-        ctk.CTkLabel(head, text=f"{_MESES[m - 1]} {y}", text_color=FG,
-                     font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE, weight="bold")
-                     ).pack(side="left", expand=True)
-        ctk.CTkButton(head, text="›", width=28, fg_color=BG3, hover_color=ACCENT,
-                      command=self._mes_next).pack(side="right")
+        self._lbl_mes.configure(text=f"{_MESES[m - 1]} {y}")
 
         for c, d in enumerate(_DIAS):
-            ctk.CTkLabel(self._panel, text=d, width=32, text_color=FG2,
+            ctk.CTkLabel(self._grid, text=d, width=32, text_color=FG2,
                          font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE)
-                         ).grid(row=1, column=c, padx=1, pady=1)
+                         ).grid(row=0, column=c, padx=1, pady=1)
 
         sel = self._fecha_actual()
         cal = calendar.Calendar(firstweekday=0)  # lunes
-        for r, semana in enumerate(cal.monthdatescalendar(y, m), start=2):
+        for r, semana in enumerate(cal.monthdatescalendar(y, m), start=1):
             for c, dia in enumerate(semana):
                 es_mes = dia.month == m
                 es_sel = dia == sel
                 ctk.CTkButton(
-                    self._panel, text=str(dia.day), width=32, height=26,
+                    self._grid, text=str(dia.day), width=32, height=26,
                     fg_color=BTN_BLUE if es_sel else (BG3 if es_mes else BG2),
                     text_color=FG if es_mes else FG2, hover_color=BTN_BLUE_HOVER,
                     command=lambda dd=dia: self._elegir(dd)

@@ -2,9 +2,9 @@
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
-from matplotlib.dates import DateFormatter
 from modelos.enums import EstadoCilindro
 from config.tema import BG, BG2, BG3, FG, FG2, ACCENT, RED, GREEN, ORANGE, COLORES_ESTADO
+from gui.dashboard_principal import formatter_tiempo, banner_sin_datos
 
 def _style_ax(ax, title):
     ax.set_facecolor("#222")
@@ -19,6 +19,18 @@ def _style_ax(ax, title):
 def crear_dashboard_detalle(t):
     fig = Figure(figsize=(18, 12), facecolor="#1A1A1A")
     gs = GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.2, left=0.06, right=0.96, top=0.94, bottom=0.06)
+
+    if not t.snapshots:
+        # Preview pre-simulación: paneles vacíos + banner.
+        for pos, titulo in ((gs[0, :], "Mapa de Cilindros: Estado vs Diámetro"),
+                            (gs[1, 0], "Distribución de Diámetros (Activos)"),
+                            (gs[1, 1], "Timeline de Cambios por Jaula")):
+            axv = fig.add_subplot(pos)
+            _style_ax(axv, titulo)
+            axv.set_xticks([])
+            axv.set_yticks([])
+        banner_sin_datos(fig)
+        return fig
 
     # 1. Mapa de Cilindros (Estado x Diámetro)
     ax1 = fig.add_subplot(gs[0, :])
@@ -51,6 +63,7 @@ def crear_dashboard_detalle(t):
     # 3. Timeline de Cambios
     ax3 = fig.add_subplot(gs[1, 1])
     _style_ax(ax3, "Timeline de Cambios por Jaula")
+    tiempos_ev = [e.tiempo for e in t.eventos_programados]
     for tn, ce in [("produccion", GREEN), ("desbaste", ORANGE)]:
         evs = [e for e in t.eventos_programados if e.tipo.value == tn]
         if evs:
@@ -60,7 +73,8 @@ def crear_dashboard_detalle(t):
     n_jaulas = t.cantidad_jaulas
     ax3.set_yticks(list(range(1, n_jaulas + 1)))
     ax3.set_yticklabels([f"J{i}" for i in range(1, n_jaulas + 1)], color=FG, fontsize=9)
-    ax3.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
+    if tiempos_ev:
+        ax3.xaxis.set_major_formatter(formatter_tiempo(min(tiempos_ev), max(tiempos_ev)))
     ax3.set_ylim(0.5, n_jaulas + 0.5)
     ax3.legend(fontsize=8, facecolor="#333", edgecolor="#333", labelcolor=FG)
 

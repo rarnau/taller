@@ -23,8 +23,8 @@ from datetime import timedelta
 from tkinter import filedialog, messagebox
 
 from matplotlib.figure import Figure
-from matplotlib.dates import DateFormatter
 from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from config.tema import (BG_CARD, FG, FG2, FG_DIM, ACCENT, GREEN, RED, FONT_FAMILY,
@@ -38,12 +38,16 @@ from modelos import generador_cambios as gencambios
 from modelos.generador_cambios import GENERADORES_CAMBIOS
 from modelos import turnos as turnos_mod
 from gui.editor_turnos import abrir_editor_turnos
-from gui.dashboard_principal import _marcar_paradas
+from gui.dashboard_principal import _marcar_paradas, formatter_tiempo
 from gui.calendario import SelectorFecha
 
 # Generadores: etiqueta visible ↔ clave persistida (la GUI muestra la etiqueta).
 _GEN_ETIQUETAS = {g.etiqueta: clave for clave, g in GENERADORES_CAMBIOS.items()}
 _GEN_CLAVE_A_ETIQUETA = {clave: g.etiqueta for clave, g in GENERADORES_CAMBIOS.items()}
+
+# Modos del gráfico del popup de adaptación.
+_MODO_HISTORIA = "Historia subida"
+_MODO_COMPARA = "Generado (antes→después)"
 
 
 def _card(parent, titulo, **pack_kw):
@@ -82,6 +86,17 @@ def _tramos_sin_turno(grilla, t0, t1):
     if ini is not None:
         tramos.append((ini, t1))
     return tramos
+
+
+def _inicios_parada(snapshots):
+    """[(tiempo, idx)] de cada transición a PARADA (inicio de un tramo parado)."""
+    out, en_parada = [], False
+    for k, s in enumerate(snapshots):
+        f = bool(getattr(s, "jaulas_paradas", []))
+        if f and not en_parada:
+            out.append((s.tiempo, k))
+        en_parada = f
+    return out
 
 
 def _resumen_modelo(m):
@@ -141,6 +156,51 @@ def _parametros_modelo(m, umbral):
         params[f"Jaula {j} · % desbaste"] = (
             f"{100 * sum(1 for x in desb if x > umbral) / len(desb):.0f}%" if desb else "—")
     return params
+
+
+def _parametros_modelo_especificos(m):
+    """Parámetros **propios del tipo de modelo** que se ajustan.
+
+    - empírico: dispersión y rango de duración/desbaste por jaula.
+    - markov: nº de estados, estado inicial dominante y transición más frecuente.
+    """
+    params = {}
+    if not m:
+        return params
+    jaulas = m.get("jaulas", {})
+    es_markov = m.get("clave") == "markov"
+    for j in sorted(jaulas, key=int):
+        mj = jaulas[j]
+        if es_markov or "transiciones" in mj:
+            params[f"Jaula {j} · nº estados"] = str(len(mj.get("muestras", {})))
+            ini = mj.get("inicial", {})
+            if ini:
+                tot = sum(ini.values())
+                est, cnt = max(ini.items(), key=lambda kv: kv[1])
+                params[f"Jaula {j} · estado inicial"] = f"{est} ({100 * cnt / tot:.0f}%)"
+            mejor = None
+            for src, dests in mj.get("transiciones", {}).items():
+                for dst, c in dests.items():
+                    if mejor is None or c > mejor[2]:
+                        mejor = (src, dst, c)
+            if mejor:
+                params[f"Jaula {j} · transición top"] = f"{mejor[0]} → {mejor[1]}"
+        else:  # empírico
+            dur, desb = _muestras_jaula(mj)
+            if dur:
+                params[f"Jaula {j} · dur σ (h)"] = (
+                    f"{statistics.pstdev(dur):.1f}" if len(dur) > 1 else "0.0")
+                params[f"Jaula {j} · dur rango (h)"] = f"{min(dur):.0f}–{max(dur):.0f}"
+            if desb:
+                params[f"Jaula {j} · desb σ (mm)"] = (
+                    f"{statistics.pstdev(desb):.2f}" if len(desb) > 1 else "0.00")
+                params[f"Jaula {j} · desb rango (mm)"] = f"{min(desb):.2f}–{max(desb):.2f}"
+    return params
+
+
+def _parametros_completos(m, umbral):
+    """Agregados + parámetros propios del modelo (para la tabla Antes→Después)."""
+    return {**_parametros_modelo(m, umbral), **_parametros_modelo_especificos(m)}
 
 
 def _leer_historia(fp):
@@ -457,7 +517,7 @@ class TabGeneracion(ctk.CTkFrame):
         btn_ajustar.pack(side="left", padx=4)
         ctk.CTkButton(top, text="ⓘ", width=32, fg_color="transparent", border_width=1,
                       border_color=ACCENT, text_color=ACCENT, hover_color=BG_CARD,
-                      command=lambda: self._mostrar_ayuda_modelos(win)).pack(side="left", padx=4)
+                      command=lambda: self._mostrar_ayuda_modelo(win, combo.get())).pack(side="left", padx=4)
 
         # Qué se está adaptando (modelo + filas de historia + período).
         lbl_que = ctk.CTkLabel(win, text="", anchor="w", justify="left", text_color=FG,
@@ -470,9 +530,15 @@ class TabGeneracion(ctk.CTkFrame):
         diff_frame = ctk.CTkScrollableFrame(win, height=210, fg_color="#222222")
         diff_frame.pack(fill="x", padx=16, pady=(2, 8))
 
-        # ── Previsualización como gráfico ────────────────────────────────────
-        ctk.CTkLabel(win, text="Previsualización de cambios generados (gráfico):",
-                     anchor="w", text_color=FG2).pack(fill="x", padx=16)
+        # ── Previsualización como gráfico (historia subida ⇄ comparación) ────
+        fila_modo = ctk.CTkFrame(win, fg_color="transparent")
+        fila_modo.pack(fill="x", padx=16, pady=(2, 0))
+        ctk.CTkLabel(fila_modo, text="Previsualización:", text_color=FG2).pack(side="left", padx=(0, 8))
+        seg_modo = ctk.CTkSegmentedButton(
+            fila_modo, values=[_MODO_HISTORIA, _MODO_COMPARA],
+            command=lambda _v: _render_chart(seg_modo.get()))
+        seg_modo.set(_MODO_HISTORIA)
+        seg_modo.pack(side="left")
         chart_holder = ctk.CTkFrame(win, fg_color="transparent")
         chart_holder.pack(fill="both", expand=True, padx=16, pady=(2, 8))
 
@@ -512,7 +578,7 @@ class TabGeneracion(ctk.CTkFrame):
                                               weight="bold" if cambia else "normal")
                              ).grid(row=i, column=2, sticky="w")
 
-        def _render_chart(modelo, seed):
+        def _render_chart(modo):
             if pop["canvas"] is not None:
                 pop["canvas"].get_tk_widget().destroy()
                 pop["canvas"] = None
@@ -522,12 +588,30 @@ class TabGeneracion(ctk.CTkFrame):
                 pop["fig"] = None
             for w in chart_holder.winfo_children():
                 w.destroy()
-            preview = gencambios.generar_cambios(modelo, self.app.user_cfg, seed=seed)
-            if preview is None or len(preview) == 0:
-                ctk.CTkLabel(chart_holder, text="(sin cambios en la ventana configurada)",
+            try:
+                seed = int(self._entry_seed.get().strip())
+            except ValueError:
+                seed = 0
+            try:
+                if modo == _MODO_HISTORIA:
+                    # Cambios de la historia subida (los que se usan para ajustar).
+                    df = self._historia_a_cambios()
+                    if df is None or len(df) == 0:
+                        ctk.CTkLabel(chart_holder, text="(la historia no tiene fechas para graficar)",
+                                     text_color=FG2).pack(pady=20)
+                        return
+                    pop["fig"] = self._construir_figura(df, self.app.taller, figsize=(7.6, 3.0))
+                else:
+                    # Comparación: generación con el modelo actual (antes) vs el temporal (después).
+                    antes = (gencambios.generar_cambios(self.app._modelo_gen, self.app.user_cfg, seed=seed)
+                             if self.app._modelo_gen else None)
+                    despues = (gencambios.generar_cambios(pop["modelo"], self.app.user_cfg, seed=seed)
+                               if pop["modelo"] else None)
+                    pop["fig"] = self._figura_comparacion(antes, despues, self.app.taller, figsize=(7.6, 3.0))
+            except Exception as e:
+                ctk.CTkLabel(chart_holder, text=f"(no se pudo graficar: {e})",
                              text_color=FG2).pack(pady=20)
                 return
-            pop["fig"] = self._construir_figura(preview, self.app.taller, figsize=(7.6, 3.0))
             pop["canvas"] = FigureCanvasTkAgg(pop["fig"], master=chart_holder)
             pop["canvas"].draw()
             pop["canvas"].get_tk_widget().pack(fill="both", expand=True)
@@ -542,13 +626,9 @@ class TabGeneracion(ctk.CTkFrame):
                 fmax = (modelo.get("fecha_max") or "—")[:10]
                 lbl_que.configure(text=f"Adaptando «{etiqueta}» · {modelo.get('n_filas', 0)} "
                                        f"filas de historia · período {fmin} → {fmax}")
-                _render_diff(_parametros_modelo(self.app._modelo_gen, umbral),
-                             _parametros_modelo(modelo, umbral))
-                try:
-                    seed = int(self._entry_seed.get().strip())
-                except ValueError:
-                    seed = 0
-                _render_chart(modelo, seed)
+                _render_diff(_parametros_completos(self.app._modelo_gen, umbral),
+                             _parametros_completos(modelo, umbral))
+                _render_chart(seg_modo.get())
                 btn_apply.configure(state="normal")
             except Exception as e:
                 messagebox.showerror("Error", f"No se pudo ajustar/previsualizar: {e}", parent=win)
@@ -578,12 +658,73 @@ class TabGeneracion(ctk.CTkFrame):
         win.protocol("WM_DELETE_WINDOW", _cerrar)
         _ajustar()  # ajuste inicial con el modelo preseleccionado
 
-    def _mostrar_ayuda_modelos(self, parent):
-        """Muestra una explicación de cada distribución/generador disponible."""
-        bloques = [f"• {g.etiqueta}\n   {g.descripcion}"
-                   for g in GENERADORES_CAMBIOS.values()]
-        messagebox.showinfo("¿Qué hace cada distribución?",
-                            "\n\n".join(bloques), parent=parent)
+    def _mostrar_ayuda_modelo(self, parent, etiqueta):
+        """Muestra la ayuda del **modelo seleccionado** (no de todos)."""
+        clave = _GEN_ETIQUETAS.get(etiqueta)
+        g = GENERADORES_CAMBIOS.get(clave)
+        if g is None:
+            return
+        messagebox.showinfo(f"¿Qué hace «{g.etiqueta}»?", g.descripcion, parent=parent)
+
+    def _historia_a_cambios(self):
+        """Convierte la historia subida en un DataFrame tipo Programa_Cambios.
+
+        Reusa la normalización del generador (jaula/duración/desbaste/fecha) para
+        poder graficar los cambios históricos con ``_construir_figura``.
+        """
+        norm = gencambios._normalizar_historia(self.app._historia_df, self.app.user_cfg)
+        umbral = float(obtener_generador_cambios(self.app.user_cfg)["umbral_desbaste_mm"])
+        df = pd.DataFrame({
+            "Fecha_Hora": pd.to_datetime(norm["fecha_salida"]),
+            "Jaula": norm["jaula"].astype(int),
+            "Tipo_Rectificado": [gencambios._tipo_desde_desbaste(x, umbral) for x in norm["desbaste_mm"]],
+            "mm_a_Rectificar": norm["desbaste_mm"],
+        })
+        return df.dropna(subset=["Fecha_Hora"])
+
+    def _figura_comparacion(self, antes_df, despues_df, taller, figsize=(7.6, 3.0)):
+        """Figura que superpone los cambios generados 'antes' (huecos) y 'después' (rellenos)."""
+        fig = Figure(figsize=figsize, facecolor="#1A1A1A")
+        ax = fig.add_subplot(111)
+        ax.set_facecolor("#222222")
+        ax.tick_params(colors=FG, labelsize=8)
+        ax.grid(True, axis="x", alpha=0.12, color="white", linestyle="--")
+        for sp in ax.spines.values():
+            sp.set_color("#444")
+
+        presentes = [d for d in (antes_df, despues_df) if d is not None and len(d)]
+        n_jaulas = taller.cantidad_jaulas
+        for d in presentes:
+            n_jaulas = max(n_jaulas, int(d["Jaula"].max()))
+
+        handles = []
+        if antes_df is not None and len(antes_df):
+            ax.scatter(pd.to_datetime(antes_df["Fecha_Hora"]), antes_df["Jaula"], s=60,
+                       facecolors="none", edgecolors=FG2, linewidths=1.0, zorder=3)
+            handles.append(Line2D([0], [0], marker="o", color="none", markerfacecolor="none",
+                                  markeredgecolor=FG2, label="Antes (modelo actual)"))
+        if despues_df is not None and len(despues_df):
+            ax.scatter(pd.to_datetime(despues_df["Fecha_Hora"]), despues_df["Jaula"], s=45,
+                       color=ACCENT, edgecolors="white", linewidths=0.4, zorder=4)
+            handles.append(Line2D([0], [0], marker="o", color="none", markerfacecolor=ACCENT,
+                                  markeredgecolor="white", label="Después (ajuste nuevo)"))
+
+        ax.set_yticks(range(1, n_jaulas + 1))
+        ax.set_yticklabels([f"Jaula {j}" for j in range(1, n_jaulas + 1)], color=FG, fontsize=9)
+        ax.set_ylim(0.5, n_jaulas + 0.5)
+        ax.invert_yaxis()
+        if presentes:
+            fechas = pd.concat([pd.to_datetime(d["Fecha_Hora"]) for d in presentes])
+            ax.xaxis.set_major_formatter(
+                formatter_tiempo(fechas.min(), fechas.max() + pd.Timedelta(hours=1)))
+        if handles:
+            ax.legend(handles=handles, loc="upper right", fontsize=8,
+                      facecolor="#333", edgecolor="#333", labelcolor=FG)
+        else:
+            ax.text(0.5, 0.5, "(sin cambios para comparar)", transform=ax.transAxes,
+                    ha="center", va="center", color=FG2)
+        fig.tight_layout()
+        return fig
 
     # ── Timeline ─────────────────────────────────────────────────────────
 
@@ -599,13 +740,28 @@ class TabGeneracion(ctk.CTkFrame):
         cambios = self.app._cambios_generados
         if cambios is None or len(cambios) == 0:
             return
-        self._fig = self._construir_figura(cambios, self.app.taller)
+        self._fig = self._construir_figura(cambios, self.app.taller, pickable_paradas=True)
         self._canvas = FigureCanvasTkAgg(self._fig, master=self._timeline_holder)
+        self._canvas.mpl_connect("pick_event", self._on_pick_parada)
         self._canvas.draw()
         self._canvas.get_tk_widget().pack(fill="both", expand=True)
 
-    def _construir_figura(self, cambios, taller, figsize=(16, 5)):
-        """Figura del timeline: un punto por cambio (por jaula) + paradas en rojo."""
+    def _on_pick_parada(self, event):
+        """Click en un marcador ▼ de parada: salta la reproducción a ese momento."""
+        idx_map = getattr(self, "_parada_snap_idx", [])
+        if not idx_map or not len(getattr(event, "ind", [])):
+            return
+        snap_idx = idx_map[event.ind[0]]
+        if hasattr(self.app, "ir_a_momento"):
+            self.app.ir_a_momento(snap_idx)
+
+    def _construir_figura(self, cambios, taller, figsize=(16, 5), pickable_paradas=False):
+        """Figura del timeline: un punto por cambio (por jaula) + paradas en rojo.
+
+        Con ``pickable_paradas`` se dibujan marcadores ▼ clickeables en el inicio
+        de cada parada (item "magnético"); el mapeo a índice de snapshot queda en
+        ``self._parada_snap_idx`` para que ``_on_pick_parada`` salte la reproducción.
+        """
         fig = Figure(figsize=figsize, facecolor="#1A1A1A")
         ax = fig.add_subplot(111)
         ax.set_facecolor("#222222")
@@ -639,16 +795,35 @@ class TabGeneracion(ctk.CTkFrame):
             tiempos = [s.tiempo for s in snaps]
             _marcar_paradas(ax, tiempos, snaps)
 
+        # Marcadores ▼ "magnéticos" en el inicio de cada parada (clickeables).
+        self._parada_snap_idx = []
+        hay_marcadores = False
+        if pickable_paradas and snaps:
+            inicios = _inicios_parada(snaps)
+            if inicios:
+                self._parada_snap_idx = [idx for _, idx in inicios]
+                ax.scatter([t for t, _ in inicios], [1.0] * len(inicios),
+                           transform=ax.get_xaxis_transform(), marker="v", s=90,
+                           color=RED, edgecolors="white", linewidths=0.5,
+                           clip_on=False, zorder=6, picker=5)
+                hay_marcadores = True
+
         ax.set_yticks(range(1, n_jaulas + 1))
         ax.set_yticklabels([f"Jaula {j}" for j in range(1, n_jaulas + 1)], color=FG, fontsize=9)
         ax.set_ylim(0.5, n_jaulas + 0.5)
         ax.invert_yaxis()
-        ax.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
+        if len(fechas):
+            ax.xaxis.set_major_formatter(
+                formatter_tiempo(fechas.min(), fechas.max() + pd.Timedelta(hours=1)))
         handles, labels = ax.get_legend_handles_labels()
         if hay_sin_turno:
             handles.append(Patch(facecolor=FG2, alpha=0.13, label="Sin turno (no se trabaja)"))
         if snaps and any(getattr(s, "jaulas_paradas", []) for s in snaps):
             handles.append(Patch(facecolor=RED, alpha=0.18, label="Línea parada"))
+        if hay_marcadores:
+            handles.append(Line2D([0], [0], marker="v", color="none", markerfacecolor=RED,
+                                  markeredgecolor="white", markersize=8,
+                                  label="Parada (clic → ir al momento)"))
         ax.legend(handles=handles, loc="upper right", fontsize=8,
                   facecolor="#333", edgecolor="#333", labelcolor=FG)
         fig.tight_layout()

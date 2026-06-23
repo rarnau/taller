@@ -11,6 +11,28 @@ from config.tema import (BG, BG2, BG3, FG, FG2, ACCENT, GREEN, ORANGE, RED, RED_
 from modelos.kpis import calcular_kpis
 
 
+MSG_SIN_DATOS = "Se mostrarán datos una vez corrida la simulación"
+
+
+def banner_sin_datos(fig):
+    """Texto centrado para los dashboards cuando todavía no se simuló."""
+    fig.text(0.5, 0.5, MSG_SIN_DATOS, ha="center", va="center",
+             color=FG2, fontsize=18, fontweight="bold", zorder=10)
+
+
+def formatter_tiempo(t0, t1):
+    """DateFormatter para un eje temporal: sin hora si el span supera 7 días.
+
+    Con ventanas largas las etiquetas ``%d/%m %H:%M`` se solapan; a partir de una
+    semana se muestra sólo el día (``%d/%m``).
+    """
+    try:
+        dias = (t1 - t0).total_seconds() / 86400.0
+    except (TypeError, AttributeError):
+        dias = 0
+    return DateFormatter("%d/%m" if dias > 7 else "%d/%m %H:%M")
+
+
 def _tramos_parada_maquina(m, t0, t1):
     """Tramos (inicio, fin) en [t0, t1) donde la máquina NO está operativa (turno cerrado).
 
@@ -68,7 +90,18 @@ def crear_dashboard_principal(t, substock=None):
                   left=0.06, right=0.96, top=0.94, bottom=0.06)
 
     ti = [s.tiempo for s in t.snapshots]
-    if not ti: return fig
+    if not ti:
+        # Preview pre-simulación: mismos 4 paneles vacíos + banner.
+        for pos, titulo in ((gs[0, 0], "Evolución Temporal de Estados"),
+                            (gs[0, 1], "Buffer de Seguridad Global"),
+                            (gs[1, 0], "Utilización de Máquinas — Disponible vs Neta (%)"),
+                            (gs[1, 1], "Cronograma de Rectificado")):
+            axv = fig.add_subplot(pos)
+            _style_ax(axv, titulo)
+            axv.set_xticks([])
+            axv.set_yticks([])
+        banner_sin_datos(fig)
+        return fig
 
     EN = t.ESTADOS_NOMBRES
 
@@ -84,7 +117,7 @@ def crear_dashboard_principal(t, substock=None):
                  labels=EN, colors=[COLORES_ESTADO.get(e, "#999") for e in EN], alpha=0.85)
     _marcar_paradas(ax, ti, t.snapshots)
     ax.legend(loc="upper right", fontsize=7, ncol=3, facecolor="#333", edgecolor="#333", labelcolor=FG)
-    ax.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
+    ax.xaxis.set_major_formatter(formatter_tiempo(ti[0], ti[-1]))
 
     # 2. Buffer Global
     ax2 = fig.add_subplot(gs[0, 1])
@@ -98,7 +131,7 @@ def crear_dashboard_principal(t, substock=None):
     ax2.plot(ti, cv, color=ORANGE, lw=1.5, label="CRC", ls="--")
     _marcar_paradas(ax2, ti, t.snapshots)
     ax2.legend(fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
-    ax2.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
+    ax2.xaxis.set_major_formatter(formatter_tiempo(ti[0], ti[-1]))
 
     # 3. Utilización de Máquinas (Bar chart): disponible vs neta por máquina.
     # Los porcentajes salen de calcular_kpis (fuente única consumida también por
@@ -149,7 +182,7 @@ def crear_dashboard_principal(t, substock=None):
     ax4.set_yticklabels(maqs_n, color=FG, fontsize=9)
     ax4.set_xlim(ti[0], ti[-1])
     ax4.xaxis_date()
-    ax4.xaxis.set_major_formatter(DateFormatter("%d/%m %H:%M"))
+    ax4.xaxis.set_major_formatter(formatter_tiempo(ti[0], ti[-1]))
     handles = [Patch(facecolor=TIPO_RECT_COLORS.get("produccion", "#999"), label="Producción"),
                Patch(facecolor=TIPO_RECT_COLORS.get("desbaste", "#999"), label="Desbaste")]
     if hay_parada:

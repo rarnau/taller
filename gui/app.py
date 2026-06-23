@@ -118,25 +118,37 @@ class App(ctk.CTk):
         )
         self.hint_inicio.grid(row=6, column=0, padx=20, pady=(0, 10))
 
-        # Controles de Reproducción
+        # Controles de Reproducción: paso atrás / play / stop / paso adelante.
         self.repro_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.repro_frame.grid(row=7, column=0, padx=20, pady=20)
+        self.repro_frame.grid(row=7, column=0, padx=20, pady=(20, 4))
 
-        self.btn_play = ctk.CTkButton(self.repro_frame, text="▶ Play", width=60, command=self._toggle_playback)
-        self.btn_play.grid(row=0, column=0, padx=5)
-
+        self.btn_paso_atras = ctk.CTkButton(self.repro_frame, text="⏪", width=40,
+                                            command=lambda: self._paso(-1))
+        self.btn_paso_atras.grid(row=0, column=0, padx=3)
+        self.btn_play = ctk.CTkButton(self.repro_frame, text="▶ Play", width=64,
+                                      command=self._toggle_playback)
+        self.btn_play.grid(row=0, column=1, padx=3)
         self.btn_stop = ctk.CTkButton(self.repro_frame, text="⏹", width=40, command=self._stop_playback)
-        self.btn_stop.grid(row=0, column=1, padx=5)
+        self.btn_stop.grid(row=0, column=2, padx=3)
+        self.btn_paso_adelante = ctk.CTkButton(self.repro_frame, text="⏩", width=40,
+                                               command=lambda: self._paso(1))
+        self.btn_paso_adelante.grid(row=0, column=3, padx=3)
 
-        self.label_vel = ctk.CTkLabel(self.sidebar, text="Velocidad: 1x")
-        self.label_vel.grid(row=8, column=0, padx=20, pady=0)
-        self.slider_vel = ctk.CTkSlider(self.sidebar, from_=1, to=100, number_of_steps=99, command=self._change_speed)
-        self.slider_vel.set(10)  # 10/10 = 1.0x
-        self.slider_vel.grid(row=9, column=0, padx=20, pady=10)
+        # Velocidad: botones discretos (1× 2× 5× 10×) en vez de una barra.
+        self.vel_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.vel_frame.grid(row=8, column=0, padx=20, pady=(4, 4))
+        ctk.CTkLabel(self.vel_frame, text="Velocidad:").grid(row=0, column=0, padx=(0, 6))
+        self._btns_vel = {}
+        for i, v in enumerate((1, 2, 5, 10)):
+            b = ctk.CTkButton(self.vel_frame, text=f"{v}×", width=40,
+                              command=lambda vv=v: self._set_velocidad(vv))
+            b.grid(row=0, column=i + 1, padx=2)
+            self._btns_vel[v] = b
+        self._set_velocidad(1)
 
         self.slider_progreso = ctk.CTkSlider(self.sidebar, from_=0, to=100, command=self._seek_simulation)
         self.slider_progreso.set(0)
-        self.slider_progreso.grid(row=10, column=0, padx=20, pady=10)
+        self.slider_progreso.grid(row=9, column=0, padx=20, pady=10)
 
     def _create_main_content(self):
         self.tabview = ctk.CTkTabview(self)
@@ -180,6 +192,10 @@ class App(ctk.CTk):
         self.log_w = crear_consola(self.tab_log)
         self._log("Bienvenido al Simulador v4 Pro")
 
+        # Preview inicial: Dashboard/Análisis/KPIs con todo en 0 y gráficos vacíos
+        # más el banner "Se mostrarán datos una vez corrida la simulación".
+        self._render_paneles()
+
     def _create_status_bar(self):
         self.status_bar = ctk.CTkFrame(self, height=25, corner_radius=0)
         self.status_bar.grid(row=1, column=0, columnspan=2, sticky="ew")
@@ -214,6 +230,7 @@ class App(ctk.CTk):
             self.cfg_widget.refrescar()
             self._sincronizar_vista_con_taller()
             self._refrescar_combo_substocks()
+            self._render_paneles()
             # Stock nuevo ⇒ se descartan los cambios: limpiar el timeline.
             if getattr(self, "gen_widget", None) is not None:
                 self.gen_widget.refrescar_timeline()
@@ -285,11 +302,8 @@ class App(ctk.CTk):
 
         # Actualizar otras pestañas (Inventario: ya hay "Stock final")
         self.inv_widget.refrescar()
-        llenar_kpis(self.tab_kpis, self.taller)
-
         self._refrescar_combo_substocks()
-        self._render_dashboard()
-        self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
+        self._render_paneles()
         # El timeline ya puede sombrear las paradas calculadas por la simulación.
         if getattr(self, "gen_widget", None) is not None:
             self.gen_widget.refrescar_timeline()
@@ -324,13 +338,24 @@ class App(ctk.CTk):
             self.combo_dash_ss.set("Global")
 
     def _render_dashboard(self):
-        """Renderiza el dashboard principal aplicando el filtro de SubStock seleccionado."""
-        if not self.taller.snapshots:
-            return
+        """Renderiza el dashboard principal aplicando el filtro de SubStock seleccionado.
+
+        Sin snapshots dibuja un preview vacío con banner (no retorna en blanco).
+        """
         sel = self.combo_dash_ss.get()
         substock = None if sel == "Global" else sel
         self._dash_into(self.dash_holder, "dashboard",
                         lambda t: crear_dashboard_principal(t, substock=substock))
+
+    def _render_analisis(self):
+        """Renderiza la pestaña Análisis (preview vacío + banner si aún no se simuló)."""
+        self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
+
+    def _render_paneles(self):
+        """Refresca Dashboard, Análisis y KPIs (preview pre-simulación incluido)."""
+        self._render_dashboard()
+        self._render_analisis()
+        llenar_kpis(self.tab_kpis, self.taller)
 
     def _dash_into(self, container, key, func):
         # Cerrar figura anterior para liberar memoria
@@ -396,9 +421,39 @@ class App(ctk.CTk):
             msg += f"\nHistorial ({len(cil.historial)} eventos)"
             messagebox.showinfo(f"Detalle Cilindro {id_cilindro}", msg)
 
-    def _change_speed(self, value):
-        self.velocidad_reproduccion = float(value) / 10.0
-        self.label_vel.configure(text=f"Velocidad: {self.velocidad_reproduccion:.1f}x")
+    def _set_velocidad(self, v):
+        """Fija la velocidad de reproducción y resalta el botón activo."""
+        self.velocidad_reproduccion = float(v)
+        for vv, b in self._btns_vel.items():
+            activo = vv == v
+            b.configure(fg_color=BTN_BLUE if activo else "transparent",
+                        border_width=0 if activo else 1, border_color=ACCENT,
+                        text_color="white" if activo else ACCENT,
+                        hover_color=BTN_BLUE_HOVER if activo else BG_CARD)
+
+    def _paso(self, delta):
+        """Avanza/retrocede un snapshot (pausa la reproducción)."""
+        if not self.taller.snapshots:
+            return
+        self.reproduciendo = False
+        self.btn_play.configure(text="▶ Play")
+        n = len(self.taller.snapshots)
+        self.snapshot_actual_idx = max(0, min(n - 1, self.snapshot_actual_idx + delta))
+        self._update_realtime_view()
+
+    def ir_a_momento(self, idx):
+        """Salta la reproducción al snapshot ``idx`` y muestra la Vista Real.
+
+        Lo usa el timeline de Generación al clickear un marcador de parada.
+        """
+        if not self.taller.snapshots:
+            return
+        n = len(self.taller.snapshots)
+        self.reproduciendo = False
+        self.btn_play.configure(text="▶ Play")
+        self.snapshot_actual_idx = max(0, min(n - 1, int(idx)))
+        self._update_realtime_view()
+        self.tabview.set("Vista Real")
 
     def _exportar(self):
         if not self.taller.snapshots:

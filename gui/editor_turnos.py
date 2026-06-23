@@ -57,7 +57,7 @@ def abrir_editor_turnos(parent, turnos_holder, btn_turnos):
 
     presets_fila = ctk.CTkFrame(win, fg_color="transparent")
     presets_fila.grid(row=9, column=0, columnspan=4, padx=16, pady=(10, 4), sticky="w")
-    for clave in ("24x7", "off", "lv3"):
+    for clave in turnos_mod.PRESETS:
         ctk.CTkButton(
             presets_fila, text=turnos_mod.PRESET_LABELS[clave], width=110, height=28,
             fg_color="transparent", border_width=1, border_color=ACCENT,

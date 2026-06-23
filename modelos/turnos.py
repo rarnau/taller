@@ -56,8 +56,11 @@ PRESETS: Dict[str, Turnos] = {
     "24x7": _filas([[True] * 3 for _ in range(7)]),
     "off": _filas([[False] * 3 for _ in range(7)]),
     "lv3": _filas([[True] * 3 if i < 5 else [False] * 3 for i in range(7)]),
+    # 3 escuadras: todos los turnos salvo T3 del sábado y el domingo completo.
+    "3escuadras": _filas([[True, True, True]] * 5 + [[True, True, False], [False, False, False]]),
 }
-PRESET_LABELS = {"24x7": "24/7", "off": "Apagada", "lv3": "L–V 3 turnos"}
+PRESET_LABELS = {"24x7": "24/7", "off": "Apagada", "lv3": "L–V 3 turnos",
+                 "3escuadras": "3 escuadras"}
 
 
 def normalizar(turnos: Optional[Turnos]) -> Turnos:

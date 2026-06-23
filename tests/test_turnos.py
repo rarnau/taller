@@ -58,6 +58,20 @@ def test_off_no_tiene_horas():
     assert not any(any(fila) for fila in g)
 
 
+def test_preset_3escuadras_sin_t3_sabado_ni_domingo():
+    p = T.PRESETS["3escuadras"]
+    # Lunes a viernes: los tres turnos operativos.
+    for d in ("lun", "mar", "mie", "jue", "vie"):
+        assert p[d] == [True, True, True]
+    # Sábado: T1 y T2 operativos, T3 apagado; domingo completo apagado.
+    assert p["sab"] == [True, True, False]
+    assert p["dom"] == [False, False, False]
+    g = T.expandir(p)
+    assert g[5][6] and g[5][14]          # sábado T1/T2 operativos
+    assert not g[5][22] and not g[5][23]  # sábado T3 apagado
+    assert not any(g[6])                  # domingo sin ninguna hora
+
+
 def test_parse_format_roundtrip():
     s = T.format_compacto(T.PRESETS["lv3"])
     assert T.parse_compacto(s) == T.normalizar(T.PRESETS["lv3"])
