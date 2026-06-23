@@ -80,7 +80,7 @@ class TabInventario(ctk.CTkFrame):
                                   height=30, style="Treeview")
         for tag, bg in TABLE_ROW_COLORS.items():
             self._tree.tag_configure(tag, background=bg)
-        vsb = ttk.Scrollbar(body, orient="vertical", command=self._tree.yview)
+        vsb = ctk.CTkScrollbar(body, command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
         self._tree.pack(fill="both", expand=True)
