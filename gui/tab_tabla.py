@@ -32,7 +32,8 @@ class TabInventario(ctk.CTkFrame):
     def __init__(self, parent, app):
         super().__init__(parent, fg_color="transparent")
         self.app = app
-        self._filtros_col = {}  # col → set de valores permitidos (ausente/None = todos)
+        # col → set de valores permitidos (ausente = sin filtro = todos)
+        self._filtros_col: dict = {}
         self._construir()
         self.refrescar()
 
@@ -117,9 +118,12 @@ class TabInventario(ctk.CTkFrame):
     def _filas_filtradas(self):
         """(columnas, filas) tras aplicar todos los filtros de columna activos."""
         cols, filas = self._filas_crudas()
-        idxs = {c: i for i, c in enumerate(cols)}
+        if not self._filtros_col:
+            return cols, filas
+        # Sólo se evalúan las columnas con filtro (idx → set de valores).
+        filtros = {cols.index(c): s for c, s in self._filtros_col.items() if c in cols}
         out = [f for f in filas
-               if all((s := self._filtros_col.get(c)) is None or str(f[idxs[c]]) in s for c in cols)]
+               if all(str(f[idx]) in s for idx, s in filtros.items())]
         return cols, out
 
     # ── Render ───────────────────────────────────────────────────────────

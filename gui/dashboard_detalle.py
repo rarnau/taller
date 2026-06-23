@@ -4,7 +4,7 @@ from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
 from modelos.enums import EstadoCilindro
 from config.tema import BG, BG2, BG3, FG, FG2, ACCENT, RED, GREEN, ORANGE, COLORES_ESTADO
-from gui.dashboard_principal import formatter_tiempo, banner_sin_datos
+from gui.dashboard_principal import formatter_tiempo, rellenar_preview_vacio
 
 def _style_ax(ax, title):
     ax.set_facecolor("#222")
@@ -21,16 +21,10 @@ def crear_dashboard_detalle(t):
     gs = GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.2, left=0.06, right=0.96, top=0.94, bottom=0.06)
 
     if not t.snapshots:
-        # Preview pre-simulación: paneles vacíos + banner.
-        for pos, titulo in ((gs[0, :], "Mapa de Cilindros: Estado vs Diámetro"),
-                            (gs[1, 0], "Distribución de Diámetros (Activos)"),
-                            (gs[1, 1], "Timeline de Cambios por Jaula")):
-            axv = fig.add_subplot(pos)
-            _style_ax(axv, titulo)
-            axv.set_xticks([])
-            axv.set_yticks([])
-        banner_sin_datos(fig)
-        return fig
+        return rellenar_preview_vacio(fig, [
+            (gs[0, :], "Mapa de Cilindros: Estado vs Diámetro"),
+            (gs[1, 0], "Distribución de Diámetros (Activos)"),
+            (gs[1, 1], "Timeline de Cambios por Jaula")], _style_ax)
 
     # 1. Mapa de Cilindros (Estado x Diámetro)
     ax1 = fig.add_subplot(gs[0, :])

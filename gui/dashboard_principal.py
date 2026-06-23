@@ -20,6 +20,21 @@ def banner_sin_datos(fig):
              color=FG2, fontsize=18, fontweight="bold", zorder=10)
 
 
+def rellenar_preview_vacio(fig, celdas, styler):
+    """Preview pre-simulación: ejes vacíos (con título) + banner central.
+
+    ``celdas`` = lista de ``(celda_gridspec, título)``; ``styler`` es el
+    ``_style_ax`` propio de cada dashboard (para conservar su estética).
+    """
+    for celda, titulo in celdas:
+        ax = fig.add_subplot(celda)
+        styler(ax, titulo)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    banner_sin_datos(fig)
+    return fig
+
+
 def formatter_tiempo(t0, t1):
     """DateFormatter para un eje temporal: sin hora si el span supera 7 días.
 
@@ -91,17 +106,11 @@ def crear_dashboard_principal(t, substock=None):
 
     ti = [s.tiempo for s in t.snapshots]
     if not ti:
-        # Preview pre-simulación: mismos 4 paneles vacíos + banner.
-        for pos, titulo in ((gs[0, 0], "Evolución Temporal de Estados"),
-                            (gs[0, 1], "Buffer de Seguridad Global"),
-                            (gs[1, 0], "Utilización de Máquinas — Disponible vs Neta (%)"),
-                            (gs[1, 1], "Cronograma de Rectificado")):
-            axv = fig.add_subplot(pos)
-            _style_ax(axv, titulo)
-            axv.set_xticks([])
-            axv.set_yticks([])
-        banner_sin_datos(fig)
-        return fig
+        return rellenar_preview_vacio(fig, [
+            (gs[0, 0], "Evolución Temporal de Estados"),
+            (gs[0, 1], "Buffer de Seguridad Global"),
+            (gs[1, 0], "Utilización de Máquinas — Disponible vs Neta (%)"),
+            (gs[1, 1], "Cronograma de Rectificado")], _style_ax)
 
     EN = t.ESTADOS_NOMBRES
 

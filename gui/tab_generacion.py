@@ -99,6 +99,26 @@ def _inicios_parada(snapshots):
     return out
 
 
+def _fig_timeline(figsize):
+    """Figura + eje con el estilo oscuro común de los timelines/comparación."""
+    fig = Figure(figsize=figsize, facecolor="#1A1A1A")
+    ax = fig.add_subplot(111)
+    ax.set_facecolor("#222222")
+    ax.tick_params(colors=FG, labelsize=8)
+    ax.grid(True, axis="x", alpha=0.12, color="white", linestyle="--")
+    for sp in ax.spines.values():
+        sp.set_color("#444")
+    return fig, ax
+
+
+def _eje_jaulas(ax, n_jaulas):
+    """Eje Y por jaula (1..n, invertido) común a los timelines."""
+    ax.set_yticks(range(1, n_jaulas + 1))
+    ax.set_yticklabels([f"Jaula {j}" for j in range(1, n_jaulas + 1)], color=FG, fontsize=9)
+    ax.set_ylim(0.5, n_jaulas + 0.5)
+    ax.invert_yaxis()
+
+
 def _resumen_modelo(m):
     """Texto con los parámetros aprendidos de un modelo (para label y popup)."""
     if not m:
@@ -502,8 +522,9 @@ class TabGeneracion(ctk.CTkFrame):
         win.transient(self.winfo_toplevel())
         win.grab_set()
 
-        # Estado del popup: modelo temporal + figura/canvas del preview (a cerrar).
-        pop = {"modelo": None, "fig": None, "canvas": None}
+        # Estado del popup: modelo temporal + figura/canvas del preview (a cerrar)
+        # + caché de la conversión de la historia (constante durante el popup).
+        pop = {"modelo": None, "fig": None, "canvas": None, "hist_df": None}
         umbral = float(obtener_generador_cambios(self.app.user_cfg)["umbral_desbaste_mm"])
 
         # ── Selector de modelo + ajustar + ayuda ─────────────────────────────
@@ -595,7 +616,10 @@ class TabGeneracion(ctk.CTkFrame):
             try:
                 if modo == _MODO_HISTORIA:
                     # Cambios de la historia subida (los que se usan para ajustar).
-                    df = self._historia_a_cambios()
+                    # La conversión es constante durante el popup ⇒ se cachea.
+                    if pop["hist_df"] is None:
+                        pop["hist_df"] = self._historia_a_cambios()
+                    df = pop["hist_df"]
                     if df is None or len(df) == 0:
                         ctk.CTkLabel(chart_holder, text="(la historia no tiene fechas para graficar)",
                                      text_color=FG2).pack(pady=20)
@@ -684,13 +708,7 @@ class TabGeneracion(ctk.CTkFrame):
 
     def _figura_comparacion(self, antes_df, despues_df, taller, figsize=(7.6, 3.0)):
         """Figura que superpone los cambios generados 'antes' (huecos) y 'después' (rellenos)."""
-        fig = Figure(figsize=figsize, facecolor="#1A1A1A")
-        ax = fig.add_subplot(111)
-        ax.set_facecolor("#222222")
-        ax.tick_params(colors=FG, labelsize=8)
-        ax.grid(True, axis="x", alpha=0.12, color="white", linestyle="--")
-        for sp in ax.spines.values():
-            sp.set_color("#444")
+        fig, ax = _fig_timeline(figsize)
 
         presentes = [d for d in (antes_df, despues_df) if d is not None and len(d)]
         n_jaulas = taller.cantidad_jaulas
@@ -709,10 +727,7 @@ class TabGeneracion(ctk.CTkFrame):
             handles.append(Line2D([0], [0], marker="o", color="none", markerfacecolor=ACCENT,
                                   markeredgecolor="white", label="Después (ajuste nuevo)"))
 
-        ax.set_yticks(range(1, n_jaulas + 1))
-        ax.set_yticklabels([f"Jaula {j}" for j in range(1, n_jaulas + 1)], color=FG, fontsize=9)
-        ax.set_ylim(0.5, n_jaulas + 0.5)
-        ax.invert_yaxis()
+        _eje_jaulas(ax, n_jaulas)
         if presentes:
             fechas = pd.concat([pd.to_datetime(d["Fecha_Hora"]) for d in presentes])
             ax.xaxis.set_major_formatter(
@@ -762,15 +777,10 @@ class TabGeneracion(ctk.CTkFrame):
         de cada parada (item "magnético"); el mapeo a índice de snapshot queda en
         ``self._parada_snap_idx`` para que ``_on_pick_parada`` salte la reproducción.
         """
-        fig = Figure(figsize=figsize, facecolor="#1A1A1A")
-        ax = fig.add_subplot(111)
-        ax.set_facecolor("#222222")
-        ax.tick_params(colors=FG, labelsize=8)
-        ax.grid(True, axis="x", alpha=0.12, color="white", linestyle="--")
-        for sp in ax.spines.values():
-            sp.set_color("#444")
+        fig, ax = _fig_timeline(figsize)
 
-        n_jaulas = max(taller.cantidad_jaulas, int(cambios["Jaula"].max()))
+        n_jaulas = max(taller.cantidad_jaulas,
+                       int(cambios["Jaula"].max()) if len(cambios) else 0)
         fechas = pd.to_datetime(cambios["Fecha_Hora"])
 
         # Sombrear los días/tramos sin turno del laminador (no se trabaja). Se
@@ -808,10 +818,7 @@ class TabGeneracion(ctk.CTkFrame):
                            clip_on=False, zorder=6, picker=5)
                 hay_marcadores = True
 
-        ax.set_yticks(range(1, n_jaulas + 1))
-        ax.set_yticklabels([f"Jaula {j}" for j in range(1, n_jaulas + 1)], color=FG, fontsize=9)
-        ax.set_ylim(0.5, n_jaulas + 0.5)
-        ax.invert_yaxis()
+        _eje_jaulas(ax, n_jaulas)
         if len(fechas):
             ax.xaxis.set_major_formatter(
                 formatter_tiempo(fechas.min(), fechas.max() + pd.Timedelta(hours=1)))

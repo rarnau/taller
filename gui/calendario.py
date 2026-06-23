@@ -31,7 +31,9 @@ class SelectorFecha(ctk.CTkFrame):
                       hover_color=BG_CARD, command=self._toggle).pack(side="left", padx=(4, 0))
         self._entry.bind("<Button-1>", lambda _e: self._abrir())
         self._panel = None
-        self._bind_id = None
+        self._grid = None
+        self._lbl_mes = None
+        self._binds_hechos = False  # los binds del toplevel se crean una sola vez
         self._vista = None  # primer día del mes mostrado
 
     # ── Mini-API estilo CTkEntry (reemplazo directo) ─────────────────────────
@@ -54,10 +56,14 @@ class SelectorFecha(ctk.CTkFrame):
             return date.today()
 
     def _mes_prev(self):
+        if self._panel is None:
+            return
         self._vista = (self._vista - timedelta(days=1)).replace(day=1)
         self._dibujar()
 
     def _mes_next(self):
+        if self._panel is None:
+            return
         y, m = self._vista.year, self._vista.month
         self._vista = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
         self._dibujar()
@@ -100,22 +106,21 @@ class SelectorFecha(ctk.CTkFrame):
         y = self._entry.winfo_rooty() - top.winfo_rooty() + self._entry.winfo_height() + 2
         self._panel.place(x=x, y=y)
         self._panel.lift()
-        # Cerrar al hacer click fuera o con Escape. El bind se agrega tras el
-        # click que abre, así que ese mismo evento no lo dispara.
-        self._bind_id = top.bind("<Button-1>", self._click_fuera, add="+")
-        top.bind("<Escape>", lambda _e: self._cerrar(), add="+")
+        # Cerrar al hacer click fuera o con Escape. Los binds del toplevel se
+        # crean UNA sola vez y nunca se quitan (cada handler corta solo si el
+        # panel está cerrado): así se evita el footgun de unbind(seq, funcid),
+        # que puede borrar todos los binds de ese evento. Se agregan tras el
+        # click que abre, así ese mismo evento no los dispara.
+        if not self._binds_hechos:
+            top.bind("<Button-1>", self._click_fuera, add="+")
+            top.bind("<Escape>", lambda _e: self._cerrar(), add="+")
+            self._binds_hechos = True
 
     def _cerrar(self):
         if self._panel is None:
             return
         self._panel.destroy()
-        self._panel = None
-        if self._bind_id is not None:
-            try:
-                self.winfo_toplevel().unbind("<Button-1>", self._bind_id)
-            except Exception:
-                pass
-            self._bind_id = None
+        self._panel = self._grid = self._lbl_mes = None
 
     def _click_fuera(self, event):
         """Cierra el panel si el click no cayó dentro de él ni del propio selector."""
