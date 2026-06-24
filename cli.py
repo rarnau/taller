@@ -18,9 +18,11 @@ Subcomandos::
 """
 import argparse
 import json
+import multiprocessing
 import os
 import sys
-from typing import Any, Callable, Dict, Optional
+from concurrent.futures import ProcessPoolExecutor
+from typing import Any, Callable, Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -94,6 +96,75 @@ def simular_desde_dataframes(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
     taller = construir_taller_desde_dataframes(cfg, stock_df, cambios_df)
     taller.simular(estrategia=estrategia, callback_log=None)
     return taller
+
+
+# ── Ejecución en procesos (worker reutilizable + barridos en paralelo) ────────
+#
+# La simulación es CPU-bound en Python puro, así que se corre en procesos aparte
+# (no hilos: el GIL los serializa). Para barridos de muchas corridas que comparten
+# el MISMO stock + config + estrategia y solo varían el ``Programa_Cambios`` (p. ej.
+# distintas seeds del generador), el stock/config/estrategia se cargan **una sola
+# vez por worker** vía un *initializer* del pool y cada tarea envía únicamente su
+# ``cambios_df`` — lo más liviano de serializar. Lo usan tanto la GUI (una corrida)
+# como ``batch_simular`` (N corridas en paralelo).
+
+# Estado por-worker: lo siembra el initializer en cada proceso del pool (no es
+# estado global compartido entre procesos — cada worker tiene su propia copia).
+_WORKER_STATE: Dict[str, Any] = {}
+
+
+def ctx_paralelo() -> "multiprocessing.context.BaseContext":
+    """Contexto de multiprocessing preferido: ``fork`` si está disponible.
+
+    Con ``fork`` el worker hereda los módulos ya importados (sin re-importar ni
+    re-ejecutar nada — clave cuando el padre es la GUI). Si la plataforma no
+    soporta fork (p. ej. Windows) se cae a ``spawn``; como el initializer y la
+    tarea viven en este módulo (sin GUI), spawn solo re-importa ``cli``.
+    """
+    metodos = multiprocessing.get_all_start_methods()
+    return multiprocessing.get_context("fork" if "fork" in metodos else "spawn")
+
+
+def init_worker_simulacion(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
+                           estrategia: str = "mayor_diametro") -> None:
+    """*Initializer* del pool: fija el stock+config+estrategia compartidos del worker.
+
+    Se ejecuta una vez por proceso del pool; luego cada tarea
+    (``simular_cambios_worker``) reusa estos valores sin volver a serializarlos.
+    """
+    _WORKER_STATE["cfg"] = cfg
+    _WORKER_STATE["stock_df"] = stock_df
+    _WORKER_STATE["estrategia"] = estrategia
+
+
+def simular_cambios_worker(cambios_df: "pd.DataFrame") -> TallerCilindros:
+    """Tarea del pool: simula con el stock/config/estrategia del worker + ``cambios_df``.
+
+    Requiere que ``init_worker_simulacion`` haya corrido en este proceso (lo hace
+    el ``initializer`` del ``ProcessPoolExecutor``). Devuelve el taller resultante.
+    """
+    return simular_desde_dataframes(
+        _WORKER_STATE["cfg"], _WORKER_STATE["stock_df"], cambios_df,
+        _WORKER_STATE["estrategia"])
+
+
+def batch_simular(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
+                  lista_cambios: List["pd.DataFrame"],
+                  estrategia: str = "mayor_diametro",
+                  max_workers: Optional[int] = None) -> List[TallerCilindros]:
+    """Corre N simulaciones en paralelo: mismo stock+config+estrategia, distintos cambios.
+
+    El stock/config/estrategia se cargan **una vez por worker** (initializer) y cada
+    tarea solo manda su ``cambios_df``. Devuelve la lista de tallers en el **mismo
+    orden** que ``lista_cambios``. Pensado para barridos de seeds del generador
+    (combinar con ``gencambios.generar_cambios`` para producir cada ``cambios_df``).
+    """
+    if not lista_cambios:
+        return []
+    with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx_paralelo(),
+                             initializer=init_worker_simulacion,
+                             initargs=(cfg, stock_df, estrategia)) as ex:
+        return list(ex.map(simular_cambios_worker, lista_cambios))
 
 
 def generar_y_construir(cfg: Dict[str, Any], stock_df: "pd.DataFrame",

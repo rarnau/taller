@@ -2,7 +2,6 @@
 Ventana principal mejorada con CustomTkinter.
 """
 import os
-import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 import customtkinter as ctk
 import tkinter as tk
@@ -21,7 +20,7 @@ from config import modelo_generador as modmod
 from modelos.estrategias import ESTRATEGIAS_SELECCION
 from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
-from cli import simular_desde_dataframes
+from cli import (init_worker_simulacion, simular_cambios_worker, ctx_paralelo)
 
 # Cada pestaña es un componente de display puro; App es el único que conoce
 # tanto el modelo (TallerCilindros) como la UI y los conecta.
@@ -282,13 +281,16 @@ class App(ctk.CTk):
         if cambios is None:
             cambios = pd.DataFrame(columns=gencambios.COLUMNAS_SALIDA)
 
-        # Contexto 'fork': el hijo hereda los módulos ya importados y NO re-importa
-        # gui.app (con 'spawn' se re-ejecutaría el módulo y su Tk). En Linux fork es
-        # el default; se fija explícitamente por robustez.
-        ctx = multiprocessing.get_context("fork")
-        self._sim_executor = ProcessPoolExecutor(max_workers=1, mp_context=ctx)
-        self._sim_future = self._sim_executor.submit(
-            simular_desde_dataframes, self.user_cfg, self._stock_df, cambios, estrat)
+        # Mismo camino que el runner paralelo del CLI (cli.batch_simular): el
+        # stock+config+estrategia se cargan una vez por worker con un initializer
+        # y la tarea solo manda el cambios_df. Acá es 1 worker (una corrida), pero
+        # queda listo para reusar el patrón en simulaciones en paralelo. El
+        # contexto 'fork' (cuando existe) evita re-importar/re-ejecutar módulos.
+        self._sim_executor = ProcessPoolExecutor(
+            max_workers=1, mp_context=ctx_paralelo(),
+            initializer=init_worker_simulacion,
+            initargs=(self.user_cfg, self._stock_df, estrat))
+        self._sim_future = self._sim_executor.submit(simular_cambios_worker, cambios)
         self.after(100, self._poll_simulacion)
 
     def _poll_simulacion(self):
