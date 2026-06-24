@@ -44,6 +44,7 @@ from gui.dashboard_principal import _marcar_paradas, formatter_tiempo
 from gui.calendario import SelectorFecha
 from gui.timeline_util import indice_tiempo_mas_cercano
 from gui.animaciones import fade_in
+from gui.mpl_zoom import conectar_zoom
 
 # Generadores: etiqueta visible ↔ clave persistida (la GUI muestra la etiqueta).
 _GEN_ETIQUETAS = {g.etiqueta: clave for clave, g in GENERADORES_CAMBIOS.items()}
