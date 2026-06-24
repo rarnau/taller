@@ -45,19 +45,20 @@ def _pintar_zonas_substock(ax, substocks, ymax):
             col = len(topes) - 1
         asignacion.append((ss, col))
 
-    base = ymax * 1.05
-    lane_h = max(ymax * 0.07, 0.5)
+    base = ymax * 1.04
+    lane_h = max(ymax * 0.045, 0.32)
+    barra_h = lane_h * 0.55          # barra fina dentro del carril
     for ss, col in asignacion:
         color = JAULA_COLORS[(ss.jaula_asignada - 1) % len(JAULA_COLORS)]
         # Relleno tenue a toda altura (los solapes se oscurecen al superponerse).
         ax.axvspan(ss.hasta, ss.desde, color=color, alpha=0.07, lw=0, zorder=0)
-        # Franja etiquetada en su carril, por encima del histograma.
+        # Franja fina etiquetada en su carril, por encima del histograma.
         y0 = base + col * lane_h
-        ax.add_patch(Rectangle((ss.hasta, y0), ss.desde - ss.hasta, lane_h * 0.78,
+        ax.add_patch(Rectangle((ss.hasta, y0), ss.desde - ss.hasta, barra_h,
                                facecolor=color, edgecolor=color, alpha=0.6,
-                               lw=1.0, zorder=2, clip_on=False))
-        ax.text((ss.hasta + ss.desde) / 2, y0 + lane_h * 0.39, f"J{ss.jaula_asignada}",
-                ha="center", va="center", color=BG, fontsize=8, fontweight="bold",
+                               lw=0.8, zorder=2, clip_on=False))
+        ax.text((ss.hasta + ss.desde) / 2, y0 + barra_h / 2, f"J{ss.jaula_asignada}",
+                ha="center", va="center", color=BG, fontsize=7, fontweight="bold",
                 zorder=3, clip_on=False)
     return base + len(topes) * lane_h
 
