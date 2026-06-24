@@ -153,6 +153,7 @@ class GeneradorCambios:
 
     clave: str = ""
     etiqueta: str = ""
+    descripcion: str = ""
 
     # -- Fit -----------------------------------------------------------------
     def _modelo_jaula_vacio(self) -> Dict[str, Any]:
@@ -193,21 +194,36 @@ class GeneradorCambios:
 
     def generar(self, modelo: Dict[str, Any], cfg: Dict[str, Any], *,
                 seed: Optional[int] = None, inicio: Optional[datetime] = None,
+                fin: Optional[datetime] = None,
                 horizonte_dias: Optional[int] = None,
                 grilla_cambios: Optional[List[List[bool]]] = None) -> pd.DataFrame:
-        """Genera el ``Programa_Cambios`` muestreando campañas por jaula."""
+        """Genera el ``Programa_Cambios`` muestreando campañas por jaula.
+
+        La ventana ``[inicio, fin)`` se resuelve, en orden de prioridad:
+        argumentos explícitos → ``fecha_inicio``/``fecha_fin`` del cfg → legacy
+        ``horizonte_dias`` (días desde ``inicio``) → 7 días desde ``_INICIO_DEFECTO``.
+        """
         gc = cfgmod.obtener_generador_cambios(cfg)
         cg = cfgmod.obtener_config_global(cfg)
         umbral = float(gc["umbral_desbaste_mm"])
-        if horizonte_dias is None:
-            horizonte_dias = int(gc["horizonte_dias"])
         n_jaulas = int(cg["cantidad_jaulas"])
 
         seed = resolver_seed(seed)
         rng = np.random.default_rng(seed)
+
+        if inicio is None and gc.get("fecha_inicio"):
+            inicio = pd.to_datetime(gc["fecha_inicio"]).to_pydatetime()
         if inicio is None:
             inicio = _INICIO_DEFECTO
-        fin = inicio + timedelta(days=int(horizonte_dias))
+        # Precedencia de ``fin``: arg explícito → horizonte_dias explícito →
+        # cfg.fecha_fin → cfg.horizonte_dias legacy → 7 días. Un horizonte
+        # explícito gana a la fecha persistida (evita ventanas invertidas).
+        if fin is None and horizonte_dias is not None:
+            fin = inicio + timedelta(days=int(horizonte_dias))
+        if fin is None and gc.get("fecha_fin"):
+            fin = pd.to_datetime(gc["fecha_fin"]).to_pydatetime()
+        if fin is None:
+            fin = inicio + timedelta(days=int(gc.get("horizonte_dias", 7)))
 
         filas: List[Dict[str, Any]] = []
         modelo_jaulas = modelo.get("jaulas", {})
@@ -247,6 +263,12 @@ class _GeneradorEmpirico(GeneradorCambios):
     """Distribuciones empíricas por jaula: muestrea duración y desbaste i.i.d."""
 
     clave, etiqueta = "empirico", "Distribuciones empíricas por jaula"
+    descripcion = (
+        "Aprende, por cada jaula, las distribuciones de duración de campaña y de "
+        "mm desbastados a partir de la historia, y las muestrea de forma "
+        "independiente (i.i.d.): cada cambio se sortea sin mirar el anterior. "
+        "Simple y robusto; ideal cuando no hay correlación entre campañas "
+        "consecutivas.")
 
     def _modelo_jaula_vacio(self) -> Dict[str, Any]:
         return {"duracion": [], "desbaste": []}
@@ -274,6 +296,12 @@ class _GeneradorMarkov(GeneradorCambios):
     """
 
     clave, etiqueta = "markov", "Cadena de Markov por jaula"
+    descripcion = (
+        "Cadena de Markov por jaula: agrupa las campañas en buckets de duración "
+        "y aprende con qué probabilidad una campaña de cierta duración (y tipo) es "
+        "seguida por otra. Captura la correlación entre campañas consecutivas "
+        "(p. ej. que tras una campaña larga suele venir una corta); la duración y "
+        "el desbaste concretos se muestrean de las observaciones de ese estado.")
 
     def _modelo_jaula_vacio(self) -> Dict[str, Any]:
         return {"inicial": {}, "transiciones": {}, "muestras": {}}
@@ -360,9 +388,10 @@ def ajustar_modelo(historia_df: pd.DataFrame, cfg: Dict[str, Any], *,
 
 def generar_cambios(modelo: Dict[str, Any], cfg: Dict[str, Any], *,
                     seed: Optional[int] = None, inicio: Optional[datetime] = None,
+                    fin: Optional[datetime] = None,
                     horizonte_dias: Optional[int] = None) -> pd.DataFrame:
     """Genera el Programa_Cambios desde un modelo ya ajustado, con el régimen del cfg."""
     gen = obtener_generador(modelo.get("clave"))
-    return gen.generar(modelo, cfg, seed=seed, inicio=inicio,
+    return gen.generar(modelo, cfg, seed=seed, inicio=inicio, fin=fin,
                        horizonte_dias=horizonte_dias,
                        grilla_cambios=grilla_cambios_desde_cfg(cfg))

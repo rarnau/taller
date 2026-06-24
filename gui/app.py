@@ -2,9 +2,9 @@
 Ventana principal mejorada con CustomTkinter.
 """
 import os
-import threading
-import time
+from concurrent.futures import ProcessPoolExecutor
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import matplotlib
@@ -18,7 +18,9 @@ from config.tema import *
 from config.persistencia import cargar_config
 from config import modelo_generador as modmod
 from modelos.estrategias import ESTRATEGIAS_SELECCION
+from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
+from cli import (init_worker_simulacion, simular_cambios_worker, ctx_paralelo)
 
 # Cada pestaña es un componente de display puro; App es el único que conoce
 # tanto el modelo (TallerCilindros) como la UI y los conecta.
@@ -26,10 +28,11 @@ from gui.tab_consola import crear_consola
 from gui.vista_realtime import VistaRealTime
 from gui.dashboard_principal import crear_dashboard_principal
 from gui.dashboard_detalle import crear_dashboard_detalle
-from gui.tab_tabla import llenar_tabla
+from gui.tab_tabla import crear_tab_inventario
 from gui.tab_kpis import llenar_kpis
 from gui.tab_config import crear_tab_configuracion
 from gui.tab_generacion import crear_tab_generacion
+from gui.tab_generacion import _inicios_parada
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -40,6 +43,30 @@ ctk.set_default_color_theme("blue")
 # ("invalid command name ...dropdownmenu"). Desactivarlo mantiene una escala fija
 # y elimina ese callback problemático. Debe ejecutarse antes de crear la ventana.
 ctk.deactivate_automatic_dpi_awareness()
+
+# Otro crash conocido de CustomTkinter: un widget puede recibir un <Configure>
+# que ya estaba en la cola de Tk *después* de ser destruido. En ese punto su
+# `_canvas` es None y `_update_dimensions_event` -> `_draw` revienta con
+# "AttributeError: 'NoneType' object has no attribute 'winfo_exists'". Se da, por
+# ejemplo, al cerrar/recrear el panel inline de filtro del inventario (que lleva
+# un CTkScrollableFrame) mientras la ventana se reajusta. Envolvemos el handler
+# para que sea no-op cuando el widget ya no tiene canvas. Debe aplicarse una sola
+# vez, antes de crear la ventana.
+try:
+    from customtkinter.windows.widgets.core_widget_classes.ctk_base_class import \
+        CTkBaseClass as _CTkBaseClass
+
+    _orig_update_dimensions_event = _CTkBaseClass._update_dimensions_event
+
+    def _safe_update_dimensions_event(self, event):
+        if getattr(self, "_canvas", None) is None:
+            return
+        return _orig_update_dimensions_event(self, event)
+
+    _CTkBaseClass._update_dimensions_event = _safe_update_dimensions_event
+except Exception:  # noqa: BLE001 — si CTk cambia su layout interno, seguimos sin el guard
+    pass
+
 
 class App(ctk.CTk):
     def __init__(self):
@@ -56,12 +83,12 @@ class App(ctk.CTk):
         # en el JSON y se aplica con un único configurar(); el Excel solo aporta
         # datos. configurar() debe ir antes de cualquier cargar_datos().
         self.taller.configurar(self.user_cfg)
-        self.archivo_cargado = None
 
-        # Generador de cambios: modelo aprendido persistido + cambios sintéticos.
-        # Si _cambios_generados está activo, la simulación usa ese Programa_Cambios
-        # (con el stock del Excel) en vez de la hoja Programa_Cambios del Excel.
+        # Flujo desacoplado: el stock se carga desde la pestaña Inventario
+        # (``_stock_df``) y los cambios se generan/suben desde la pestaña
+        # Generación (``_cambios_generados``); la simulación combina ambos.
         self._modelo_gen = modmod.cargar_modelo()
+        self._historia_df = None      # última historia subida (para el popup de ajuste)
         self._stock_df = None
         self._cambios_generados = None
 
@@ -89,9 +116,8 @@ class App(ctk.CTk):
         self.logo_label = ctk.CTkLabel(self.sidebar, text="SIMULADOR\nCILINDROS", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
-        self.btn_cargar = ctk.CTkButton(self.sidebar, text="Cargar Excel", command=self._cargar)
-        self.btn_cargar.grid(row=1, column=0, padx=20, pady=10)
-
+        # El stock se carga desde la pestaña Inventario y los cambios desde
+        # Generación; el sidebar solo dispara la simulación y exporta.
         self.label_estrat = ctk.CTkLabel(self.sidebar, text="Estrategia de rectificado:", anchor="w")
         self.label_estrat.grid(row=2, column=0, padx=20, pady=(10, 0))
         # El combo muestra etiquetas legibles; se mapean a la clave de estrategia
@@ -111,32 +137,56 @@ class App(ctk.CTk):
         # lugar de un overlay sobre la Vista Real. Se oculta al cargar/simular.
         self.hint_inicio = ctk.CTkLabel(
             self.sidebar,
-            text="Cargue un Excel y ejecute la\nsimulación para comenzar.",
+            text="Cargue el stock en Inventario,\ngenere/suba los cambios en\nGeneración y ejecute la simulación.",
             font=ctk.CTkFont(size=FONT_SIZE_SM),
             text_color=FG_DIM,
             justify="center",
         )
         self.hint_inicio.grid(row=6, column=0, padx=20, pady=(0, 10))
 
-        # Controles de Reproducción
+        # Controles de Reproducción: paso atrás / play / stop / paso adelante.
         self.repro_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.repro_frame.grid(row=7, column=0, padx=20, pady=20)
+        self.repro_frame.grid(row=7, column=0, padx=20, pady=(20, 4))
 
-        self.btn_play = ctk.CTkButton(self.repro_frame, text="▶ Play", width=60, command=self._toggle_playback)
-        self.btn_play.grid(row=0, column=0, padx=5)
-
+        self.btn_paso_atras = ctk.CTkButton(self.repro_frame, text="⏪", width=40,
+                                            command=lambda: self._paso(-1))
+        self.btn_paso_atras.grid(row=0, column=0, padx=3)
+        self.btn_play = ctk.CTkButton(self.repro_frame, text="▶ Play", width=64,
+                                      command=self._toggle_playback)
+        self.btn_play.grid(row=0, column=1, padx=3)
         self.btn_stop = ctk.CTkButton(self.repro_frame, text="⏹", width=40, command=self._stop_playback)
-        self.btn_stop.grid(row=0, column=1, padx=5)
+        self.btn_stop.grid(row=0, column=2, padx=3)
+        self.btn_paso_adelante = ctk.CTkButton(self.repro_frame, text="⏩", width=40,
+                                               command=lambda: self._paso(1))
+        self.btn_paso_adelante.grid(row=0, column=3, padx=3)
 
-        self.label_vel = ctk.CTkLabel(self.sidebar, text="Velocidad: 1x")
-        self.label_vel.grid(row=8, column=0, padx=20, pady=0)
-        self.slider_vel = ctk.CTkSlider(self.sidebar, from_=1, to=100, number_of_steps=99, command=self._change_speed)
-        self.slider_vel.set(10)  # 10/10 = 1.0x
-        self.slider_vel.grid(row=9, column=0, padx=20, pady=10)
+        # Velocidad: botones discretos (1× 2× 5× 10×) en vez de una barra.
+        self.vel_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.vel_frame.grid(row=8, column=0, padx=20, pady=(4, 4))
+        ctk.CTkLabel(self.vel_frame, text="Velocidad:").grid(row=0, column=0, padx=(0, 6))
+        self._btns_vel = {}
+        for i, v in enumerate((1, 2, 5, 10)):
+            b = ctk.CTkButton(self.vel_frame, text=f"{v}×", width=40,
+                              command=lambda vv=v: self._set_velocidad(vv))
+            b.grid(row=0, column=i + 1, padx=2)
+            self._btns_vel[v] = b
+        self._set_velocidad(1)
 
+        # Marcadores de parada: una franja fina sobre el slider con un punto por
+        # cada inicio de PARADA; al clickear salta la reproducción a ese momento.
+        bg_sidebar = self.sidebar._apply_appearance_mode(self.sidebar.cget("fg_color"))
+        self.parada_canvas = tk.Canvas(self.sidebar, height=12, highlightthickness=0,
+                                       bg=bg_sidebar)
+        self.parada_canvas.grid(row=9, column=0, padx=20, pady=(8, 0), sticky="ew")
+        self.parada_canvas.bind("<Button-1>", self._click_parada_canvas)
+        self.parada_canvas.bind("<Configure>", lambda _e: self._redibujar_paradas_sidebar())
+        self._paradas_sidebar: list = []  # [(idx, x_px)] de los marcadores dibujados
+
+        # sticky="ew" para que el slider ocupe el mismo ancho que la franja de
+        # marcadores (mismo padx) y los puntos de parada queden alineados con él.
         self.slider_progreso = ctk.CTkSlider(self.sidebar, from_=0, to=100, command=self._seek_simulation)
         self.slider_progreso.set(0)
-        self.slider_progreso.grid(row=10, column=0, padx=20, pady=10)
+        self.slider_progreso.grid(row=10, column=0, padx=20, pady=(0, 10), sticky="ew")
 
     def _create_main_content(self):
         self.tabview = ctk.CTkTabview(self)
@@ -153,6 +203,9 @@ class App(ctk.CTk):
         self.tab_gen = self.tabview.add("Generación de Cambios")
         self.tab_cfg = self.tabview.add("Configuración")
         self.tab_log = self.tabview.add("Consola")
+
+        # Pestaña de inventario (carga de stock + vista inicial/final + descarga)
+        self.inv_widget = crear_tab_inventario(self.tab_tabla, self)
 
         # Pestaña de configuración (globales + máquinas + rangos + sim, CRUD completo)
         self.cfg_widget = crear_tab_configuracion(self.tab_cfg, self)
@@ -177,55 +230,67 @@ class App(ctk.CTk):
         self.log_w = crear_consola(self.tab_log)
         self._log("Bienvenido al Simulador v4 Pro")
 
+        # Preview inicial: Dashboard/Análisis/KPIs con todo en 0 y gráficos vacíos
+        # más el banner "Se mostrarán datos una vez corrida la simulación".
+        self._render_paneles()
+
     def _create_status_bar(self):
         self.status_bar = ctk.CTkFrame(self, height=25, corner_radius=0)
         self.status_bar.grid(row=1, column=0, columnspan=2, sticky="ew")
         self.status_label = ctk.CTkLabel(self.status_bar, text="Listo", font=ctk.CTkFont(size=12))
         self.status_label.pack(side="left", padx=20)
+        # Barra de progreso indeterminada de la simulación (oculta salvo al simular).
+        self.progress_sim = ctk.CTkProgressBar(self.status_bar, width=180, mode="indeterminate")
+        self.progress_sim.pack(side="right", padx=20)
+        self.progress_sim.pack_forget()
 
     def _log(self, m):
         if hasattr(self, 'log_w'):
             self.log_w.insert("end", m + "\n")
             self.log_w.see("end")
 
-    def _cargar(self):
-        fp = filedialog.askopenfilename(title="Seleccionar Excel de Datos", filetypes=[("Excel", "*.xlsx *.xls")])
-        if not fp: return
+    def cargar_stock_desde(self, fp):
+        """Carga **solo el stock** (hoja Stock_Inicial) desde un Excel.
+
+        Llamado por la pestaña Inventario. Arma el taller con el stock y un
+        Programa_Cambios vacío (los cambios llegan luego desde Generación), y
+        descarta cualquier cambio sintético de una corrida previa.
+        """
         try:
             # configurar() (globales + máquinas + rangos + sim) debe ir antes de
-            # cargar_datos(): el stock necesita la cantidad de jaulas y el mínimo.
+            # cargar_datos_*(): el stock necesita la cantidad de jaulas y el mínimo.
             self.taller.configurar(self.user_cfg)
-            self.taller.cargar_datos(fp)
-            self.archivo_cargado = fp
-            # Guardar el stock para el generador y descartar cambios sintéticos
-            # de una corrida previa (este Excel trae su propio Programa_Cambios).
-            self._stock_df = pd.read_excel(fp, sheet_name="Stock_Inicial")
+            stock_df = pd.read_excel(fp, sheet_name="Stock_Inicial")
+            cambios_vacios = pd.DataFrame(columns=gencambios.COLUMNAS_SALIDA)
+            self.taller.cargar_datos_desde_dataframes(stock_df, cambios_vacios)
+            self._stock_df = stock_df
             self._cambios_generados = None
-            self.status_label.configure(text=f"Cargado: {os.path.basename(fp)}")
-            self._log(f"Archivo cargado: {fp}")
+            self.status_label.configure(text=f"Stock cargado: {os.path.basename(fp)}")
+            self._log(f"Stock cargado: {fp}")
             for aviso in self.taller.avisos_carga:
                 self._log(aviso)
             self.cfg_widget.refrescar()
             self._sincronizar_vista_con_taller()
             self._refrescar_combo_substocks()
-            # Nuevo Excel ⇒ se descartan los cambios sintéticos: limpiar el timeline.
+            self._render_paneles()
+            # Stock nuevo ⇒ se descartan los cambios: limpiar el timeline.
             if getattr(self, "gen_widget", None) is not None:
                 self.gen_widget.refrescar_timeline()
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo cargar el archivo: {e}")
+            messagebox.showerror("Error", f"No se pudo cargar el stock: {e}")
 
     def _simular(self):
-        if not self.archivo_cargado and self._cambios_generados is None:
-            messagebox.showwarning("Atención", "Primero debe cargar un archivo Excel.")
+        if self._stock_df is None:
+            messagebox.showwarning("Atención", "Primero cargue el stock desde la pestaña Inventario.")
             return
         if getattr(self, "_simulando", False):
             return
 
-        # La carga del Excel y la simulación corren en un hilo aparte para no
-        # bloquear el event loop de Tkinter (la ventana se congelaba mientras
-        # tanto). Los logs y la actualización de la UI se marshalan al hilo de
-        # Tk con self.after(); el taller solo se lee desde la UI una vez que el
-        # hilo termina (en _simular_finalizado).
+        # La simulación es CPU-bound en Python puro: un hilo no basta (el GIL
+        # congelaba la ventana). Se corre en un PROCESO aparte
+        # (ProcessPoolExecutor) y se sondea el future con self.after(); la GUI
+        # queda fluida y muestra una barra de progreso indeterminada. El taller
+        # resultante viaja de vuelta por pickle y reemplaza a self.taller.
         # Al simular, el aviso "Configuración guardada..." ya no aplica: borrarlo.
         if getattr(self, "cfg_widget", None) is not None:
             self.cfg_widget._limpiar_feedback()
@@ -233,42 +298,73 @@ class App(ctk.CTk):
         self._simulando = True
         self.btn_simular.configure(state="disabled")
         self.status_label.configure(text="Simulando...")
-        self.update_idletasks()
+        self._mostrar_progreso(True)
 
         estrat = self._estrat_por_etiqueta.get(self.combo_est.get(), "mayor_diametro")
-        threading.Thread(target=self._simular_worker, args=(estrat,), daemon=True).start()
+        cambios = self._cambios_generados
+        if cambios is None:
+            cambios = pd.DataFrame(columns=gencambios.COLUMNAS_SALIDA)
 
-    def _simular_worker(self, estrat):
-        """Corre carga + simulación fuera del hilo de Tk (no toca widgets)."""
-        try:
-            # Resetear estado del taller: configurar() (globales + máquinas +
-            # rangos + sim) antes de recargar los datos. Si hay un Programa_Cambios
-            # sintético activo, se usa con el stock del Excel; si no, el Excel completo.
-            self.taller.configurar(self.user_cfg)
-            if self._cambios_generados is not None:
-                self.taller.cargar_datos_desde_dataframes(self._stock_df, self._cambios_generados)
-            else:
-                self.taller.cargar_datos(self.archivo_cargado)
-            self.taller.simular(estrategia=estrat, callback_log=self._log_async)
-        except Exception as e:
-            self.after(0, lambda err=e: self._simular_error(err))
+        # Mismo camino que el runner paralelo del CLI (cli.batch_simular): el
+        # stock+config+estrategia se cargan una vez por worker con un initializer
+        # y la tarea solo manda el cambios_df. Acá es 1 worker (una corrida), pero
+        # queda listo para reusar el patrón en simulaciones en paralelo. El
+        # contexto 'fork' (cuando existe) evita re-importar/re-ejecutar módulos.
+        self._sim_executor = ProcessPoolExecutor(
+            max_workers=1, mp_context=ctx_paralelo(),
+            initializer=init_worker_simulacion,
+            initargs=(self.user_cfg, self._stock_df, estrat))
+        self._sim_future = self._sim_executor.submit(simular_cambios_worker, cambios)
+        self.after(100, self._poll_simulacion)
+
+    def _poll_simulacion(self):
+        """Sondea el proceso de simulación sin bloquear el event loop de Tk."""
+        fut = getattr(self, "_sim_future", None)
+        if fut is None:
             return
-        self.after(0, self._simular_finalizado)
+        if not fut.done():
+            self.after(100, self._poll_simulacion)
+            return
+        self._sim_executor.shutdown(wait=False)
+        self._sim_future = None
+        try:
+            taller = fut.result()
+        except Exception as e:
+            self._simular_error(e)
+            return
+        # Reemplazar el taller local por el resultado del proceso hijo.
+        self.taller = taller
+        self._simular_finalizado()
 
-    def _log_async(self, m):
-        """Callback de log seguro para hilos: difiere el insert al hilo de Tk."""
-        self.after(0, lambda: self._log(m))
+    def _mostrar_progreso(self, activo):
+        """Muestra/oculta la barra de progreso indeterminada de la simulación."""
+        if activo:
+            self.progress_sim.pack(side="right", padx=20)
+            self.progress_sim.start()
+        else:
+            self.progress_sim.stop()
+            self.progress_sim.pack_forget()
 
     def _simular_error(self, e):
         self._simulando = False
+        self._mostrar_progreso(False)
         self.btn_simular.configure(state="normal")
         self.status_label.configure(text="Error en la simulación")
         messagebox.showerror("Error", f"No se pudo ejecutar la simulación: {e}")
 
     def _simular_finalizado(self):
+        self._mostrar_progreso(False)
         self.snapshot_actual_idx = 0
         n_snaps = len(self.taller.snapshots)
         self.status_label.configure(text=f"Simulación completada. Snapshots: {n_snaps}")
+
+        # El proceso hijo no transmite logs en vivo: se vuelcan ahora los avisos
+        # de carga y el log de la simulación (cambios, paradas, bajas…) que el
+        # taller acumuló durante la corrida y viajó de vuelta por pickle.
+        for aviso in self.taller.avisos_carga:
+            self._log(aviso)
+        for linea in self.taller.log_simulacion:
+            self._log(linea)
 
         self.slider_progreso.configure(from_=0, to=max(0, n_snaps - 1))
         self.slider_progreso.set(0)
@@ -276,20 +372,45 @@ class App(ctk.CTk):
         # Reconstruir frames de jaulas y rectificadoras de la Vista Real
         self._sincronizar_vista_con_taller()
 
-        # Actualizar otras pestañas
-        llenar_tabla(self.tab_tabla, self.taller)
-        llenar_kpis(self.tab_kpis, self.taller)
-
+        # Actualizar otras pestañas (Inventario: ya hay "Stock final")
+        self.inv_widget.refrescar()
         self._refrescar_combo_substocks()
-        self._render_dashboard()
-        self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
-        # Si los cambios fueron sintéticos, el timeline ya puede sombrear las paradas.
-        if getattr(self, "gen_widget", None) is not None and self._cambios_generados is not None:
+        self._render_paneles()
+        self._redibujar_paradas_sidebar()
+        # El timeline ya puede sombrear las paradas calculadas por la simulación.
+        if getattr(self, "gen_widget", None) is not None:
             self.gen_widget.refrescar_timeline()
         self._log("Simulación finalizada. Use los controles de reproducción para ver los resultados.")
 
         self.btn_simular.configure(state="normal")
         self._simulando = False
+
+    def _redibujar_paradas_sidebar(self):
+        """Dibuja un punto por cada inicio de PARADA sobre el slider del sidebar."""
+        cv = getattr(self, "parada_canvas", None)
+        if cv is None:
+            return
+        cv.delete("all")
+        self._paradas_sidebar = []
+        snaps = self.taller.snapshots
+        n = len(snaps)
+        if n < 2:
+            return
+        ancho = cv.winfo_width()
+        if ancho <= 1:  # aún sin layout: reintentar cuando haya ancho
+            self.after(60, self._redibujar_paradas_sidebar)
+            return
+        for _t, idx in _inicios_parada(snaps):
+            x = (idx / (n - 1)) * (ancho - 1)
+            cv.create_polygon(x - 4, 1, x + 4, 1, x, 9, fill=RED, outline=RED_DARK)
+            self._paradas_sidebar.append((idx, x))
+
+    def _click_parada_canvas(self, event):
+        """Salta la reproducción al marcador de parada más cercano al click."""
+        if not self._paradas_sidebar:
+            return
+        idx, _x = min(self._paradas_sidebar, key=lambda p: abs(p[1] - event.x))
+        self.ir_a_momento(idx)
 
     def _sincronizar_vista_con_taller(self) -> None:
         """Actualiza los frames de Vista Real con las jaulas y máquinas del taller cargado."""
@@ -317,13 +438,24 @@ class App(ctk.CTk):
             self.combo_dash_ss.set("Global")
 
     def _render_dashboard(self):
-        """Renderiza el dashboard principal aplicando el filtro de SubStock seleccionado."""
-        if not self.taller.snapshots:
-            return
+        """Renderiza el dashboard principal aplicando el filtro de SubStock seleccionado.
+
+        Sin snapshots dibuja un preview vacío con banner (no retorna en blanco).
+        """
         sel = self.combo_dash_ss.get()
         substock = None if sel == "Global" else sel
         self._dash_into(self.dash_holder, "dashboard",
                         lambda t: crear_dashboard_principal(t, substock=substock))
+
+    def _render_analisis(self):
+        """Renderiza la pestaña Análisis (preview vacío + banner si aún no se simuló)."""
+        self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
+
+    def _render_paneles(self):
+        """Refresca Dashboard, Análisis y KPIs (preview pre-simulación incluido)."""
+        self._render_dashboard()
+        self._render_analisis()
+        llenar_kpis(self.tab_kpis, self.taller)
 
     def _dash_into(self, container, key, func):
         # Cerrar figura anterior para liberar memoria
@@ -389,9 +521,39 @@ class App(ctk.CTk):
             msg += f"\nHistorial ({len(cil.historial)} eventos)"
             messagebox.showinfo(f"Detalle Cilindro {id_cilindro}", msg)
 
-    def _change_speed(self, value):
-        self.velocidad_reproduccion = float(value) / 10.0
-        self.label_vel.configure(text=f"Velocidad: {self.velocidad_reproduccion:.1f}x")
+    def _set_velocidad(self, v):
+        """Fija la velocidad de reproducción y resalta el botón activo."""
+        self.velocidad_reproduccion = float(v)
+        for vv, b in self._btns_vel.items():
+            activo = vv == v
+            b.configure(fg_color=BTN_BLUE if activo else "transparent",
+                        border_width=0 if activo else 1, border_color=ACCENT,
+                        text_color="white" if activo else ACCENT,
+                        hover_color=BTN_BLUE_HOVER if activo else BG_CARD)
+
+    def _paso(self, delta):
+        """Avanza/retrocede un snapshot (pausa la reproducción)."""
+        if not self.taller.snapshots:
+            return
+        self.reproduciendo = False
+        self.btn_play.configure(text="▶ Play")
+        n = len(self.taller.snapshots)
+        self.snapshot_actual_idx = max(0, min(n - 1, self.snapshot_actual_idx + delta))
+        self._update_realtime_view()
+
+    def ir_a_momento(self, idx):
+        """Salta la reproducción al snapshot ``idx`` y muestra la Vista Real.
+
+        Lo usa el timeline de Generación al clickear un marcador de parada.
+        """
+        if not self.taller.snapshots:
+            return
+        n = len(self.taller.snapshots)
+        self.reproduciendo = False
+        self.btn_play.configure(text="▶ Play")
+        self.snapshot_actual_idx = max(0, min(n - 1, int(idx)))
+        self._update_realtime_view()
+        self.tabview.set("Vista Real")
 
     def _exportar(self):
         if not self.taller.snapshots:

@@ -6,7 +6,7 @@ duplicar la grilla ni los presets.
 """
 import customtkinter as ctk
 
-from config.tema import (BG_CARD, FG, FG2, ACCENT, FONT_FAMILY, FONT_SIZE,
+from config.tema import (BG_CARD, FG, FG2, FONT_FAMILY, FONT_SIZE,
                          FONT_SIZE_MD, BTN_BLUE, BTN_BLUE_HOVER)
 from modelos import turnos as turnos_mod
 
@@ -55,15 +55,20 @@ def abrir_editor_turnos(parent, turnos_holder, btn_turnos):
             for i in range(turnos_mod.NUM_TURNOS):
                 variables[d][i].set(preset[d][i])
 
+    # Presets en un desplegable (no una fila de botones) para que el popup no
+    # crezca al sumar presets. La etiqueta visible mapea a la clave del preset.
+    etiqueta_a_clave = {turnos_mod.PRESET_LABELS[k]: k for k in turnos_mod.PRESETS}
     presets_fila = ctk.CTkFrame(win, fg_color="transparent")
     presets_fila.grid(row=9, column=0, columnspan=4, padx=16, pady=(10, 4), sticky="w")
-    for clave in ("24x7", "off", "lv3"):
-        ctk.CTkButton(
-            presets_fila, text=turnos_mod.PRESET_LABELS[clave], width=110, height=28,
-            fg_color="transparent", border_width=1, border_color=ACCENT,
-            text_color=ACCENT, hover_color=BG_CARD,
-            command=lambda k=clave: _aplicar_preset(k),
-        ).pack(side="left", padx=4)
+    ctk.CTkLabel(presets_fila, text="Preset:", text_color=FG2,
+                 font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE)).pack(side="left", padx=(0, 6))
+    menu_presets = ctk.CTkOptionMenu(
+        presets_fila, width=160,
+        values=list(etiqueta_a_clave.keys()),
+        command=lambda etiqueta: _aplicar_preset(etiqueta_a_clave[etiqueta]),
+    )
+    menu_presets.set("Elegir preset…")  # placeholder: el comando solo corre al elegir
+    menu_presets.pack(side="left")
 
     def _aceptar():
         nuevo = {d: [variables[d][i].get() for i in range(turnos_mod.NUM_TURNOS)]

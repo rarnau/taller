@@ -189,8 +189,10 @@ def test_jaula_inicial_sin_pareja_no_queda_hibrida():
     """Con un solo cilindro en su rango, la jaula arranca PARADA con 0 trabajando.
 
     "Pareja completa o nada": el cilindro parcial no debe quedar en la lista de
-    trabajando junto con la jaula marcada PARADA (estado híbrido). Se mueve al
-    CRC a la espera de pareja y se reactiva con la pareja completa.
+    trabajando junto con la jaula marcada PARADA (estado híbrido). Y como el CRC
+    se llena **de a parejas** (nunca un cilindro suelto), el parcial NO va al CRC:
+    queda Disponible pero RESERVADO a la jaula (jaula_destino) y se reactiva con
+    la pareja completa en cuanto aparece un compañero de su rango.
     """
     import pandas as pd
 
@@ -215,8 +217,12 @@ def test_jaula_inicial_sin_pareja_no_queda_hibrida():
     jaula = t.jaulas[1]
     assert jaula.parada is True
     assert jaula.cilindros_trabajando == []          # no híbrido
-    assert [c.id for c in jaula.cilindros_crc] == ["A"]
-    assert jaula.cilindros_crc[0].estado == EstadoCilindro.CRC
+    assert jaula.cilindros_crc == []                 # el CRC nunca recibe un suelto
+    # El parcial queda Disponible pero reservado a la jaula 1 (jaula_destino).
+    cil_a = t.cilindros["A"]
+    assert cil_a.estado == EstadoCilindro.DISPONIBLE
+    assert cil_a.jaula_destino == 1
+    assert [c.id for c in t.obtener_disponibles_para_jaula(1)] == ["A"]
 
     # Al aparecer un compañero compatible, se reactiva con pareja COMPLETA.
     companero = Cilindro("B", 558.0, EstadoCilindro.DISPONIBLE)

@@ -111,6 +111,11 @@ class TallerCilindros:
         self.alertas: List[Alerta] = []
         self.snapshots: List[Snapshot] = []
         self.avisos_carga: List[str] = []  # avisos surgidos al cargar datos (para la GUI)
+        # Log de la última simulación (acumulado en simular()): permite mostrarlo
+        # en la consola de la GUI aunque la corrida ocurra en un proceso aparte
+        # (el callback_log en vivo no cruza el límite de proceso; esta lista sí,
+        # vía pickle del taller resultante).
+        self.log_simulacion: List[str] = []
         # IDs ya avisados por "ninguna máquina puede rectificar su tipo" (alerta 1 vez).
         self._sin_maquina_alertados: set = set()
 
@@ -142,6 +147,21 @@ class TallerCilindros:
         # Contador de secuencia de la cola de eventos (heap). Se reinicia al
         # inicio de cada simulación; declarado aquí para que _push_evento no
         # dependa de un atributo que solo existe a mitad de corrida.
+        self._seq_cola = itertools.count()
+
+    # ── Pickling (paso a procesos: worker GUI y batch_simular) ───────────────
+
+    def __getstate__(self):
+        # itertools.count() no es picklable. Es solo un contador transitorio de
+        # la cola de eventos (válido únicamente a mitad de simular()), así que se
+        # excluye del pickle y se reconstruye al despicklear. El resto del estado
+        # (snapshots, cilindros, máquinas, alertas) es picklable.
+        estado = self.__dict__.copy()
+        estado.pop("_seq_cola", None)
+        return estado
+
+    def __setstate__(self, estado):
+        self.__dict__.update(estado)
         self._seq_cola = itertools.count()
 
     # ── Configuración externa ───────────────────────────────────────────────
@@ -478,13 +498,19 @@ class TallerCilindros:
             if len(jaula.cilindros_trabajando) < _BUFFER_CRC_SIZE:
                 parciales = jaula.cilindros_trabajando
                 jaula.cilindros_trabajando = []
+                # Regla del taller: el CRC se llena de a parejas, nunca un cilindro
+                # suelto. El parcial NO se mete al CRC: queda Disponible pero
+                # RESERVADO a esta jaula (jaula_destino), de modo que ninguna otra
+                # lo tome y _instalar_pareja_o_parar lo reincorpore en cuanto haya
+                # un segundo cilindro de su rango (la jaula arranca PARADA).
                 for cil in parciales:
-                    cil.estado = EstadoCilindro.CRC
-                    jaula.cilindros_crc.append(cil)
+                    cil.estado = EstadoCilindro.DISPONIBLE
+                    cil.jaula = None
+                    cil.jaula_destino = j_id
                 jaula.parada = True
                 logger.warning(
                     "Jaula %s arranca PARADA: solo %d cilindro(s) en su rango de "
-                    "diámetros (movidos al CRC a la espera de pareja).",
+                    "diámetros (reservados como Disponible a la espera de pareja).",
                     j_id, len(parciales)
                 )
 
@@ -828,16 +854,10 @@ class TallerCilindros:
             tipo = self._tipo_efectivo(cil, maq)
             nuevo_diam = cil.diametro - mm
 
-            if nuevo_diam < self.diametro_minimo:
-                cil.estado = EstadoCilindro.BAJA
-                cil.registrar_evento(
-                    tiempo, "BAJA",
-                    f"Diámetro proyectado {nuevo_diam:.2f} < {self.diametro_minimo}"
-                )
-                self.alertas.append(Alerta(tiempo, "INFO", f"Cilindro {cil.id} dado de BAJA"))
-                cola.remove(cil)
-                continue
-
+            # Un pase que proyecta diámetro < mínimo NO se da de baja en seco: se
+            # ejecuta el rectificado igual (reduce el diámetro de verdad) y la BAJA
+            # se decide recién al finalizar, en _finalizar_y_continuar, una vez que
+            # el diámetro real quedó por debajo del mínimo ("rectificar y luego BAJA").
             # El motor decide la jaula destino (y por tanto el perfil) con el
             # diámetro proyectado tras el rectificado; la máquina sólo lo aplica.
             _, perfil = self._asignar_jaula_destino(cil, nuevo_diam, tiempo)
@@ -894,7 +914,14 @@ class TallerCilindros:
         return destino, self.perfil_por_jaula(destino)
 
     def reponer_buffer_crc(self, jaula_id: int, tiempo: datetime) -> bool:
-        """Intenta llenar el CRC de una jaula con cilindros disponibles."""
+        """Intenta llenar el CRC de una jaula con cilindros disponibles.
+
+        El traslado al CRC se hace **de a parejas** (`_BUFFER_CRC_SIZE`): el recurso
+        de traslado mueve la pareja completa en un viaje, nunca un cilindro suelto.
+        Si no hay disponibles suficientes para completar lo que falta, **no mueve
+        ninguno** (quedan en estado Disponible) y devuelve False — la reactivación
+        de la jaula (`_instalar_pareja_o_parar`) igual los toma directo del stock.
+        """
         jaula = self.jaulas[jaula_id]
         necesarios = _BUFFER_CRC_SIZE - len(jaula.cilindros_crc)
         if necesarios <= 0:
@@ -903,17 +930,16 @@ class TallerCilindros:
         disponibles = sorted(
             self.obtener_disponibles_para_jaula(jaula_id), key=lambda c: c.diametro, reverse=True
         )
-        completados = 0
-        for cil in disponibles:
-            if completados >= necesarios:
-                break
+        if len(disponibles) < necesarios:
+            return False  # pareja incompleta: no se coloca un cilindro suelto en el CRC
+
+        for cil in disponibles[:necesarios]:
             cil.estado = EstadoCilindro.CRC
             cil.jaula = jaula_id
             jaula.cilindros_crc.append(cil)
             cil.registrar_evento(tiempo, f"Traslado a CRC Jaula {jaula_id}")
-            completados += 1
 
-        return completados >= necesarios
+        return True
 
     def _push_evento(self, cola: List[_ItemCola], evento: _EventoSim) -> None:
         """Inserta un evento en la cola de prioridad (heap) por (tiempo, secuencia).
@@ -958,6 +984,16 @@ class TallerCilindros:
         simulación (ambos cierran rectificados en curso de idéntica forma).
         """
         cil_terminado = maquina.finalizar_rectificado(tiempo)
+        if cil_terminado and cil_terminado.diametro < self.diametro_minimo:
+            # El pase ya se aplicó (diámetro real reducido): ahora que quedó por
+            # debajo del mínimo, recién se da de BAJA ("rectificar y luego BAJA").
+            cil_terminado.estado = EstadoCilindro.BAJA
+            cil_terminado.registrar_evento(
+                tiempo, "BAJA",
+                f"Diámetro {cil_terminado.diametro:.2f} < {self.diametro_minimo}")
+            self.alertas.append(Alerta(
+                tiempo, "INFO", f"Cilindro {cil_terminado.id} dado de BAJA"))
+            cil_terminado = None  # no tratarlo como Disponible recién llegado
         if (cil_terminado and not self._es_colocable(cil_terminado)
                 and cil_terminado.diametro > self.diametro_minimo):
             # No colocable en ninguna jaula (su perfil/diámetro no entra): en vez
@@ -1110,8 +1146,13 @@ class TallerCilindros:
         self.estrategia_seleccion = estrategia
         self.alertas.clear()
         self.snapshots.clear()
+        self.log_simulacion.clear()
 
         def _log(msg: str) -> None:
+            # Se acumula siempre (la GUI lo vuelca tras una corrida en proceso
+            # aparte) y, si hay callback en vivo (CLI/test en el mismo proceso),
+            # se emite además al instante.
+            self.log_simulacion.append(msg)
             if callback_log:
                 callback_log(msg)
 

@@ -63,6 +63,11 @@ def llenar_kpis(tab, taller):
     container = ctk.CTkScrollableFrame(tab, fg_color="transparent")
     container.pack(fill="both", expand=True, padx=20, pady=20)
 
+    if not taller.snapshots:
+        ctk.CTkLabel(container, text="Se mostrarán datos una vez corrida la simulación",
+                     font=ctk.CTkFont(size=14, weight="bold"), text_color=FG2,
+                     anchor="w").pack(fill="x", padx=10, pady=(0, 6))
+
     k = calcular_kpis(taller)
     baj = k["bajas"]
     nc = k["alertas_criticas"]
@@ -88,7 +93,8 @@ def llenar_kpis(tab, taller):
     for i in range(cols):
         grid_gen.columnconfigure(i, weight=1)
 
-    # Secciones de utilización: mismo orden de máquinas en ambas.
-    nombres = list(k["utilizacion_maquinas_pct"])
+    # Secciones de utilización: mismo orden de máquinas en ambas. Sin simular el
+    # dict viene vacío, así que se derivan los nombres del parque para previsualizar 0%.
+    nombres = list(k["utilizacion_maquinas_pct"]) or list(getattr(taller, "maquinas", {}).keys())
     _seccion_util(container, "UTILIZACIÓN DISPONIBLE", k["utilizacion_maquinas_pct"], nombres, cols)
     _seccion_util(container, "UTILIZACIÓN NETA", k["utilizacion_neta_pct"], nombres, cols)
