@@ -4,9 +4,9 @@ from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
 from matplotlib.patches import Rectangle
 from modelos.enums import EstadoCilindro
-from config.tema import (BG, BG2, BG3, FG, FG2, ACCENT, RED, GREEN, ORANGE,
+from config.tema import (BG, BG2, BG3, FG, FG2, ACCENT, RED, GREEN,
                          COLORES_ESTADO, JAULA_COLORS)
-from gui.dashboard_principal import formatter_tiempo, rellenar_preview_vacio
+from gui.dashboard_principal import formatter_tiempo, rellenar_preview_vacio, _marcar_paradas
 
 def _style_ax(ax, title):
     ax.set_facecolor("#222")
@@ -70,7 +70,7 @@ def crear_dashboard_detalle(t):
         return rellenar_preview_vacio(fig, [
             (gs[0, :], "Mapa de Cilindros: Estado vs Diámetro"),
             (gs[1, 0], "Distribución de Diámetros (Activos)"),
-            (gs[1, 1], "Timeline de Cambios por Jaula")], _style_ax)
+            (gs[1, 1], "Evolución de SubStock (disponibles)")], _style_ax)
 
     # 1. Mapa de Cilindros (Estado x Diámetro)
     ax1 = fig.add_subplot(gs[0, :])
@@ -112,22 +112,25 @@ def crear_dashboard_detalle(t):
     ax2.set_ylim(0, nuevo_tope + ymax * 0.03)
     ax2.legend(fontsize=8, facecolor="#333", edgecolor="#333", labelcolor=FG, loc="lower right")
 
-    # 3. Timeline de Cambios
+    # 3. Evolución de SubStock: cilindros disponibles por banda a lo largo del tiempo.
+    #    Una línea escalonada por SubStock (el conteo cambia en eventos), coloreada
+    #    por su jaula; se sombrean las PARADAs para leer cuándo se agotó el stock.
     ax3 = fig.add_subplot(gs[1, 1])
-    _style_ax(ax3, "Timeline de Cambios por Jaula")
-    tiempos_ev = [e.tiempo for e in t.eventos_programados]
-    for tn, ce in [("produccion", GREEN), ("desbaste", ORANGE)]:
-        evs = [e for e in t.eventos_programados if e.tipo.value == tn]
-        if evs:
-            ax3.scatter([e.tiempo for e in evs], [e.jaula for e in evs],
-                        c=ce, s=100, zorder=5, edgecolors="white",
-                        linewidths=0.5, alpha=0.8, label=tn.capitalize())
-    n_jaulas = t.cantidad_jaulas
-    ax3.set_yticks(list(range(1, n_jaulas + 1)))
-    ax3.set_yticklabels([f"J{i}" for i in range(1, n_jaulas + 1)], color=FG, fontsize=9)
-    if tiempos_ev:
-        ax3.xaxis.set_major_formatter(formatter_tiempo(min(tiempos_ev), max(tiempos_ev)))
-    ax3.set_ylim(0.5, n_jaulas + 0.5)
-    ax3.legend(fontsize=8, facecolor="#333", edgecolor="#333", labelcolor=FG)
+    _style_ax(ax3, "Evolución de SubStock (disponibles)")
+    ti = [s.tiempo for s in t.snapshots]
+    ymax = 1
+    for ss in t.lista_substocks:
+        serie = [s.disponibles_por_substock.get(ss.nombre, 0) for s in t.snapshots]
+        color = JAULA_COLORS[(ss.jaula_asignada - 1) % len(JAULA_COLORS)]
+        ax3.plot(ti, serie, drawstyle="steps-post", color=color, lw=1.8,
+                 alpha=0.9, label=f"J{ss.jaula_asignada} · {ss.nombre}")
+        if serie:
+            ymax = max(ymax, max(serie))
+    _marcar_paradas(ax3, ti, t.snapshots)
+    if ti:
+        ax3.xaxis.set_major_formatter(formatter_tiempo(ti[0], ti[-1]))
+    ax3.set_ylim(0, ymax + 1)
+    ax3.set_ylabel("Disponibles", color=FG2, fontsize=9)
+    ax3.legend(fontsize=7, ncol=2, facecolor="#333", edgecolor="#333", labelcolor=FG)
 
     return fig
