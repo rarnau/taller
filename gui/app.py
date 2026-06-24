@@ -98,6 +98,7 @@ class App(ctk.CTk):
         self.velocidad_reproduccion = 1.0
 
         self._figs: dict = {}  # {tab_name: Figure} — para cerrar figuras al regenerar
+        self._dash_firmas: dict = {}  # {tab_name: firma} — caché para no redibujar sin cambios
 
         self._setup_grid()
         self._create_sidebar()
@@ -505,11 +506,23 @@ class App(ctk.CTk):
         sel = self.combo_dash_ss.get()
         substock = None if sel == "Global" else sel
         self._dash_into(self.dash_holder, "dashboard",
-                        lambda t: crear_dashboard_principal(t, substock=substock))
+                        lambda t: crear_dashboard_principal(t, substock=substock),
+                        firma=self._firma_datos(substock))
 
     def _render_analisis(self):
         """Renderiza la pestaña Análisis (preview vacío + banner si aún no se simuló)."""
-        self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
+        self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle,
+                        firma=self._firma_datos())
+
+    def _firma_datos(self, *extra):
+        """Firma de los datos que alimentan un gráfico (para cachear el render).
+
+        ``(id(taller), nº snapshots, *extra)`` captura toda diferencia *visible*:
+        el taller cambia de identidad al simular (vuelve por pickle), y el nº de
+        snapshots distingue cargar stock (0) de un resultado (N). ``extra`` agrega
+        parámetros propios del gráfico (p. ej. el SubStock seleccionado).
+        """
+        return (id(self.taller), len(self.taller.snapshots)) + extra
 
     def _render_paneles(self):
         """Refresca Dashboard, Análisis y KPIs (preview pre-simulación incluido)."""
@@ -517,7 +530,12 @@ class App(ctk.CTk):
         self._render_analisis()
         llenar_kpis(self.tab_kpis, self.taller)
 
-    def _dash_into(self, container, key, func):
+    def _dash_into(self, container, key, func, firma=None):
+        # Caché por firma: si los datos no cambiaron y el canvas sigue vivo, no se
+        # reconstruye la figura (evita redibujar el dashboard sin necesidad).
+        if (firma is not None and self._dash_firmas.get(key) == firma
+                and key in self._figs and container.winfo_children()):
+            return
         # Cerrar figura anterior para liberar memoria
         if key in self._figs:
             plt.close(self._figs[key])
@@ -525,6 +543,7 @@ class App(ctk.CTk):
             w.destroy()
         fig = func(self.taller)
         self._figs[key] = fig
+        self._dash_firmas[key] = firma
         cv = FigureCanvasTkAgg(fig, master=container)
         cv.draw()
         conectar_zoom(cv)
