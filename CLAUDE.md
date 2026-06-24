@@ -124,6 +124,8 @@ At startup, `App.__init__` calls `taller.configurar(self.user_cfg)` (one call th
 
 This is safe because each run builds a **fresh** `TallerCilindros` and the engine has no module-level mutable state (the shift grid is per-instance). The GUI uses this **same initializer path** with `max_workers=1` (see below), so a future parallel runner is a drop-in (`batch_simular`) with no new machinery.
 
+**Picklability of the result.** Workers return the whole `TallerCilindros` back to the parent by pickle, so the engine must be picklable. The only non-picklable attribute is `self._seq_cola = itertools.count()` (the event-queue sequence counter, valid only mid-`simular()`); `TallerCilindros.__getstate__`/`__setstate__` **drop it from the pickle and recreate it on unpickle**. Everything else (snapshots, cilindros, maquinas, alertas, `log_simulacion`) is picklable. If you add another non-picklable transient to the engine, exclude it the same way.
+
 ### GUI structure — `gui/app.py`
 
 Single `App(CTk)` window with a sidebar and a tabbed main area:
@@ -167,6 +169,8 @@ All UI color constants are in `config/tema.py` and imported with `from config.te
 ### GUI: DPI scaling and Vista Real layout
 
 `gui/app.py` calls `ctk.deactivate_automatic_dpi_awareness()` at module load, **before** the window is created. This is required: when the window is dragged between monitors with different DPI scaling, CustomTkinter's auto-rescaler tries to reconfigure the already-destroyed dropdown of a `CTkComboBox` and raises `TclError: invalid command name ...dropdownmenu`. Deactivating it pins the scale to 1 and removes that callback. **Tradeoff:** widgets are not auto-rescaled to per-monitor DPI. Do not re-enable without first solving the combobox-dropdown crash.
+
+Also at module load, `gui/app.py` wraps `CTkBaseClass._update_dimensions_event` with a guard (`_safe_update_dimensions_event`): a widget can receive a `<Configure>` event already queued in Tk **after** it was destroyed (its `_canvas` is `None`), so `_update_dimensions_event` → `_draw` would raise `AttributeError: 'NoneType' object has no attribute 'winfo_exists'`. The wrapper is a no-op when `_canvas` is `None` (the widget is gone — nothing to redraw), live widgets are unaffected. It happens e.g. when the inline filter panel (a `CTkScrollableFrame`) is closed/recreated mid-resize. The monkeypatch is wrapped in `try/except` so a future CTk layout change degrades gracefully instead of breaking startup.
 
 In `gui/vista_realtime.py`, the machine widgets ("rectificadoras") use a `grid` of uniform weighted columns (`grid_columnconfigure(..., weight=1, uniform="maq")`, `sticky="ew"`) so they share the available width responsively — do **not** give them a fixed width. The "Cargue un Excel y ejecute la simulación..." guidance hint (`self.hint_inicio` in `gui/app.py`) lives in the **sidebar** under the action buttons (not as an overlay on Vista Real), and is hidden with `grid_remove()` in `_sincronizar_vista_con_taller()` once data is loaded. The "EN ENFRIAMIENTO" section lives in the **right** column (under the queue) to keep all jaulas visible in the left column.
 
