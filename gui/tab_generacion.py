@@ -38,6 +38,7 @@ from config import modelo_generador as modmod
 from modelos import generador_cambios as gencambios
 from modelos.generador_cambios import GENERADORES_CAMBIOS
 from modelos import turnos as turnos_mod
+from config.iconos import GUARDAR, SUBIR_HISTORIA, AJUSTAR, GENERAR, SEED, CARGAR, INFO
 from gui.editor_turnos import abrir_editor_turnos
 from gui.dashboard_principal import _marcar_paradas, formatter_tiempo
 from gui.calendario import SelectorFecha
@@ -330,7 +331,7 @@ class TabGeneracion(ctk.CTkFrame):
             text_color=ACCENT, hover_color=BG_CARD,
             command=lambda: abrir_editor_turnos(self, self._turnos_holder, self._btn_turnos))
         self._btn_turnos.pack(side="left", padx=4)
-        ctk.CTkButton(cfg, text="💾 Guardar configuración", height=30,
+        ctk.CTkButton(cfg, text=f"{GUARDAR} Guardar configuración", height=30,
                       fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER,
                       command=self._guardar_config).pack(anchor="w", pady=(8, 0))
 
@@ -339,10 +340,10 @@ class TabGeneracion(ctk.CTkFrame):
         self._chk_reiniciar = ctk.CTkCheckBox(adap, text="reiniciar adaptación (desde cero)",
                                               font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE))
         self._chk_reiniciar.pack(anchor="w", pady=(0, 4))
-        ctk.CTkButton(adap, text="📈 Subir historia", height=30,
+        ctk.CTkButton(adap, text=f"{SUBIR_HISTORIA} Subir historia", height=30,
                       command=self._subir_historia).pack(fill="x", pady=2)
         self._btn_ajustar = ctk.CTkButton(
-            adap, text="🔍 Ver / ajustar adaptación", height=30, state="disabled",
+            adap, text=f"{AJUSTAR} Ver / ajustar adaptación", height=30, state="disabled",
             fg_color="transparent", border_width=1, border_color=ACCENT,
             text_color=ACCENT, hover_color=BG_CARD,
             command=self._abrir_popup_adaptacion)
@@ -360,18 +361,18 @@ class TabGeneracion(ctk.CTkFrame):
                      font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE)).pack(side="left")
         self._entry_seed = ctk.CTkEntry(fila_seed, width=110, justify="center")
         self._entry_seed.pack(side="left", padx=4)
-        ctk.CTkButton(gen, text="▶ Generar cambios", height=34,
+        ctk.CTkButton(gen, text=f"{GENERAR} Generar cambios", height=34,
                       font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD, weight="bold"),
                       fg_color=GREEN, hover_color="#2BB46B",
                       command=self._generar_cambios).pack(fill="x", pady=(4, 2))
         # Botones secundarios al mismo nivel (misma fila).
         fila_sec = ctk.CTkFrame(gen, fg_color="transparent")
         fila_sec.pack(fill="x", pady=2)
-        ctk.CTkButton(fila_sec, text="🎲 Nueva seed", height=30,
+        ctk.CTkButton(fila_sec, text=f"{SEED} Nueva seed", height=30,
                       fg_color="transparent", border_width=1, border_color=ACCENT,
                       text_color=ACCENT, hover_color=BG_CARD,
                       command=self._nueva_seed).pack(side="left", expand=True, fill="x", padx=(0, 3))
-        ctk.CTkButton(fila_sec, text="📁 Subir Excel de cambios", height=30,
+        ctk.CTkButton(fila_sec, text=f"{CARGAR} Subir Excel de cambios", height=30,
                       fg_color="transparent", border_width=1, border_color=ACCENT,
                       text_color=ACCENT, hover_color=BG_CARD,
                       command=self._subir_cambios).pack(side="left", expand=True, fill="x", padx=(3, 0))
@@ -604,7 +605,7 @@ class TabGeneracion(ctk.CTkFrame):
         combo.pack(side="left", padx=8)
         btn_ajustar = ctk.CTkButton(top, text="Ajustar", width=90)
         btn_ajustar.pack(side="left", padx=4)
-        ctk.CTkButton(top, text="ⓘ", width=32, fg_color="transparent", border_width=1,
+        ctk.CTkButton(top, text=INFO, width=32, fg_color="transparent", border_width=1,
                       border_color=ACCENT, text_color=ACCENT, hover_color=BG_CARD,
                       command=lambda: self._mostrar_ayuda_modelo(win, combo.get())).pack(side="left", padx=4)
 

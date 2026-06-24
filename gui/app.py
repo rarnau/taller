@@ -17,6 +17,7 @@ import pandas as pd
 from config.tema import *
 from config.persistencia import cargar_config, obtener_estrategia_seleccion
 from config import modelo_generador as modmod
+from config.iconos import ATRAS, STOP, ADELANTE, PLAY, PAUSE
 from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
 from cli import (init_worker_simulacion, simular_cambios_worker, ctx_paralelo)
@@ -192,15 +193,15 @@ class App(ctk.CTk):
         self.repro_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.repro_frame.grid(row=7, column=0, padx=20, pady=(20, 4))
 
-        self.btn_paso_atras = ctk.CTkButton(self.repro_frame, text="⏪", width=40,
+        self.btn_paso_atras = ctk.CTkButton(self.repro_frame, text=ATRAS, width=40,
                                             command=lambda: self._paso(-1))
         self.btn_paso_atras.grid(row=0, column=0, padx=3)
-        self.btn_play = ctk.CTkButton(self.repro_frame, text="▶ Play", width=64,
+        self.btn_play = ctk.CTkButton(self.repro_frame, text=f"{PLAY} Play", width=64,
                                       command=self._toggle_playback)
         self.btn_play.grid(row=0, column=1, padx=3)
-        self.btn_stop = ctk.CTkButton(self.repro_frame, text="⏹", width=40, command=self._stop_playback)
+        self.btn_stop = ctk.CTkButton(self.repro_frame, text=STOP, width=40, command=self._stop_playback)
         self.btn_stop.grid(row=0, column=2, padx=3)
-        self.btn_paso_adelante = ctk.CTkButton(self.repro_frame, text="⏩", width=40,
+        self.btn_paso_adelante = ctk.CTkButton(self.repro_frame, text=ADELANTE, width=40,
                                                command=lambda: self._paso(1))
         self.btn_paso_adelante.grid(row=0, column=3, padx=3)
 
@@ -628,17 +629,17 @@ class App(ctk.CTk):
 
         if self.reproduciendo:
             self.reproduciendo = False
-            self.btn_play.configure(text="▶ Play")
+            self.btn_play.configure(text=f"{PLAY} Play")
         else:
             self.reproduciendo = True
-            self.btn_play.configure(text="⏸ Pause")
+            self.btn_play.configure(text=f"{PAUSE} Pause")
             self._playback_tick()
 
     def _stop_playback(self):
         self.reproduciendo = False
         self.snapshot_actual_idx = 0
         self.slider_progreso.set(0)
-        self.btn_play.configure(text="▶ Play")
+        self.btn_play.configure(text=f"{PLAY} Play")
         self._update_realtime_view()
 
     def _seek_simulation(self, value):
@@ -656,7 +657,7 @@ class App(ctk.CTk):
             self.after(ms, self._playback_tick)
         else:
             self.reproduciendo = False
-            self.btn_play.configure(text="▶ Play")
+            self.btn_play.configure(text=f"{PLAY} Play")
 
     def _update_realtime_view(self):
         if self.snapshot_actual_idx < len(self.taller.snapshots):
@@ -688,7 +689,7 @@ class App(ctk.CTk):
         if not self.taller.snapshots:
             return
         self.reproduciendo = False
-        self.btn_play.configure(text="▶ Play")
+        self.btn_play.configure(text=f"{PLAY} Play")
         n = len(self.taller.snapshots)
         self.snapshot_actual_idx = max(0, min(n - 1, self.snapshot_actual_idx + delta))
         self._update_realtime_view()
@@ -702,7 +703,7 @@ class App(ctk.CTk):
             return
         n = len(self.taller.snapshots)
         self.reproduciendo = False
-        self.btn_play.configure(text="▶ Play")
+        self.btn_play.configure(text=f"{PLAY} Play")
         self.snapshot_actual_idx = max(0, min(n - 1, int(idx)))
         self._update_realtime_view()
         self.tabview.set("Vista Real")

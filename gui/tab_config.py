@@ -12,6 +12,7 @@ from config.tema import (
     BG_CARD, FG, FG2, ACCENT, GREEN, RED, YELLOW, FONT_FAMILY,
     FONT_SIZE, FONT_SIZE_MD, FONT_SIZE_LG, BTN_BLUE, BTN_BLUE_HOVER,
 )
+from config.iconos import GUARDAR, ELIMINAR
 from gui.validacion_config import _estado_validacion
 from config.persistencia import (
     guardar_config, obtener_rangos, obtener_maquinas, obtener_config_global,
@@ -227,7 +228,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         footer.pack(fill="x", padx=4, pady=(4, 20))
 
         ctk.CTkButton(
-            footer, text="💾  Guardar configuración", height=40, width=220,
+            footer, text=f"{GUARDAR}  Guardar configuración", height=40, width=220,
             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD, weight="bold"),
             fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER,
             command=self._guardar,
@@ -412,7 +413,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         registro = (e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo, turnos_holder, fila)
 
         ctk.CTkButton(
-            fila, text="🗑", width=36, fg_color="transparent",
+            fila, text=ELIMINAR, width=36, fg_color="transparent",
             text_color=RED, hover_color=BG_CARD,
             command=lambda: self._quitar_fila_maquina(registro),
         ).pack(side="left", padx=2)

@@ -15,6 +15,7 @@ import customtkinter as ctk
 import pandas as pd
 
 from config.tema import (BG_CARD, FG, FG2, ACCENT, BTN_BLUE, BTN_BLUE_HOVER, TABLE_ROW_COLORS)
+from config.iconos import CARGAR, DESCARGAR
 from gui.orden_tabla import ordenar_filas
 
 _VISTA_INICIAL = "Stock inicial"
@@ -48,7 +49,7 @@ class TabInventario(ctk.CTkFrame):
         toolbar = ctk.CTkFrame(self, fg_color="transparent")
         toolbar.pack(fill="x", padx=10, pady=10)
 
-        ctk.CTkButton(toolbar, text="📁 Cargar stock", width=130,
+        ctk.CTkButton(toolbar, text=f"{CARGAR} Cargar stock", width=130,
                       fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER,
                       command=self._cargar_stock).pack(side="left", padx=(0, 16))
 
@@ -61,7 +62,7 @@ class TabInventario(ctk.CTkFrame):
         ctk.CTkLabel(toolbar, text="Orden: clic en cabecera ▲▼  ·  Filtro: clic derecho",
                      text_color=FG2).pack(side="left")
 
-        ctk.CTkButton(toolbar, text="⬇ Descargar Excel", width=150,
+        ctk.CTkButton(toolbar, text=f"{DESCARGAR} Descargar Excel", width=150,
                       fg_color="transparent", border_width=1, border_color=ACCENT,
                       text_color=ACCENT, hover_color=BG_CARD,
                       command=self._descargar).pack(side="right")
