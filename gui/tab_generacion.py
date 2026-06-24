@@ -22,6 +22,7 @@ import pandas as pd
 from datetime import timedelta
 from tkinter import filedialog, messagebox
 
+import matplotlib.dates as mdates
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
@@ -40,6 +41,7 @@ from modelos import turnos as turnos_mod
 from gui.editor_turnos import abrir_editor_turnos
 from gui.dashboard_principal import _marcar_paradas, formatter_tiempo
 from gui.calendario import SelectorFecha
+from gui.timeline_util import indice_tiempo_mas_cercano
 
 # Generadores: etiqueta visible ↔ clave persistida (la GUI muestra la etiqueta).
 _GEN_ETIQUETAS = {g.etiqueta: clave for clave, g in GENERADORES_CAMBIOS.items()}
@@ -857,6 +859,9 @@ class TabGeneracion(ctk.CTkFrame):
         self._fig = self._construir_figura(cambios, self.app.taller, pickable_paradas=True)
         self._canvas = FigureCanvasTkAgg(self._fig, master=self._timeline_holder)
         self._canvas.mpl_connect("pick_event", self._on_pick_parada)
+        # Clic simple en cualquier punto del timeline ⇒ saltar al momento más
+        # cercano (el doble clic queda para el reset de zoom de mpl_zoom).
+        self._canvas.mpl_connect("button_press_event", self._on_click_timeline)
         self._canvas.draw()
         conectar_zoom(self._canvas)
         self._canvas.get_tk_widget().pack(fill="both", expand=True)
@@ -869,6 +874,25 @@ class TabGeneracion(ctk.CTkFrame):
         snap_idx = idx_map[event.ind[0]]
         if hasattr(self.app, "ir_a_momento"):
             self.app.ir_a_momento(snap_idx)
+
+    def _on_click_timeline(self, event):
+        """Clic simple en el timeline: salta la reproducción al snapshot más cercano.
+
+        Mapea la coordenada temporal clickeada (eje X) al snapshot de tiempo más
+        próximo y delega en ``app.ir_a_momento`` (que muestra la Vista Real). El
+        doble clic se ignora aquí porque lo usa el reset de zoom (gui/mpl_zoom).
+        """
+        if getattr(event, "dblclick", False):
+            return
+        if event.inaxes is None or event.xdata is None:
+            return
+        snaps = self.app.taller.snapshots
+        if not snaps:
+            return
+        clic = mdates.num2date(event.xdata).replace(tzinfo=None)
+        idx = indice_tiempo_mas_cercano([s.tiempo for s in snaps], clic)
+        if idx is not None and hasattr(self.app, "ir_a_momento"):
+            self.app.ir_a_momento(idx)
 
     def _construir_figura(self, cambios, taller, figsize=(16, 5), pickable_paradas=False):
         """Figura del timeline: un punto por cambio (por jaula) + paradas en rojo.
