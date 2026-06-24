@@ -254,6 +254,27 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         for e in self._entries_globales:
             e.bind("<KeyRelease>", self._validar_en_vivo)
 
+        # Navegación mejorada: Enter avanza al siguiente campo del formulario en
+        # orden lógico (el Tab nativo ya sigue el orden de creación = visual).
+        self._encadenar_enter(self._entries_globales)
+
+    def _encadenar_enter(self, entries):
+        """Bindea Enter en cada entry para mover el foco al siguiente de la lista.
+
+        Cadena explícita (no ``tk_focusNext``, que con CTkEntry saltaría a
+        sub-widgets internos): orden determinista. El último no avanza. ``add="+"``
+        conserva binds previos (p. ej. el ``<Return>`` de cantidad de jaulas).
+        """
+        for i in range(len(entries) - 1):
+            siguiente = entries[i + 1]
+            entries[i].bind("<Return>",
+                            lambda _ev, w=siguiente: self._foco_a(w), add="+")
+
+    def _foco_a(self, widget):
+        """Lleva el foco al widget indicado y corta la propagación del evento."""
+        widget.focus_set()
+        return "break"
+
     # ── Layout responsive ────────────────────────────────────────────────
 
     # Ancho (px) por debajo del cual las dos columnas se apilan a ancho completo.
