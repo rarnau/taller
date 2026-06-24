@@ -120,6 +120,35 @@ class App(ctk.CTk):
         self._create_sidebar()
         self._create_main_content()
         self._create_status_bar()
+        self._crear_atajos()
+
+    def _crear_atajos(self):
+        """Atajos de teclado globales: Ctrl+S guardar config, Ctrl+L cargar
+        stock, Ctrl+R ejecutar simulación. ``bind_all`` para que funcionen sin
+        importar qué widget tenga el foco."""
+        self.bind_all("<Control-s>", lambda _e: self._atajo_guardar_config())
+        self.bind_all("<Control-l>", lambda _e: self._atajo_cargar_stock())
+        self.bind_all("<Control-r>", lambda _e: self._atajo_simular())
+
+    def _atajo_guardar_config(self):
+        """Ctrl+S: guarda la configuración y muestra la pestaña para ver el resultado."""
+        if getattr(self, "cfg_widget", None) is not None:
+            self.tabview.set("Configuración")
+            self.cfg_widget._guardar()
+        return "break"
+
+    def _atajo_cargar_stock(self):
+        """Ctrl+L: abre el diálogo de carga de stock (pestaña Inventario)."""
+        if getattr(self, "inv_widget", None) is not None:
+            self.tabview.set("Inventario")
+            self.inv_widget._cargar_stock()
+        return "break"
+
+    def _atajo_simular(self):
+        """Ctrl+R: ejecuta la simulación (respeta las precondiciones de _simular)."""
+        if not getattr(self, "_simulando", False):
+            self._simular()
+        return "break"
 
     def _setup_grid(self):
         self.grid_columnconfigure(1, weight=1)
