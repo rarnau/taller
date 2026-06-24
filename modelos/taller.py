@@ -111,6 +111,11 @@ class TallerCilindros:
         self.alertas: List[Alerta] = []
         self.snapshots: List[Snapshot] = []
         self.avisos_carga: List[str] = []  # avisos surgidos al cargar datos (para la GUI)
+        # Log de la última simulación (acumulado en simular()): permite mostrarlo
+        # en la consola de la GUI aunque la corrida ocurra en un proceso aparte
+        # (el callback_log en vivo no cruza el límite de proceso; esta lista sí,
+        # vía pickle del taller resultante).
+        self.log_simulacion: List[str] = []
         # IDs ya avisados por "ninguna máquina puede rectificar su tipo" (alerta 1 vez).
         self._sin_maquina_alertados: set = set()
 
@@ -1141,8 +1146,13 @@ class TallerCilindros:
         self.estrategia_seleccion = estrategia
         self.alertas.clear()
         self.snapshots.clear()
+        self.log_simulacion.clear()
 
         def _log(msg: str) -> None:
+            # Se acumula siempre (la GUI lo vuelca tras una corrida en proceso
+            # aparte) y, si hay callback en vivo (CLI/test en el mismo proceso),
+            # se emite además al instante.
+            self.log_simulacion.append(msg)
             if callback_log:
                 callback_log(msg)
 

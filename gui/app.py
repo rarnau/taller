@@ -359,9 +359,12 @@ class App(ctk.CTk):
         self.status_label.configure(text=f"Simulación completada. Snapshots: {n_snaps}")
 
         # El proceso hijo no transmite logs en vivo: se vuelcan ahora los avisos
-        # de carga del taller resultante.
+        # de carga y el log de la simulación (cambios, paradas, bajas…) que el
+        # taller acumuló durante la corrida y viajó de vuelta por pickle.
         for aviso in self.taller.avisos_carga:
             self._log(aviso)
+        for linea in self.taller.log_simulacion:
+            self._log(linea)
 
         self.slider_progreso.configure(from_=0, to=max(0, n_snaps - 1))
         self.slider_progreso.set(0)
