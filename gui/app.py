@@ -167,18 +167,20 @@ class App(ctk.CTk):
         # Marcadores de parada: una franja fina sobre el slider con un punto por
         # cada inicio de PARADA; al clickear salta la reproducción a ese momento.
         bg_sidebar = self.sidebar._apply_appearance_mode(self.sidebar.cget("fg_color"))
-        self.parada_canvas = tk.Canvas(self.sidebar, height=12, highlightthickness=0,
+        self.parada_canvas = tk.Canvas(self.sidebar, height=9, highlightthickness=0,
                                        bg=bg_sidebar)
-        self.parada_canvas.grid(row=9, column=0, padx=20, pady=(8, 0), sticky="ew")
+        self.parada_canvas.grid(row=9, column=0, padx=20, pady=(6, 0), sticky="ew")
         self.parada_canvas.bind("<Button-1>", self._click_parada_canvas)
         self.parada_canvas.bind("<Configure>", lambda _e: self._redibujar_paradas_sidebar())
         self._paradas_sidebar: list = []  # [(idx, x_px)] de los marcadores dibujados
 
         # sticky="ew" para que el slider ocupe el mismo ancho que la franja de
         # marcadores (mismo padx) y los puntos de parada queden alineados con él.
-        self.slider_progreso = ctk.CTkSlider(self.sidebar, from_=0, to=100, command=self._seek_simulation)
+        # height/button_length reducidos: barra temporal un poco más compacta.
+        self.slider_progreso = ctk.CTkSlider(self.sidebar, from_=0, to=100, height=12,
+                                              button_length=6, command=self._seek_simulation)
         self.slider_progreso.set(0)
-        self.slider_progreso.grid(row=10, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.slider_progreso.grid(row=10, column=0, padx=20, pady=(0, 8), sticky="ew")
 
     def _create_main_content(self):
         self.tabview = ctk.CTkTabview(self)
@@ -394,7 +396,7 @@ class App(ctk.CTk):
             return
         for _t, idx in _inicios_parada(snaps):
             x = (idx / (n - 1)) * (ancho - 1)
-            cv.create_polygon(x - 4, 1, x + 4, 1, x, 9, fill=RED, outline=RED_DARK)
+            cv.create_polygon(x - 3, 1, x + 3, 1, x, 7, fill=RED, outline=RED_DARK)
             self._paradas_sidebar.append((idx, x))
 
     def _click_parada_canvas(self, event):
