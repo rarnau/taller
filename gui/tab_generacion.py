@@ -546,9 +546,11 @@ class TabGeneracion(ctk.CTkFrame):
         win.transient(self.winfo_toplevel())
         win.grab_set()
 
-        # Estado del popup: modelo temporal + figura/canvas del preview (a cerrar)
-        # + caché de la conversión de la historia (constante durante el popup).
-        pop = {"modelo": None, "fig": None, "canvas": None, "hist_df": None}
+        # Estado del popup: `preview` es el modelo del combo recalculado EN VIVO
+        # (solo se muestra); `modelo` es el modelo **confirmado** con «Ajustar», que
+        # es el único que «Aplicar» guarda. Más la figura/canvas del preview (a
+        # cerrar) y la caché de la conversión de la historia (constante en el popup).
+        pop = {"preview": None, "modelo": None, "fig": None, "canvas": None, "hist_df": None}
         umbral = float(obtener_generador_cambios(self.app.user_cfg)["umbral_desbaste_mm"])
 
         # ── Selector de modelo + ajustar + ayuda ─────────────────────────────
@@ -590,6 +592,9 @@ class TabGeneracion(ctk.CTkFrame):
         # ── Acciones ─────────────────────────────────────────────────────────
         acc = ctk.CTkFrame(win, fg_color="transparent")
         acc.pack(fill="x", padx=16, pady=(0, 14))
+        lbl_estado = ctk.CTkLabel(acc, text="", anchor="w", text_color=FG2,
+                                  font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE))
+        lbl_estado.pack(side="left", padx=(0, 8))
         btn_cerrar = ctk.CTkButton(acc, text="Cerrar", width=100, fg_color="transparent",
                                    border_width=1, border_color=FG2, text_color=FG2,
                                    hover_color=BG_CARD)
@@ -650,11 +655,13 @@ class TabGeneracion(ctk.CTkFrame):
                         return
                     pop["fig"] = self._construir_figura(df, self.app.taller, figsize=(7.6, 3.0))
                 else:
-                    # Comparación: generación con el modelo actual (antes) vs el temporal (después).
+                    # Comparación: generación con el modelo aplicado (antes) vs el
+                    # previsualizado en el combo (después), aunque aún no se confirme.
                     antes = (gencambios.generar_cambios(self.app._modelo_gen, self.app.user_cfg, seed=seed)
                              if self.app._modelo_gen else None)
-                    despues = (gencambios.generar_cambios(pop["modelo"], self.app.user_cfg, seed=seed)
-                               if pop["modelo"] else None)
+                    ref = pop["preview"] or pop["modelo"]
+                    despues = (gencambios.generar_cambios(ref, self.app.user_cfg, seed=seed)
+                               if ref else None)
                     pop["fig"] = self._figura_comparacion(antes, despues, self.app.taller, figsize=(7.6, 3.0))
             except Exception as e:
                 ctk.CTkLabel(chart_holder, text=f"(no se pudo graficar: {e})",
@@ -664,22 +671,50 @@ class TabGeneracion(ctk.CTkFrame):
             pop["canvas"].draw()
             pop["canvas"].get_tk_widget().pack(fill="both", expand=True)
 
-        def _ajustar():
+        def _preview():
+            """Recalcula el modelo del combo y muestra **en vivo** su diff y gráfico.
+
+            Solo previsualiza: no confirma nada (``pop["modelo"]`` no cambia y
+            «Aplicar» sigue deshabilitado hasta pulsar «Ajustar»).
+            """
             clave = _GEN_ETIQUETAS.get(combo.get(), next(iter(_GEN_ETIQUETAS.values())))
             try:
                 modelo = gencambios.ajustar_modelo(self.app._historia_df, self.app.user_cfg, clave=clave)
-                pop["modelo"] = modelo
-                etiqueta = _GEN_CLAVE_A_ETIQUETA.get(clave, clave)
-                fmin = (modelo.get("fecha_min") or "—")[:10]
-                fmax = (modelo.get("fecha_max") or "—")[:10]
-                lbl_que.configure(text=f"Adaptando «{etiqueta}» · {modelo.get('n_filas', 0)} "
-                                       f"filas de historia · período {fmin} → {fmax}")
-                _render_diff(_parametros_completos(self.app._modelo_gen, umbral),
-                             _parametros_completos(modelo, umbral))
-                _render_chart(seg_modo.get())
-                btn_apply.configure(state="normal")
             except Exception as e:
-                messagebox.showerror("Error", f"No se pudo ajustar/previsualizar: {e}", parent=win)
+                messagebox.showerror("Error", f"No se pudo previsualizar: {e}", parent=win)
+                return
+            pop["preview"] = modelo
+            etiqueta = _GEN_CLAVE_A_ETIQUETA.get(clave, clave)
+            fmin = (modelo.get("fecha_min") or "—")[:10]
+            fmax = (modelo.get("fecha_max") or "—")[:10]
+            lbl_que.configure(text=f"Adaptando «{etiqueta}» · {modelo.get('n_filas', 0)} "
+                                   f"filas de historia · período {fmin} → {fmax}")
+            _render_diff(_parametros_completos(self.app._modelo_gen, umbral),
+                         _parametros_completos(modelo, umbral))
+            _render_chart(seg_modo.get())
+
+        def _on_cambiar_modelo(_v=None):
+            """Cambiar de modelo es **solo previsualizar**: hay que volver a confirmar.
+
+            Resetea el modelo confirmado (deshabilita «Aplicar») para que «Aplicar»
+            nunca guarde un modelo que no se confirmó explícitamente con «Ajustar».
+            """
+            pop["modelo"] = None
+            btn_apply.configure(state="disabled")
+            lbl_estado.configure(text="Previsualización — pulse «Ajustar» para confirmar este modelo.",
+                                 text_color=FG2)
+            _preview()
+
+        def _ajustar():
+            """Confirma (stage) el modelo previsualizado: «Aplicar» guardará solo esto."""
+            if pop["preview"] is None:
+                _preview()
+            if pop["preview"] is None:
+                return
+            pop["modelo"] = pop["preview"]
+            btn_apply.configure(state="normal")
+            lbl_estado.configure(text="✓ Ajuste confirmado — pulse «Aplicar» para guardar.",
+                                 text_color=GREEN)
 
         def _cerrar():
             if pop["fig"] is not None:
@@ -700,11 +735,12 @@ class TabGeneracion(ctk.CTkFrame):
             self.app._log(f"Adaptación aplicada: modelo {pop['modelo']['clave']}.")
             _cerrar()
 
+        combo.configure(command=_on_cambiar_modelo)  # cambiar de modelo previsualiza en vivo
         btn_ajustar.configure(command=_ajustar)
         btn_apply.configure(command=_aplicar)
         btn_cerrar.configure(command=_cerrar)
         win.protocol("WM_DELETE_WINDOW", _cerrar)
-        _ajustar()  # ajuste inicial con el modelo preseleccionado
+        _on_cambiar_modelo()  # preview inicial del modelo preseleccionado (sin confirmar)
 
     def _mostrar_ayuda_modelo(self, parent, etiqueta):
         """Muestra la ayuda del **modelo seleccionado** (no de todos)."""
