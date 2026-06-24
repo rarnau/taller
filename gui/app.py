@@ -99,6 +99,7 @@ class App(ctk.CTk):
 
         self._figs: dict = {}  # {tab_name: Figure} — para cerrar figuras al regenerar
         self._dash_firmas: dict = {}  # {tab_name: firma} — caché para no redibujar sin cambios
+        self._paneles_pendientes: set = set()  # paneles pesados a renderizar al visitarlos (lazy)
 
         self._setup_grid()
         self._create_sidebar()
@@ -185,7 +186,9 @@ class App(ctk.CTk):
         self.slider_progreso.grid(row=10, column=0, padx=20, pady=(0, 8), sticky="ew")
 
     def _create_main_content(self):
-        self.tabview = ctk.CTkTabview(self)
+        # command: al cambiar de pestaña se renderiza (lazy) el panel pesado
+        # recién visible si quedó pendiente (ver _render_tab_visible).
+        self.tabview = ctk.CTkTabview(self, command=self._render_tab_visible)
         self.tabview.grid(row=0, column=1, padx=(10, 10), pady=(0, 10), sticky="nsew")
 
         self.tab_visual = self.tabview.add("Vista Real")
@@ -525,10 +528,30 @@ class App(ctk.CTk):
         return (id(self.taller), len(self.taller.snapshots)) + extra
 
     def _render_paneles(self):
-        """Refresca Dashboard, Análisis y KPIs (preview pre-simulación incluido)."""
-        self._render_dashboard()
-        self._render_analisis()
-        llenar_kpis(self.tab_kpis, self.taller)
+        """Marca los paneles pesados como pendientes y refresca solo el visible.
+
+        Lazy load: Dashboard/Análisis/KPIs no se renderizan hasta que el usuario
+        visita su pestaña (o si ya está visible). Al cambiar de pestaña,
+        ``_render_tab_visible`` (command del CTkTabview) renderiza el pendiente.
+        """
+        self._paneles_pendientes = {"Dashboard", "Análisis", "KPIs"}
+        self._render_tab_visible()
+
+    def _render_tab_visible(self):
+        """Renderiza el panel de la pestaña activa si quedó pendiente (lazy load)."""
+        try:
+            actual = self.tabview.get()
+        except Exception:
+            return
+        if actual not in getattr(self, "_paneles_pendientes", set()):
+            return
+        if actual == "Dashboard":
+            self._render_dashboard()
+        elif actual == "Análisis":
+            self._render_analisis()
+        elif actual == "KPIs":
+            llenar_kpis(self.tab_kpis, self.taller)
+        self._paneles_pendientes.discard(actual)
 
     def _dash_into(self, container, key, func, firma=None):
         # Caché por firma: si los datos no cambiaron y el canvas sigue vivo, no se
