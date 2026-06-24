@@ -217,6 +217,8 @@ class TallerCilindros:
             self.tiempo_enfriado_h = float(cfg["tiempo_enfriado_h"])
         if "max_iteraciones" in cfg:
             self.max_iteraciones = int(cfg["max_iteraciones"])
+        if "estrategia_seleccion" in cfg:
+            self.estrategia_seleccion = str(cfg["estrategia_seleccion"])
         if "estrategia_asignacion" in cfg:
             self.estrategia_asignacion = str(cfg["estrategia_asignacion"])
 

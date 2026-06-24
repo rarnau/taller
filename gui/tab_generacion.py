@@ -22,6 +22,7 @@ import pandas as pd
 from datetime import timedelta
 from tkinter import filedialog, messagebox
 
+import matplotlib.dates as mdates
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
@@ -37,9 +38,12 @@ from config import modelo_generador as modmod
 from modelos import generador_cambios as gencambios
 from modelos.generador_cambios import GENERADORES_CAMBIOS
 from modelos import turnos as turnos_mod
+from config.iconos import GUARDAR, SUBIR_HISTORIA, AJUSTAR, GENERAR, SEED, CARGAR, INFO
 from gui.editor_turnos import abrir_editor_turnos
 from gui.dashboard_principal import _marcar_paradas, formatter_tiempo
 from gui.calendario import SelectorFecha
+from gui.timeline_util import indice_tiempo_mas_cercano
+from gui.animaciones import fade_in
 
 # Generadores: etiqueta visible ↔ clave persistida (la GUI muestra la etiqueta).
 _GEN_ETIQUETAS = {g.etiqueta: clave for clave, g in GENERADORES_CAMBIOS.items()}
@@ -284,6 +288,11 @@ def _fila_fecha(parent, etiqueta):
 class TabGeneracion(ctk.CTkFrame):
     """Editor + generador + timeline del Programa_Cambios sintético."""
 
+    # Por debajo de este ancho (px) las tres tarjetas superiores se apilan a
+    # ancho completo (ver _aplicar_layout_top); tres columnas lado a lado
+    # necesitan ~1150px para no recortar sus widgets.
+    _UMBRAL_APILADO = 1150
+
     def __init__(self, parent, app):
         super().__init__(parent, fg_color="transparent")
         self.app = app
@@ -322,7 +331,7 @@ class TabGeneracion(ctk.CTkFrame):
             text_color=ACCENT, hover_color=BG_CARD,
             command=lambda: abrir_editor_turnos(self, self._turnos_holder, self._btn_turnos))
         self._btn_turnos.pack(side="left", padx=4)
-        ctk.CTkButton(cfg, text="💾 Guardar configuración", height=30,
+        ctk.CTkButton(cfg, text=f"{GUARDAR} Guardar configuración", height=30,
                       fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER,
                       command=self._guardar_config).pack(anchor="w", pady=(8, 0))
 
@@ -331,10 +340,10 @@ class TabGeneracion(ctk.CTkFrame):
         self._chk_reiniciar = ctk.CTkCheckBox(adap, text="reiniciar adaptación (desde cero)",
                                               font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE))
         self._chk_reiniciar.pack(anchor="w", pady=(0, 4))
-        ctk.CTkButton(adap, text="📈 Subir historia", height=30,
+        ctk.CTkButton(adap, text=f"{SUBIR_HISTORIA} Subir historia", height=30,
                       command=self._subir_historia).pack(fill="x", pady=2)
         self._btn_ajustar = ctk.CTkButton(
-            adap, text="🔍 Ver / ajustar adaptación", height=30, state="disabled",
+            adap, text=f"{AJUSTAR} Ver / ajustar adaptación", height=30, state="disabled",
             fg_color="transparent", border_width=1, border_color=ACCENT,
             text_color=ACCENT, hover_color=BG_CARD,
             command=self._abrir_popup_adaptacion)
@@ -352,18 +361,18 @@ class TabGeneracion(ctk.CTkFrame):
                      font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE)).pack(side="left")
         self._entry_seed = ctk.CTkEntry(fila_seed, width=110, justify="center")
         self._entry_seed.pack(side="left", padx=4)
-        ctk.CTkButton(gen, text="▶ Generar cambios", height=34,
+        ctk.CTkButton(gen, text=f"{GENERAR} Generar cambios", height=34,
                       font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD, weight="bold"),
                       fg_color=GREEN, hover_color="#2BB46B",
                       command=self._generar_cambios).pack(fill="x", pady=(4, 2))
         # Botones secundarios al mismo nivel (misma fila).
         fila_sec = ctk.CTkFrame(gen, fg_color="transparent")
         fila_sec.pack(fill="x", pady=2)
-        ctk.CTkButton(fila_sec, text="🎲 Nueva seed", height=30,
+        ctk.CTkButton(fila_sec, text=f"{SEED} Nueva seed", height=30,
                       fg_color="transparent", border_width=1, border_color=ACCENT,
                       text_color=ACCENT, hover_color=BG_CARD,
                       command=self._nueva_seed).pack(side="left", expand=True, fill="x", padx=(0, 3))
-        ctk.CTkButton(fila_sec, text="📁 Subir Excel de cambios", height=30,
+        ctk.CTkButton(fila_sec, text=f"{CARGAR} Subir Excel de cambios", height=30,
                       fg_color="transparent", border_width=1, border_color=ACCENT,
                       text_color=ACCENT, hover_color=BG_CARD,
                       command=self._subir_cambios).pack(side="left", expand=True, fill="x", padx=(3, 0))
@@ -376,7 +385,38 @@ class TabGeneracion(ctk.CTkFrame):
         cont = _card(self, "Timeline de cambios generados (paradas de línea en rojo)",
                      fill="both", expand=True, padx=10, pady=(4, 10))
         self._timeline_holder = cont
+
+        # Layout responsivo de las tres tarjetas superiores: lado a lado cuando
+        # hay ancho, apiladas a ancho completo cuando es angosto (mismo patrón
+        # que tab_config). Se re-empacan en _aplicar_layout_top.
+        self._top = top
+        self._gen_cards = [cfg.master, adap.master, gen.master]
+        self._top_layout_mode = None
+        self._aplicar_layout_top("ancho")  # layout inicial; <Configure> lo ajusta
+        top.bind("<Configure>", self._on_resize_top)
+
         self._nueva_seed()
+
+    # ── Layout responsivo de la fila superior ────────────────────────────
+
+    def _on_resize_top(self, event=None):
+        ancho = event.width if event is not None else self.winfo_width()
+        modo = "ancho" if ancho >= self._UMBRAL_APILADO else "estrecho"
+        if modo != self._top_layout_mode:
+            self._aplicar_layout_top(modo)
+
+    def _aplicar_layout_top(self, modo):
+        """Reparte las tres tarjetas lado a lado ('ancho') o apiladas ('estrecho')."""
+        self._top_layout_mode = modo
+        for card in self._gen_cards:
+            card.pack_forget()
+        if modo == "ancho":
+            pads = [(0, 6), (6, 6), (6, 0)]
+            for card, padx in zip(self._gen_cards, pads):
+                card.pack(side="left", fill="x", expand=True, padx=padx, anchor="n")
+        else:
+            for i, card in enumerate(self._gen_cards):
+                card.pack(side="top", fill="x", anchor="n", pady=(0 if i == 0 else 8, 0))
 
     # ── Refresco desde la configuración ──────────────────────────────────
 
@@ -526,6 +566,8 @@ class TabGeneracion(ctk.CTkFrame):
         self.app._sincronizar_vista_con_taller()
         self.app._refrescar_combo_substocks()
         self.refrescar_timeline()  # sin paradas aún (no se simuló)
+        if hasattr(self.app, "actualizar_indicadores_tabs"):
+            self.app.actualizar_indicadores_tabs()
 
     # ── Popup de previsualización + ajuste del modelo ────────────────────
 
@@ -545,6 +587,7 @@ class TabGeneracion(ctk.CTkFrame):
         win.geometry("820x720")
         win.transient(self.winfo_toplevel())
         win.grab_set()
+        fade_in(win)  # aparición suave del popup
 
         # Estado del popup: `preview` es el modelo del combo recalculado EN VIVO
         # (solo se muestra); `modelo` es el modelo **confirmado** con «Ajustar», que
@@ -562,7 +605,7 @@ class TabGeneracion(ctk.CTkFrame):
         combo.pack(side="left", padx=8)
         btn_ajustar = ctk.CTkButton(top, text="Ajustar", width=90)
         btn_ajustar.pack(side="left", padx=4)
-        ctk.CTkButton(top, text="ⓘ", width=32, fg_color="transparent", border_width=1,
+        ctk.CTkButton(top, text=INFO, width=32, fg_color="transparent", border_width=1,
                       border_color=ACCENT, text_color=ACCENT, hover_color=BG_CARD,
                       command=lambda: self._mostrar_ayuda_modelo(win, combo.get())).pack(side="left", padx=4)
 
@@ -669,6 +712,7 @@ class TabGeneracion(ctk.CTkFrame):
                 return
             pop["canvas"] = FigureCanvasTkAgg(pop["fig"], master=chart_holder)
             pop["canvas"].draw()
+            conectar_zoom(pop["canvas"])
             pop["canvas"].get_tk_widget().pack(fill="both", expand=True)
 
         def _preview():
@@ -818,7 +862,11 @@ class TabGeneracion(ctk.CTkFrame):
         self._fig = self._construir_figura(cambios, self.app.taller, pickable_paradas=True)
         self._canvas = FigureCanvasTkAgg(self._fig, master=self._timeline_holder)
         self._canvas.mpl_connect("pick_event", self._on_pick_parada)
+        # Clic simple en cualquier punto del timeline ⇒ saltar al momento más
+        # cercano (el doble clic queda para el reset de zoom de mpl_zoom).
+        self._canvas.mpl_connect("button_press_event", self._on_click_timeline)
         self._canvas.draw()
+        conectar_zoom(self._canvas)
         self._canvas.get_tk_widget().pack(fill="both", expand=True)
 
     def _on_pick_parada(self, event):
@@ -829,6 +877,25 @@ class TabGeneracion(ctk.CTkFrame):
         snap_idx = idx_map[event.ind[0]]
         if hasattr(self.app, "ir_a_momento"):
             self.app.ir_a_momento(snap_idx)
+
+    def _on_click_timeline(self, event):
+        """Clic simple en el timeline: salta la reproducción al snapshot más cercano.
+
+        Mapea la coordenada temporal clickeada (eje X) al snapshot de tiempo más
+        próximo y delega en ``app.ir_a_momento`` (que muestra la Vista Real). El
+        doble clic se ignora aquí porque lo usa el reset de zoom (gui/mpl_zoom).
+        """
+        if getattr(event, "dblclick", False):
+            return
+        if event.inaxes is None or event.xdata is None:
+            return
+        snaps = self.app.taller.snapshots
+        if not snaps:
+            return
+        clic = mdates.num2date(event.xdata).replace(tzinfo=None)
+        idx = indice_tiempo_mas_cercano([s.tiempo for s in snaps], clic)
+        if idx is not None and hasattr(self.app, "ir_a_momento"):
+            self.app.ir_a_momento(idx)
 
     def _construir_figura(self, cambios, taller, figsize=(16, 5), pickable_paradas=False):
         """Figura del timeline: un punto por cambio (por jaula) + paradas en rojo.

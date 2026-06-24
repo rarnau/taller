@@ -15,9 +15,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pandas as pd
 
 from config.tema import *
-from config.persistencia import cargar_config
+from config.persistencia import cargar_config, obtener_estrategia_seleccion
 from config import modelo_generador as modmod
-from modelos.estrategias import ESTRATEGIAS_SELECCION
+from config.iconos import ATRAS, STOP, ADELANTE, PLAY, PAUSE
 from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
 from cli import (init_worker_simulacion, simular_cambios_worker, ctx_paralelo)
@@ -33,6 +33,9 @@ from gui.tab_kpis import llenar_kpis
 from gui.tab_config import crear_tab_configuracion
 from gui.tab_generacion import crear_tab_generacion
 from gui.tab_generacion import _inicios_parada
+from gui.mpl_zoom import conectar_zoom
+from gui.dpi import factor_escala_dpi
+from gui.animaciones import fade_in
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -72,6 +75,20 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        # Escala automática en alta DPI. El rescalado por-monitor de CTk está
+        # desactivado (deactivate_automatic_dpi_awareness, arriba) para evitar el
+        # crash del dropdown; en su lugar aplicamos UNA escala fija derivada del
+        # DPI de la pantalla. Con DPI estándar (96) el factor es 1.0 (idéntico al
+        # comportamiento previo); en pantallas densas agranda widgets y ventana.
+        # Se hace antes de geometry() para que el tamaño contemple la escala.
+        try:
+            factor = factor_escala_dpi(self.winfo_fpixels("1i"))
+            if abs(factor - 1.0) > 0.01:
+                ctk.set_widget_scaling(factor)
+                ctk.set_window_scaling(factor)
+        except Exception:  # noqa: BLE001 — si la detección falla, seguimos a escala 1
+            pass
+
         # Configuración de ventana
         self.title("Simulador de Cilindros Pro v4")
         self.geometry("1400x900")
@@ -98,11 +115,46 @@ class App(ctk.CTk):
         self.velocidad_reproduccion = 1.0
 
         self._figs: dict = {}  # {tab_name: Figure} — para cerrar figuras al regenerar
+        self._dash_firmas: dict = {}  # {tab_name: firma} — caché para no redibujar sin cambios
+        self._paneles_pendientes: set = set()  # paneles pesados a renderizar al visitarlos (lazy)
 
         self._setup_grid()
         self._create_sidebar()
         self._create_main_content()
         self._create_status_bar()
+        self._crear_atajos()
+
+        # Aparición suave de la ventana principal (fade-in de opacidad). No-op si
+        # el sistema no soporta -alpha (p. ej. X11 sin compositor).
+        fade_in(self)
+
+    def _crear_atajos(self):
+        """Atajos de teclado globales: Ctrl+S guardar config, Ctrl+L cargar
+        stock, Ctrl+R ejecutar simulación. ``bind_all`` para que funcionen sin
+        importar qué widget tenga el foco."""
+        self.bind_all("<Control-s>", lambda _e: self._atajo_guardar_config())
+        self.bind_all("<Control-l>", lambda _e: self._atajo_cargar_stock())
+        self.bind_all("<Control-r>", lambda _e: self._atajo_simular())
+
+    def _atajo_guardar_config(self):
+        """Ctrl+S: guarda la configuración y muestra la pestaña para ver el resultado."""
+        if getattr(self, "cfg_widget", None) is not None:
+            self.tabview.set("Configuración")
+            self.cfg_widget._guardar()
+        return "break"
+
+    def _atajo_cargar_stock(self):
+        """Ctrl+L: abre el diálogo de carga de stock (pestaña Inventario)."""
+        if getattr(self, "inv_widget", None) is not None:
+            self.tabview.set("Inventario")
+            self.inv_widget._cargar_stock()
+        return "break"
+
+    def _atajo_simular(self):
+        """Ctrl+R: ejecuta la simulación (respeta las precondiciones de _simular)."""
+        if not getattr(self, "_simulando", False):
+            self._simular()
+        return "break"
 
     def _setup_grid(self):
         self.grid_columnconfigure(1, weight=1)
@@ -117,16 +169,9 @@ class App(ctk.CTk):
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
         # El stock se carga desde la pestaña Inventario y los cambios desde
-        # Generación; el sidebar solo dispara la simulación y exporta.
-        self.label_estrat = ctk.CTkLabel(self.sidebar, text="Estrategia de rectificado:", anchor="w")
-        self.label_estrat.grid(row=2, column=0, padx=20, pady=(10, 0))
-        # El combo muestra etiquetas legibles; se mapean a la clave de estrategia
-        # que espera el motor. Ambas se derivan del registro ESTRATEGIAS_SELECCION.
-        self._estrat_por_etiqueta = {e.etiqueta: clave for clave, e in ESTRATEGIAS_SELECCION.items()}
-        self.combo_est = ctk.CTkComboBox(self.sidebar, values=list(self._estrat_por_etiqueta.keys()))
-        self.combo_est.set(ESTRATEGIAS_SELECCION["mayor_diametro"].etiqueta)
-        self.combo_est.grid(row=3, column=0, padx=20, pady=10)
-
+        # Generación; el sidebar solo dispara la simulación y exporta. La
+        # estrategia de rectificado vive ahora en la pestaña Configuración
+        # (persistida en user_config.json) y se lee desde allí al simular.
         self.btn_simular = ctk.CTkButton(self.sidebar, text="Ejecutar Simulación", fg_color=GREEN, hover_color="#2BB46B", command=self._simular)
         self.btn_simular.grid(row=4, column=0, padx=20, pady=10)
 
@@ -148,15 +193,15 @@ class App(ctk.CTk):
         self.repro_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.repro_frame.grid(row=7, column=0, padx=20, pady=(20, 4))
 
-        self.btn_paso_atras = ctk.CTkButton(self.repro_frame, text="⏪", width=40,
+        self.btn_paso_atras = ctk.CTkButton(self.repro_frame, text=ATRAS, width=40,
                                             command=lambda: self._paso(-1))
         self.btn_paso_atras.grid(row=0, column=0, padx=3)
-        self.btn_play = ctk.CTkButton(self.repro_frame, text="▶ Play", width=64,
+        self.btn_play = ctk.CTkButton(self.repro_frame, text=f"{PLAY} Play", width=64,
                                       command=self._toggle_playback)
         self.btn_play.grid(row=0, column=1, padx=3)
-        self.btn_stop = ctk.CTkButton(self.repro_frame, text="⏹", width=40, command=self._stop_playback)
+        self.btn_stop = ctk.CTkButton(self.repro_frame, text=STOP, width=40, command=self._stop_playback)
         self.btn_stop.grid(row=0, column=2, padx=3)
-        self.btn_paso_adelante = ctk.CTkButton(self.repro_frame, text="⏩", width=40,
+        self.btn_paso_adelante = ctk.CTkButton(self.repro_frame, text=ADELANTE, width=40,
                                                command=lambda: self._paso(1))
         self.btn_paso_adelante.grid(row=0, column=3, padx=3)
 
@@ -175,21 +220,25 @@ class App(ctk.CTk):
         # Marcadores de parada: una franja fina sobre el slider con un punto por
         # cada inicio de PARADA; al clickear salta la reproducción a ese momento.
         bg_sidebar = self.sidebar._apply_appearance_mode(self.sidebar.cget("fg_color"))
-        self.parada_canvas = tk.Canvas(self.sidebar, height=12, highlightthickness=0,
+        self.parada_canvas = tk.Canvas(self.sidebar, height=9, highlightthickness=0,
                                        bg=bg_sidebar)
-        self.parada_canvas.grid(row=9, column=0, padx=20, pady=(8, 0), sticky="ew")
+        self.parada_canvas.grid(row=9, column=0, padx=20, pady=(6, 0), sticky="ew")
         self.parada_canvas.bind("<Button-1>", self._click_parada_canvas)
         self.parada_canvas.bind("<Configure>", lambda _e: self._redibujar_paradas_sidebar())
         self._paradas_sidebar: list = []  # [(idx, x_px)] de los marcadores dibujados
 
         # sticky="ew" para que el slider ocupe el mismo ancho que la franja de
         # marcadores (mismo padx) y los puntos de parada queden alineados con él.
-        self.slider_progreso = ctk.CTkSlider(self.sidebar, from_=0, to=100, command=self._seek_simulation)
+        # height/button_length reducidos: barra temporal un poco más compacta.
+        self.slider_progreso = ctk.CTkSlider(self.sidebar, from_=0, to=100, height=12,
+                                              button_length=6, command=self._seek_simulation)
         self.slider_progreso.set(0)
-        self.slider_progreso.grid(row=10, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.slider_progreso.grid(row=10, column=0, padx=20, pady=(0, 8), sticky="ew")
 
     def _create_main_content(self):
-        self.tabview = ctk.CTkTabview(self)
+        # command: al cambiar de pestaña se renderiza (lazy) el panel pesado
+        # recién visible si quedó pendiente (ver _render_tab_visible).
+        self.tabview = ctk.CTkTabview(self, command=self._render_tab_visible)
         self.tabview.grid(row=0, column=1, padx=(10, 10), pady=(0, 10), sticky="nsew")
 
         self.tab_visual = self.tabview.add("Vista Real")
@@ -234,6 +283,68 @@ class App(ctk.CTk):
         # más el banner "Se mostrarán datos una vez corrida la simulación".
         self._render_paneles()
 
+        # Estrellas iniciales en las pestañas que requieren acción del usuario.
+        self.actualizar_indicadores_tabs()
+
+    def _marcar_tab(self, nombre: str, incompleto: bool):
+        """Agrega/quita un indicador ★ en la pestaña ``nombre`` (sin cambiar su clave).
+
+        Accede al botón del segmented button de CTkTabview (API privada): si la
+        estructura cambia en una versión futura, degrada a no-op (como los guards DPI).
+        """
+        try:
+            btn = self.tabview._segmented_button._buttons_dict[nombre]
+        except Exception:
+            return
+        # Captura del color de texto por defecto la primera vez (antes de pintarlo
+        # de rojo), para poder restaurarlo al volver a "completo" sin quedar rojo.
+        if not hasattr(self, "_tab_text_color_def"):
+            self._tab_text_color_def = {}
+        if nombre not in self._tab_text_color_def:
+            try:
+                self._tab_text_color_def[nombre] = btn.cget("text_color")
+            except Exception:
+                self._tab_text_color_def[nombre] = None
+        texto = f"{nombre}  ★" if incompleto else nombre
+        color = RED if incompleto else self._tab_text_color_def.get(nombre)
+        try:
+            if color is not None:
+                btn.configure(text=texto, text_color=color)
+            else:
+                btn.configure(text=texto)
+        except Exception:
+            try:
+                btn.configure(text=texto)
+            except Exception:
+                pass
+
+    def actualizar_indicadores_tabs(self):
+        """Marca como incompletas las pestañas que requieren acción del usuario."""
+        from config.persistencia import problemas_coherencia
+        self._marcar_tab("Inventario", self._stock_df is None)
+        self._marcar_tab("Generación de Cambios", self._cambios_generados is None)
+        self._marcar_tab("Configuración", bool(problemas_coherencia(self.user_cfg)))
+        # Mismo fan-out: refrescar el estado (habilitado/deshabilitado) de los
+        # botones de acción cada vez que cambia el estado de los datos.
+        self._actualizar_estado_botones()
+
+    def _actualizar_estado_botones(self):
+        """Habilita/deshabilita los botones de acción según las precondiciones.
+
+        'Ejecutar Simulación' requiere stock + cambios cargados y que no haya una
+        corrida en curso; 'Exportar Resultados' requiere snapshots de una
+        simulación previa. Evita que el usuario dispare acciones sin sentido.
+        """
+        if not hasattr(self, "btn_simular"):
+            return
+        simulando = getattr(self, "_simulando", False)
+        puede_simular = (self._stock_df is not None
+                         and self._cambios_generados is not None
+                         and not simulando)
+        self.btn_simular.configure(state="normal" if puede_simular else "disabled")
+        hay_snaps = bool(getattr(self.taller, "snapshots", None))
+        self.btn_exportar.configure(state="normal" if hay_snaps else "disabled")
+
     def _create_status_bar(self):
         self.status_bar = ctk.CTkFrame(self, height=25, corner_radius=0)
         self.status_bar.grid(row=1, column=0, columnspan=2, sticky="ew")
@@ -276,6 +387,7 @@ class App(ctk.CTk):
             # Stock nuevo ⇒ se descartan los cambios: limpiar el timeline.
             if getattr(self, "gen_widget", None) is not None:
                 self.gen_widget.refrescar_timeline()
+            self.actualizar_indicadores_tabs()
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar el stock: {e}")
 
@@ -296,11 +408,11 @@ class App(ctk.CTk):
             self.cfg_widget._limpiar_feedback()
 
         self._simulando = True
-        self.btn_simular.configure(state="disabled")
+        self._actualizar_estado_botones()  # deshabilita 'Ejecutar' durante la corrida
         self.status_label.configure(text="Simulando...")
         self._mostrar_progreso(True)
 
-        estrat = self._estrat_por_etiqueta.get(self.combo_est.get(), "mayor_diametro")
+        estrat = obtener_estrategia_seleccion(self.user_cfg)
         cambios = self._cambios_generados
         if cambios is None:
             cambios = pd.DataFrame(columns=gencambios.COLUMNAS_SALIDA)
@@ -348,7 +460,7 @@ class App(ctk.CTk):
     def _simular_error(self, e):
         self._simulando = False
         self._mostrar_progreso(False)
-        self.btn_simular.configure(state="normal")
+        self._actualizar_estado_botones()
         self.status_label.configure(text="Error en la simulación")
         messagebox.showerror("Error", f"No se pudo ejecutar la simulación: {e}")
 
@@ -382,8 +494,10 @@ class App(ctk.CTk):
             self.gen_widget.refrescar_timeline()
         self._log("Simulación finalizada. Use los controles de reproducción para ver los resultados.")
 
-        self.btn_simular.configure(state="normal")
+        # Marcar la corrida como terminada ANTES del fan-out, para que
+        # _actualizar_estado_botones rehabilite 'Ejecutar' (no la ve en curso).
         self._simulando = False
+        self.actualizar_indicadores_tabs()
 
     def _redibujar_paradas_sidebar(self):
         """Dibuja un punto por cada inicio de PARADA sobre el slider del sidebar."""
@@ -402,7 +516,7 @@ class App(ctk.CTk):
             return
         for _t, idx in _inicios_parada(snaps):
             x = (idx / (n - 1)) * (ancho - 1)
-            cv.create_polygon(x - 4, 1, x + 4, 1, x, 9, fill=RED, outline=RED_DARK)
+            cv.create_polygon(x - 3, 1, x + 3, 1, x, 7, fill=RED, outline=RED_DARK)
             self._paradas_sidebar.append((idx, x))
 
     def _click_parada_canvas(self, event):
@@ -415,7 +529,7 @@ class App(ctk.CTk):
     def _sincronizar_vista_con_taller(self) -> None:
         """Actualiza los frames de Vista Real con las jaulas y máquinas del taller cargado."""
         self.hint_inicio.grid_remove()  # ya hay datos: ocultar el hint guía del sidebar
-        estrat = self._estrat_por_etiqueta.get(self.combo_est.get(), "mayor_diametro")
+        estrat = obtener_estrategia_seleccion(self.user_cfg)
         self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
         self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))
         self.vista_rt.set_estrategia(estrat)
@@ -445,19 +559,56 @@ class App(ctk.CTk):
         sel = self.combo_dash_ss.get()
         substock = None if sel == "Global" else sel
         self._dash_into(self.dash_holder, "dashboard",
-                        lambda t: crear_dashboard_principal(t, substock=substock))
+                        lambda t: crear_dashboard_principal(t, substock=substock),
+                        firma=self._firma_datos(substock))
 
     def _render_analisis(self):
         """Renderiza la pestaña Análisis (preview vacío + banner si aún no se simuló)."""
-        self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle)
+        self._dash_into(self.tab_det, "analisis", crear_dashboard_detalle,
+                        firma=self._firma_datos())
+
+    def _firma_datos(self, *extra):
+        """Firma de los datos que alimentan un gráfico (para cachear el render).
+
+        ``(id(taller), nº snapshots, *extra)`` captura toda diferencia *visible*:
+        el taller cambia de identidad al simular (vuelve por pickle), y el nº de
+        snapshots distingue cargar stock (0) de un resultado (N). ``extra`` agrega
+        parámetros propios del gráfico (p. ej. el SubStock seleccionado).
+        """
+        return (id(self.taller), len(self.taller.snapshots)) + extra
 
     def _render_paneles(self):
-        """Refresca Dashboard, Análisis y KPIs (preview pre-simulación incluido)."""
-        self._render_dashboard()
-        self._render_analisis()
-        llenar_kpis(self.tab_kpis, self.taller)
+        """Marca los paneles pesados como pendientes y refresca solo el visible.
 
-    def _dash_into(self, container, key, func):
+        Lazy load: Dashboard/Análisis/KPIs no se renderizan hasta que el usuario
+        visita su pestaña (o si ya está visible). Al cambiar de pestaña,
+        ``_render_tab_visible`` (command del CTkTabview) renderiza el pendiente.
+        """
+        self._paneles_pendientes = {"Dashboard", "Análisis", "KPIs"}
+        self._render_tab_visible()
+
+    def _render_tab_visible(self):
+        """Renderiza el panel de la pestaña activa si quedó pendiente (lazy load)."""
+        try:
+            actual = self.tabview.get()
+        except Exception:
+            return
+        if actual not in getattr(self, "_paneles_pendientes", set()):
+            return
+        if actual == "Dashboard":
+            self._render_dashboard()
+        elif actual == "Análisis":
+            self._render_analisis()
+        elif actual == "KPIs":
+            llenar_kpis(self.tab_kpis, self.taller)
+        self._paneles_pendientes.discard(actual)
+
+    def _dash_into(self, container, key, func, firma=None):
+        # Caché por firma: si los datos no cambiaron y el canvas sigue vivo, no se
+        # reconstruye la figura (evita redibujar el dashboard sin necesidad).
+        if (firma is not None and self._dash_firmas.get(key) == firma
+                and key in self._figs and container.winfo_children()):
+            return
         # Cerrar figura anterior para liberar memoria
         if key in self._figs:
             plt.close(self._figs[key])
@@ -465,8 +616,10 @@ class App(ctk.CTk):
             w.destroy()
         fig = func(self.taller)
         self._figs[key] = fig
+        self._dash_firmas[key] = firma
         cv = FigureCanvasTkAgg(fig, master=container)
         cv.draw()
+        conectar_zoom(cv)
         cv.get_tk_widget().pack(fill="both", expand=True)
 
     def _toggle_playback(self):
@@ -476,17 +629,17 @@ class App(ctk.CTk):
 
         if self.reproduciendo:
             self.reproduciendo = False
-            self.btn_play.configure(text="▶ Play")
+            self.btn_play.configure(text=f"{PLAY} Play")
         else:
             self.reproduciendo = True
-            self.btn_play.configure(text="⏸ Pause")
+            self.btn_play.configure(text=f"{PAUSE} Pause")
             self._playback_tick()
 
     def _stop_playback(self):
         self.reproduciendo = False
         self.snapshot_actual_idx = 0
         self.slider_progreso.set(0)
-        self.btn_play.configure(text="▶ Play")
+        self.btn_play.configure(text=f"{PLAY} Play")
         self._update_realtime_view()
 
     def _seek_simulation(self, value):
@@ -504,7 +657,7 @@ class App(ctk.CTk):
             self.after(ms, self._playback_tick)
         else:
             self.reproduciendo = False
-            self.btn_play.configure(text="▶ Play")
+            self.btn_play.configure(text=f"{PLAY} Play")
 
     def _update_realtime_view(self):
         if self.snapshot_actual_idx < len(self.taller.snapshots):
@@ -536,7 +689,7 @@ class App(ctk.CTk):
         if not self.taller.snapshots:
             return
         self.reproduciendo = False
-        self.btn_play.configure(text="▶ Play")
+        self.btn_play.configure(text=f"{PLAY} Play")
         n = len(self.taller.snapshots)
         self.snapshot_actual_idx = max(0, min(n - 1, self.snapshot_actual_idx + delta))
         self._update_realtime_view()
@@ -550,7 +703,7 @@ class App(ctk.CTk):
             return
         n = len(self.taller.snapshots)
         self.reproduciendo = False
-        self.btn_play.configure(text="▶ Play")
+        self.btn_play.configure(text=f"{PLAY} Play")
         self.snapshot_actual_idx = max(0, min(n - 1, int(idx)))
         self._update_realtime_view()
         self.tabview.set("Vista Real")

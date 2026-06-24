@@ -15,6 +15,8 @@ import customtkinter as ctk
 import pandas as pd
 
 from config.tema import (BG_CARD, FG, FG2, ACCENT, BTN_BLUE, BTN_BLUE_HOVER, TABLE_ROW_COLORS)
+from config.iconos import CARGAR, DESCARGAR
+from gui.orden_tabla import ordenar_filas
 
 _VISTA_INICIAL = "Stock inicial"
 _VISTA_FINAL = "Stock final"
@@ -36,6 +38,8 @@ class TabInventario(ctk.CTkFrame):
         self._filtros_col: dict = {}
         self._filtro_panel = None    # panel inline de filtro abierto (o None)
         self._filtro_binds = False   # binds de cierre creados una sola vez
+        self._sort_col = None        # columna de orden activo (o None)
+        self._sort_desc = False      # sentido del orden (True = descendente)
         self._construir()
         self.refrescar()
 
@@ -45,7 +49,7 @@ class TabInventario(ctk.CTkFrame):
         toolbar = ctk.CTkFrame(self, fg_color="transparent")
         toolbar.pack(fill="x", padx=10, pady=10)
 
-        ctk.CTkButton(toolbar, text="📁 Cargar stock", width=130,
+        ctk.CTkButton(toolbar, text=f"{CARGAR} Cargar stock", width=130,
                       fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER,
                       command=self._cargar_stock).pack(side="left", padx=(0, 16))
 
@@ -55,10 +59,10 @@ class TabInventario(ctk.CTkFrame):
                         values=[_VISTA_INICIAL, _VISTA_FINAL],
                         command=lambda _v: self._on_cambiar_vista()).pack(side="left", padx=(0, 16))
 
-        ctk.CTkLabel(toolbar, text="Filtros: clic en una cabecera ▾",
+        ctk.CTkLabel(toolbar, text="Orden: clic en cabecera ▲▼  ·  Filtro: clic derecho",
                      text_color=FG2).pack(side="left")
 
-        ctk.CTkButton(toolbar, text="⬇ Descargar Excel", width=150,
+        ctk.CTkButton(toolbar, text=f"{DESCARGAR} Descargar Excel", width=150,
                       fg_color="transparent", border_width=1, border_color=ACCENT,
                       text_color=ACCENT, hover_color=BG_CARD,
                       command=self._descargar).pack(side="right")
@@ -84,6 +88,10 @@ class TabInventario(ctk.CTkFrame):
         self._tree.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
         self._tree.pack(fill="both", expand=True)
+
+        # Clic derecho en una cabecera abre el filtro de esa columna (el clic
+        # izquierdo, configurado por columna en _actualizar_headings, ordena).
+        self._tree.bind("<Button-3>", self._on_click_derecho_cabecera)
 
         # Re-render al volver visible la pestaña: ttk.Treeview llenado mientras
         # estaba oculta (p. ej. tras simular en otra pestaña) puede pintarse mal.
@@ -145,6 +153,7 @@ class TabInventario(ctk.CTkFrame):
     def _on_cambiar_vista(self):
         self._cerrar_filtro()
         self._filtros_col = {}  # columnas distintas por vista: se reinician los filtros
+        self._sort_col, self._sort_desc = None, False  # también el orden (cambian las columnas)
         self._rerender()
 
     def _rerender(self):
@@ -172,13 +181,31 @@ class TabInventario(ctk.CTkFrame):
             self._rerender()
 
     def _actualizar_headings(self):
-        """Texto de cabecera (con ▾ si hay filtro) + binding de click por columna."""
+        """Texto de cabecera (orden ▲/▼ + filtro ▾) + binding de click por columna.
+
+        El clic izquierdo ordena (``_ordenar``); el filtro se abre con clic derecho.
+        """
         for c in self._columnas():
+            orden = " ▲" if c == self._sort_col and not self._sort_desc else (
+                " ▼" if c == self._sort_col and self._sort_desc else "")
             marca = "  ▾" if self._filtros_col.get(c) else ""
-            self._tree.heading(c, text=c + marca, command=lambda col=c: self._abrir_filtro(col))
+            self._tree.heading(c, text=c + orden + marca,
+                               command=lambda col=c: self._ordenar(col))
+
+    def _ordenar(self, col):
+        """Cicla el orden de ``col``: 1º ascendente, 2º descendente, 3º sin orden."""
+        if self._sort_col != col:
+            self._sort_col, self._sort_desc = col, False     # 1er clic: ascendente
+        elif not self._sort_desc:
+            self._sort_desc = True                           # 2º clic: descendente
+        else:
+            self._sort_col, self._sort_desc = None, False    # 3er clic: sin orden
+        self._actualizar_headings()
+        self._fill()
 
     def _fill(self):
         cols, filas = self._filas_filtradas()
+        filas = ordenar_filas(cols, filas, self._sort_col, self._sort_desc)
         self._tree.delete(*self._tree.get_children())
         idx_estado = cols.index("Estado") if "Estado" in cols else None
         for fila in filas:
@@ -191,6 +218,18 @@ class TabInventario(ctk.CTkFrame):
             self._lbl_count.set(f"{len(filas)} cilindros")
 
     # ── Filtro de columna (estilo Excel) ─────────────────────────────────
+
+    def _on_click_derecho_cabecera(self, event):
+        """Clic derecho sobre una cabecera: abre el filtro de esa columna."""
+        if self._tree.identify_region(event.x, event.y) != "heading":
+            return
+        col_id = self._tree.identify_column(event.x)  # '#1', '#2', ...
+        if not col_id:
+            return
+        idx = int(col_id.replace("#", "")) - 1
+        cols = self._columnas()
+        if 0 <= idx < len(cols):
+            self._abrir_filtro(cols[idx])
 
     def _abrir_filtro(self, col):
         """Panel **inline** (sin popup) con búsqueda + checklist de valores de ``col``.

@@ -13,6 +13,7 @@ import customtkinter as ctk
 
 from config.tema import (BG2, BG3, BG_CARD, FG, FG2, ACCENT, BTN_BLUE,
                          BTN_BLUE_HOVER, FONT_FAMILY, FONT_SIZE)
+from config.iconos import CALENDARIO
 
 _DIAS = ["L", "M", "X", "J", "V", "S", "D"]
 _MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
@@ -26,7 +27,7 @@ class SelectorFecha(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self._entry = ctk.CTkEntry(self, width=width, justify="center")
         self._entry.pack(side="left")
-        ctk.CTkButton(self, text="📅", width=30, fg_color="transparent",
+        ctk.CTkButton(self, text=CALENDARIO, width=30, fg_color="transparent",
                       border_width=1, border_color=ACCENT, text_color=ACCENT,
                       hover_color=BG_CARD, command=self._toggle).pack(side="left", padx=(4, 0))
         self._entry.bind("<Button-1>", lambda _e: self._abrir())

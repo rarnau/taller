@@ -3,6 +3,7 @@ Componentes visuales para la representación en tiempo real del taller.
 """
 import customtkinter as ctk
 from config.tema import *
+from config.iconos import PARADA, OPERATIVA, FUERA_TURNO
 
 
 # Alto (px) del área de cada barra del gráfico de stock disponible por jaula.
@@ -69,7 +70,7 @@ class SeccionTaller(ctk.CTkFrame):
         self.parada = parada
         if parada:
             self.configure(border_color=RED, border_width=3)
-            self.titulo.configure(text="⛔ PARADA", text_color=RED)
+            self.titulo.configure(text=f"{PARADA} PARADA", text_color=RED)
         else:
             self.configure(border_color=self._color_borde_orig, border_width=2)
             self.titulo.configure(text=self._titulo_orig, text_color=FG)
@@ -360,12 +361,12 @@ class VistaRealTime(ctk.CTkScrollableFrame):
             elif operativa:
                 # Libre y dentro de turno: disponible para tomar trabajo.
                 w["prog"].set(0)
-                w["label"].configure(text="● Libre\n(operativa)", text_color=GREEN)
+                w["label"].configure(text=f"{OPERATIVA} Libre\n(operativa)", text_color=GREEN)
                 w["prog"].configure(progress_color="gray")
                 w["outer"].configure(border_color=GREEN)
             else:
                 # Libre pero fuera de turno: parada por régimen de trabajo.
                 w["prog"].set(0)
-                w["label"].configure(text="⏸ Fuera de turno", text_color=RED)
+                w["label"].configure(text=f"{FUERA_TURNO} Fuera de turno", text_color=RED)
                 w["prog"].configure(progress_color=RED_DARK)
                 w["outer"].configure(border_color=RED_DARK)

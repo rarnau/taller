@@ -9,16 +9,18 @@ configuración.
 import customtkinter as ctk
 
 from config.tema import (
-    BG_CARD, FG, FG2, ACCENT, GREEN, RED, FONT_FAMILY,
+    BG_CARD, FG, FG2, ACCENT, GREEN, RED, YELLOW, FONT_FAMILY,
     FONT_SIZE, FONT_SIZE_MD, FONT_SIZE_LG, BTN_BLUE, BTN_BLUE_HOVER,
 )
+from config.iconos import GUARDAR, ELIMINAR
+from gui.validacion_config import _estado_validacion
 from config.persistencia import (
     guardar_config, obtener_rangos, obtener_maquinas, obtener_config_global,
     obtener_tiempo_enfriado, obtener_max_iteraciones, verificar_coherencia,
-    obtener_estrategia_asignacion,
+    obtener_estrategia_asignacion, obtener_estrategia_seleccion,
 )
 from modelos.enums import TipoRectificado
-from modelos.estrategias import ESTRATEGIAS_ASIGNACION
+from modelos.estrategias import ESTRATEGIAS_ASIGNACION, ESTRATEGIAS_SELECCION
 from modelos import turnos as turnos_mod
 from gui.editor_turnos import abrir_editor_turnos
 
@@ -27,6 +29,9 @@ _TIPOS_RECT = [t.value for t in TipoRectificado]
 # de selección en gui/app.py). La GUI muestra la etiqueta y guarda la clave.
 _ASIGNACION_ETIQUETAS = {e.etiqueta: clave for clave, e in ESTRATEGIAS_ASIGNACION.items()}
 _ASIGNACION_CLAVE_A_ETIQUETA = {clave: e.etiqueta for clave, e in ESTRATEGIAS_ASIGNACION.items()}
+# Estrategias de selección de la cola de rectificado: etiqueta visible ↔ clave.
+_SELECCION_ETIQUETAS = {e.etiqueta: clave for clave, e in ESTRATEGIAS_SELECCION.items()}
+_SELECCION_CLAVE_A_ETIQUETA = {clave: e.etiqueta for clave, e in ESTRATEGIAS_SELECCION.items()}
 
 
 def _card(parent, titulo, subtitulo=None):
@@ -89,6 +94,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         # Entries de parámetros de simulación
         self._entry_max_iter = None
         self._combo_asignacion = None
+        self._combo_seleccion = None
         self._label_estado = None
         self._feedback_after = None   # id del timer que borra el feedback transitorio
 
@@ -119,7 +125,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         cuerpo_g = _card(
             col_izq,
             "Parámetros Globales del Taller",
-            "Rango de diámetro útil, traslado al CRC, cantidad de jaulas, tiempo de enfriado y estrategia de asignación.",
+            "Rango de diámetro útil, traslado al CRC, cantidad de jaulas, tiempo de enfriado, estrategia de rectificado y de asignación.",
         )
         self._e_diam_max = _fila_param(cuerpo_g, "Diámetro máximo (mm)")
         self._e_diam_min = _fila_param(cuerpo_g, "Diámetro mínimo (mm)", "bajo este, el cilindro es BAJA")
@@ -131,6 +137,17 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._e_jaulas.bind("<FocusOut>", self._on_cambio_cantidad_jaulas)
         self._e_jaulas.bind("<Return>", self._on_cambio_cantidad_jaulas)
         self._entry_enfriado = _fila_param(cuerpo_g, "Tiempo de enfriado (h)", "0 = sin enfriado")
+
+        # Estrategia de selección de la cola de rectificado (combo etiqueta↔clave).
+        fila_sel = ctk.CTkFrame(cuerpo_g, fg_color="transparent")
+        fila_sel.pack(fill="x", pady=3)
+        ctk.CTkLabel(
+            fila_sel, text="Estrategia de rectificado", width=220, anchor="w", text_color=FG,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
+        ).pack(side="left", padx=4)
+        self._combo_seleccion = ctk.CTkComboBox(
+            fila_sel, values=list(_SELECCION_ETIQUETAS.keys()), width=240, state="readonly")
+        self._combo_seleccion.pack(side="left", padx=4)
 
         # Estrategia de asignación de jaula destino (combo etiqueta↔clave).
         fila_asig = ctk.CTkFrame(cuerpo_g, fg_color="transparent")
@@ -211,7 +228,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         footer.pack(fill="x", padx=4, pady=(4, 20))
 
         ctk.CTkButton(
-            footer, text="💾  Guardar configuración", height=40, width=220,
+            footer, text=f"{GUARDAR}  Guardar configuración", height=40, width=220,
             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD, weight="bold"),
             fg_color=BTN_BLUE, hover_color=BTN_BLUE_HOVER,
             command=self._guardar,
@@ -222,6 +239,42 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
         )
         self._label_estado.pack(side="left", padx=16)
+
+        # Validación en vivo: <KeyRelease> en TODOS los entries de globales.
+        # OJO: los binds de cantidad de jaulas (<FocusOut>/<Return> →
+        # _on_cambio_cantidad_jaulas) se conservan; acá solo se AGREGA <KeyRelease>.
+        self._entries_globales = [
+            self._e_diam_max, self._e_diam_min, self._e_crc, self._e_jaulas,
+            self._entry_enfriado, self._entry_max_iter,
+        ]
+        # Color de borde por defecto de un CTkEntry, para restaurarlo cuando es válido.
+        try:
+            self._border_normal = self._e_diam_max.cget("border_color")
+        except Exception:
+            self._border_normal = FG2
+        for e in self._entries_globales:
+            e.bind("<KeyRelease>", self._validar_en_vivo)
+
+        # Navegación mejorada: Enter avanza al siguiente campo del formulario en
+        # orden lógico (el Tab nativo ya sigue el orden de creación = visual).
+        self._encadenar_enter(self._entries_globales)
+
+    def _encadenar_enter(self, entries):
+        """Bindea Enter en cada entry para mover el foco al siguiente de la lista.
+
+        Cadena explícita (no ``tk_focusNext``, que con CTkEntry saltaría a
+        sub-widgets internos): orden determinista. El último no avanza. ``add="+"``
+        conserva binds previos (p. ej. el ``<Return>`` de cantidad de jaulas).
+        """
+        for i in range(len(entries) - 1):
+            siguiente = entries[i + 1]
+            entries[i].bind("<Return>",
+                            lambda _ev, w=siguiente: self._foco_a(w), add="+")
+
+    def _foco_a(self, widget):
+        """Lleva el foco al widget indicado y corta la propagación del evento."""
+        widget.focus_set()
+        return "break"
 
     # ── Layout responsive ────────────────────────────────────────────────
 
@@ -283,6 +336,10 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             e_perfil.insert(0, str(perfil))
         e_perfil.pack(side="left", padx=4)
 
+        # Validación en vivo de los límites/perfil de la fila.
+        for e in (e_min, e_max, e_perfil):
+            e.bind("<KeyRelease>", self._validar_en_vivo)
+
         # Registro: (jaula:int, e_min=hasta interno, e_max=desde interno, e_perfil, fila)
         self._filas_rangos.append((int(jaula), e_min, e_max, e_perfil, fila))
 
@@ -295,6 +352,12 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             return  # texto inválido: se valida al guardar, no tocamos las filas
         if n > 0:
             self._sincronizar_filas_rango(n)
+            # Preview en vivo del cambio de jaulas (informativo) y luego validación.
+            if self._label_estado is not None:
+                self._label_estado.configure(
+                    text=f"↳ {n} jaula(s) ⇒ {n} fila(s) de SubStock",
+                    text_color=ACCENT)
+        self._validar_en_vivo()
 
     def _sincronizar_filas_rango(self, n):
         """Ajusta la cantidad de filas de SubStock a ``n`` jaulas (numeradas 1..n).
@@ -350,7 +413,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         registro = (e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo, turnos_holder, fila)
 
         ctk.CTkButton(
-            fila, text="🗑", width=36, fg_color="transparent",
+            fila, text=ELIMINAR, width=36, fg_color="transparent",
             text_color=RED, hover_color=BG_CARD,
             command=lambda: self._quitar_fila_maquina(registro),
         ).pack(side="left", padx=2)
@@ -422,9 +485,15 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._entry_enfriado.insert(0, f"{obtener_tiempo_enfriado(cfg):.1f}")
         self._entry_max_iter.delete(0, "end")
         self._entry_max_iter.insert(0, str(obtener_max_iteraciones(cfg)))
+        clave_sel = obtener_estrategia_seleccion(cfg)
+        self._combo_seleccion.set(_SELECCION_CLAVE_A_ETIQUETA.get(
+            clave_sel, next(iter(_SELECCION_ETIQUETAS))))
         clave_asig = obtener_estrategia_asignacion(cfg)
         self._combo_asignacion.set(_ASIGNACION_CLAVE_A_ETIQUETA.get(
             clave_asig, next(iter(_ASIGNACION_ETIQUETAS))))
+
+        # Mostrar el estado de validación al abrir/refrescar la pestaña.
+        self._validar_en_vivo()
 
     # ── Guardado ─────────────────────────────────────────────────────────
 
@@ -438,7 +507,10 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             # (misma verificación que usa el CLI), para no guardar un estado roto.
             verificar_coherencia({"config_global": config_global, "rangos": rangos})
         except ValueError as exc:
-            self._feedback(str(exc), error=True)
+            msg = str(exc)
+            if not msg.startswith("❌"):
+                msg = "❌ " + msg
+            self._feedback(msg, error=True)
             return
 
         self.app.user_cfg["config_global"] = config_global
@@ -446,6 +518,8 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self.app.user_cfg["rangos"] = rangos
         self.app.user_cfg["tiempo_enfriado_h"] = tiempo_enfriado
         self.app.user_cfg["max_iteraciones"] = max_iter
+        self.app.user_cfg["estrategia_seleccion"] = _SELECCION_ETIQUETAS.get(
+            self._combo_seleccion.get(), next(iter(_SELECCION_ETIQUETAS.values())))
         self.app.user_cfg["estrategia_asignacion"] = _ASIGNACION_ETIQUETAS.get(
             self._combo_asignacion.get(), next(iter(_ASIGNACION_ETIQUETAS.values())))
         self.app.user_cfg.pop("prioridades_maquinas", None)  # esquema viejo, ya migrado
@@ -454,7 +528,11 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         # Aplicar en caliente al taller (reconstruye máquinas, rangos y globales)
         self.app.taller.configurar(self.app.user_cfg)
 
-        self._feedback("✓ Configuración guardada y aplicada. Recargue/simule para verla en la vista.", error=False)
+        self._feedback("✓ Configuración guardada y aplicada.", error=False)
+
+        # Refrescar la estrella de la pestaña Configuración (estado ya coherente).
+        if hasattr(self.app, "actualizar_indicadores_tabs"):
+            self.app.actualizar_indicadores_tabs()
 
     def _recoger_globales(self):
         def _num(entry, etiqueta, entero=False):
@@ -564,6 +642,124 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         if not maquinas:
             raise ValueError("Debe definir al menos una máquina.")
         return maquinas
+
+    # ── Validación en vivo ───────────────────────────────────────────────
+
+    def _recoger_crudo(self):
+        """Arma los dicts/listas de strings crudos (globales + filas de rango).
+
+        Sin conversión ni validación: alimenta a ``_estado_validacion`` (puro).
+        Devuelve ``(globales, rangos)``.
+        """
+        globales = {
+            "diam_max": self._e_diam_max.get(),
+            "diam_min": self._e_diam_min.get(),
+            "crc": self._e_crc.get(),
+            "jaulas": self._e_jaulas.get(),
+            "enfriado": self._entry_enfriado.get(),
+            "max_iter": self._entry_max_iter.get(),
+        }
+        rangos = []
+        for jaula, e_min, e_max, e_perfil, _ in self._filas_rangos:
+            rangos.append({
+                "jaula": jaula,
+                "min": e_min.get(),
+                "max": e_max.get(),
+                "perfil": e_perfil.get(),
+            })
+        return globales, rangos
+
+    def _validar_en_vivo(self, event=None):
+        """Valida en vivo y refleja el resultado en el label (sin timer).
+
+        Pinta de rojo el borde de los entries inválidos y restaura el normal en
+        los válidos. A diferencia de ``_feedback``, el mensaje **no se borra solo**.
+        """
+        if self._label_estado is None:
+            return
+        globales, rangos = self._recoger_crudo()
+        mensaje, es_error = _estado_validacion(globales, rangos)
+        # ⚠ (requerido) en amarillo; ❌ (inválido) en rojo; ✓ en verde.
+        if not es_error:
+            color = GREEN
+        elif mensaje.startswith("⚠"):
+            color = YELLOW
+        else:
+            color = RED
+        self._label_estado.configure(text=mensaje, text_color=color)
+        self._marcar_entries_invalidos(es_error, globales, rangos)
+
+    def _marcar_entries_invalidos(self, es_error, globales, rangos):
+        """Resalta en rojo el/los entry(s) que disparan el problema; el resto, normal."""
+        culpables = set()
+        if es_error:
+            culpables = self._entries_culpables(globales, rangos)
+        for e in self._entries_globales:
+            self._pintar_borde(e, e in culpables)
+        for _jaula, e_min, e_max, e_perfil, _ in self._filas_rangos:
+            for e in (e_min, e_max, e_perfil):
+                self._pintar_borde(e, e in culpables)
+
+    def _entries_culpables(self, globales, rangos):
+        """Devuelve el conjunto de entries asociados al primer problema detectado.
+
+        Reproduce el orden de ``_estado_validacion`` para señalar el campo exacto.
+        """
+        import gui.validacion_config as _vc
+        culp = set()
+        mapa_glob = {
+            "diam_max": self._e_diam_max, "diam_min": self._e_diam_min,
+            "crc": self._e_crc, "jaulas": self._e_jaulas,
+            "enfriado": self._entry_enfriado, "max_iter": self._entry_max_iter,
+        }
+        # Requerido vacío / no numérico en globales.
+        for clave in _vc._ETIQUETAS_GLOBALES:
+            if str(globales.get(clave, "")).strip() == "":
+                culp.add(mapa_glob[clave]); return culp
+        for clave in _vc._ETIQUETAS_GLOBALES:
+            try:
+                float(str(globales[clave]).strip())
+            except ValueError:
+                culp.add(mapa_glob[clave]); return culp
+        v = {k: float(str(globales[k]).strip()) for k in _vc._ETIQUETAS_GLOBALES}
+        if v["diam_max"] <= v["diam_min"]:
+            culp.update({self._e_diam_max, self._e_diam_min}); return culp
+        if int(v["jaulas"]) <= 0:
+            culp.add(self._e_jaulas); return culp
+        if v["crc"] < 0:
+            culp.add(self._e_crc); return culp
+        if v["enfriado"] < 0:
+            culp.add(self._entry_enfriado); return culp
+        if v["max_iter"] <= 0:
+            culp.add(self._entry_max_iter); return culp
+        # Rangos.
+        filas = {f[0]: f for f in self._filas_rangos}
+        for r in rangos:
+            fila = filas.get(r["jaula"])
+            if fila is None:
+                continue
+            _j, e_min, e_max, _ep, _ = fila
+            min_txt, max_txt = str(r.get("min", "")).strip(), str(r.get("max", "")).strip()
+            if min_txt == "" or max_txt == "":
+                if min_txt == "":
+                    culp.add(e_min)
+                if max_txt == "":
+                    culp.add(e_max)
+                return culp
+            try:
+                hasta = float(min_txt); desde = float(max_txt)
+            except ValueError:
+                culp.update({e_min, e_max}); return culp
+            if desde <= hasta:
+                culp.update({e_min, e_max}); return culp
+        return culp
+
+    def _pintar_borde(self, entry, invalido):
+        """Pinta el borde del entry de rojo (inválido) o lo restaura al normal."""
+        try:
+            entry.configure(border_color=RED if invalido else self._border_normal)
+        except Exception:
+            pass
 
     def _feedback(self, mensaje, error):
         """Muestra un mensaje de estado transitorio que se borra solo a los segundos."""
