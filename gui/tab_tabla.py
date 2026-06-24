@@ -85,6 +85,10 @@ class TabInventario(ctk.CTkFrame):
         vsb.pack(side="right", fill="y")
         self._tree.pack(fill="both", expand=True)
 
+        # Re-render al volver visible la pestaña: ttk.Treeview llenado mientras
+        # estaba oculta (p. ej. tras simular en otra pestaña) puede pintarse mal.
+        self.bind("<Map>", self._on_map)
+
     # ── Datos por vista ──────────────────────────────────────────────────
 
     def _columnas(self):
@@ -139,14 +143,33 @@ class TabInventario(ctk.CTkFrame):
         self._on_cambiar_vista()
 
     def _on_cambiar_vista(self):
-        cols = self._columnas()
         self._cerrar_filtro()
         self._filtros_col = {}  # columnas distintas por vista: se reinician los filtros
+        self._rerender()
+
+    def _rerender(self):
+        """Reconfigura columnas + cabeceras + filas para la vista actual.
+
+        A diferencia de ``_on_cambiar_vista`` **no** resetea los filtros: se usa
+        también al re-mostrar la pestaña (ver ``_on_map``).
+        """
+        cols = self._columnas()
         self._tree.configure(columns=cols)
         for c in cols:
             self._tree.column(c, width=_ANCHOS.get(c, 110), anchor="center")
         self._actualizar_headings()
         self._fill()
+
+    def _on_map(self, _event=None):
+        """Re-renderiza al volver visible la pestaña (CTkTabview la desmapea).
+
+        ``ttk.Treeview`` llenado mientras la pestaña estaba oculta (p. ej. tras
+        ejecutar la simulación parado en otra pestaña) puede quedar mal pintado
+        hasta un re-fill estando visible — por eso «cambiar de vista lo corregía».
+        Al mostrarse se re-renderiza conservando los filtros activos.
+        """
+        if self._filtro_panel is None:
+            self._rerender()
 
     def _actualizar_headings(self):
         """Texto de cabecera (con ▾ si hay filtro) + binding de click por columna."""
