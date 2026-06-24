@@ -34,6 +34,7 @@ from gui.tab_generacion import crear_tab_generacion
 from gui.tab_generacion import _inicios_parada
 from gui.mpl_zoom import conectar_zoom
 from gui.dpi import factor_escala_dpi
+from gui.animaciones import fade_in
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -121,6 +122,10 @@ class App(ctk.CTk):
         self._create_main_content()
         self._create_status_bar()
         self._crear_atajos()
+
+        # Aparición suave de la ventana principal (fade-in de opacidad). No-op si
+        # el sistema no soporta -alpha (p. ej. X11 sin compositor).
+        fade_in(self)
 
     def _crear_atajos(self):
         """Atajos de teclado globales: Ctrl+S guardar config, Ctrl+L cargar

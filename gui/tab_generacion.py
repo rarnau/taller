@@ -42,6 +42,7 @@ from gui.editor_turnos import abrir_editor_turnos
 from gui.dashboard_principal import _marcar_paradas, formatter_tiempo
 from gui.calendario import SelectorFecha
 from gui.timeline_util import indice_tiempo_mas_cercano
+from gui.animaciones import fade_in
 
 # Generadores: etiqueta visible ↔ clave persistida (la GUI muestra la etiqueta).
 _GEN_ETIQUETAS = {g.etiqueta: clave for clave, g in GENERADORES_CAMBIOS.items()}
@@ -585,6 +586,7 @@ class TabGeneracion(ctk.CTkFrame):
         win.geometry("820x720")
         win.transient(self.winfo_toplevel())
         win.grab_set()
+        fade_in(win)  # aparición suave del popup
 
         # Estado del popup: `preview` es el modelo del combo recalculado EN VIVO
         # (solo se muestra); `modelo` es el modelo **confirmado** con «Ajustar», que
