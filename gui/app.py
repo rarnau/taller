@@ -269,6 +269,26 @@ class App(ctk.CTk):
         self._marcar_tab("Inventario", self._stock_df is None)
         self._marcar_tab("Generación de Cambios", self._cambios_generados is None)
         self._marcar_tab("Configuración", bool(problemas_coherencia(self.user_cfg)))
+        # Mismo fan-out: refrescar el estado (habilitado/deshabilitado) de los
+        # botones de acción cada vez que cambia el estado de los datos.
+        self._actualizar_estado_botones()
+
+    def _actualizar_estado_botones(self):
+        """Habilita/deshabilita los botones de acción según las precondiciones.
+
+        'Ejecutar Simulación' requiere stock + cambios cargados y que no haya una
+        corrida en curso; 'Exportar Resultados' requiere snapshots de una
+        simulación previa. Evita que el usuario dispare acciones sin sentido.
+        """
+        if not hasattr(self, "btn_simular"):
+            return
+        simulando = getattr(self, "_simulando", False)
+        puede_simular = (self._stock_df is not None
+                         and self._cambios_generados is not None
+                         and not simulando)
+        self.btn_simular.configure(state="normal" if puede_simular else "disabled")
+        hay_snaps = bool(getattr(self.taller, "snapshots", None))
+        self.btn_exportar.configure(state="normal" if hay_snaps else "disabled")
 
     def _create_status_bar(self):
         self.status_bar = ctk.CTkFrame(self, height=25, corner_radius=0)
@@ -333,7 +353,7 @@ class App(ctk.CTk):
             self.cfg_widget._limpiar_feedback()
 
         self._simulando = True
-        self.btn_simular.configure(state="disabled")
+        self._actualizar_estado_botones()  # deshabilita 'Ejecutar' durante la corrida
         self.status_label.configure(text="Simulando...")
         self._mostrar_progreso(True)
 
@@ -385,7 +405,7 @@ class App(ctk.CTk):
     def _simular_error(self, e):
         self._simulando = False
         self._mostrar_progreso(False)
-        self.btn_simular.configure(state="normal")
+        self._actualizar_estado_botones()
         self.status_label.configure(text="Error en la simulación")
         messagebox.showerror("Error", f"No se pudo ejecutar la simulación: {e}")
 
@@ -419,9 +439,10 @@ class App(ctk.CTk):
             self.gen_widget.refrescar_timeline()
         self._log("Simulación finalizada. Use los controles de reproducción para ver los resultados.")
 
-        self.actualizar_indicadores_tabs()
-        self.btn_simular.configure(state="normal")
+        # Marcar la corrida como terminada ANTES del fan-out, para que
+        # _actualizar_estado_botones rehabilite 'Ejecutar' (no la ve en curso).
         self._simulando = False
+        self.actualizar_indicadores_tabs()
 
     def _redibujar_paradas_sidebar(self):
         """Dibuja un punto por cada inicio de PARADA sobre el slider del sidebar."""
