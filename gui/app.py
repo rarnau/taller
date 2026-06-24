@@ -33,6 +33,7 @@ from gui.tab_config import crear_tab_configuracion
 from gui.tab_generacion import crear_tab_generacion
 from gui.tab_generacion import _inicios_parada
 from gui.mpl_zoom import conectar_zoom
+from gui.dpi import factor_escala_dpi
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -71,6 +72,20 @@ except Exception:  # noqa: BLE001 — si CTk cambia su layout interno, seguimos 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+
+        # Escala automática en alta DPI. El rescalado por-monitor de CTk está
+        # desactivado (deactivate_automatic_dpi_awareness, arriba) para evitar el
+        # crash del dropdown; en su lugar aplicamos UNA escala fija derivada del
+        # DPI de la pantalla. Con DPI estándar (96) el factor es 1.0 (idéntico al
+        # comportamiento previo); en pantallas densas agranda widgets y ventana.
+        # Se hace antes de geometry() para que el tamaño contemple la escala.
+        try:
+            factor = factor_escala_dpi(self.winfo_fpixels("1i"))
+            if abs(factor - 1.0) > 0.01:
+                ctk.set_widget_scaling(factor)
+                ctk.set_window_scaling(factor)
+        except Exception:  # noqa: BLE001 — si la detección falla, seguimos a escala 1
+            pass
 
         # Configuración de ventana
         self.title("Simulador de Cilindros Pro v4")
