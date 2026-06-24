@@ -44,6 +44,30 @@ ctk.set_default_color_theme("blue")
 # y elimina ese callback problemático. Debe ejecutarse antes de crear la ventana.
 ctk.deactivate_automatic_dpi_awareness()
 
+# Otro crash conocido de CustomTkinter: un widget puede recibir un <Configure>
+# que ya estaba en la cola de Tk *después* de ser destruido. En ese punto su
+# `_canvas` es None y `_update_dimensions_event` -> `_draw` revienta con
+# "AttributeError: 'NoneType' object has no attribute 'winfo_exists'". Se da, por
+# ejemplo, al cerrar/recrear el panel inline de filtro del inventario (que lleva
+# un CTkScrollableFrame) mientras la ventana se reajusta. Envolvemos el handler
+# para que sea no-op cuando el widget ya no tiene canvas. Debe aplicarse una sola
+# vez, antes de crear la ventana.
+try:
+    from customtkinter.windows.widgets.core_widget_classes.ctk_base_class import \
+        CTkBaseClass as _CTkBaseClass
+
+    _orig_update_dimensions_event = _CTkBaseClass._update_dimensions_event
+
+    def _safe_update_dimensions_event(self, event):
+        if getattr(self, "_canvas", None) is None:
+            return
+        return _orig_update_dimensions_event(self, event)
+
+    _CTkBaseClass._update_dimensions_event = _safe_update_dimensions_event
+except Exception:  # noqa: BLE001 — si CTk cambia su layout interno, seguimos sin el guard
+    pass
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
