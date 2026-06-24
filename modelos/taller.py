@@ -144,6 +144,21 @@ class TallerCilindros:
         # dependa de un atributo que solo existe a mitad de corrida.
         self._seq_cola = itertools.count()
 
+    # ── Pickling (paso a procesos: worker GUI y batch_simular) ───────────────
+
+    def __getstate__(self):
+        # itertools.count() no es picklable. Es solo un contador transitorio de
+        # la cola de eventos (válido únicamente a mitad de simular()), así que se
+        # excluye del pickle y se reconstruye al despicklear. El resto del estado
+        # (snapshots, cilindros, máquinas, alertas) es picklable.
+        estado = self.__dict__.copy()
+        estado.pop("_seq_cola", None)
+        return estado
+
+    def __setstate__(self, estado):
+        self.__dict__.update(estado)
+        self._seq_cola = itertools.count()
+
     # ── Configuración externa ───────────────────────────────────────────────
 
     def configurar_substocks(self, rangos_config: List[Dict[str, Any]]) -> None:
