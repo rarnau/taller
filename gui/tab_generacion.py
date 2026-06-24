@@ -562,6 +562,8 @@ class TabGeneracion(ctk.CTkFrame):
         self.app._sincronizar_vista_con_taller()
         self.app._refrescar_combo_substocks()
         self.refrescar_timeline()  # sin paradas aún (no se simuló)
+        if hasattr(self.app, "actualizar_indicadores_tabs"):
+            self.app.actualizar_indicadores_tabs()
 
     # ── Popup de previsualización + ajuste del modelo ────────────────────
 

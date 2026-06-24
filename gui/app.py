@@ -228,6 +228,48 @@ class App(ctk.CTk):
         # más el banner "Se mostrarán datos una vez corrida la simulación".
         self._render_paneles()
 
+        # Estrellas iniciales en las pestañas que requieren acción del usuario.
+        self.actualizar_indicadores_tabs()
+
+    def _marcar_tab(self, nombre: str, incompleto: bool):
+        """Agrega/quita un indicador ★ en la pestaña ``nombre`` (sin cambiar su clave).
+
+        Accede al botón del segmented button de CTkTabview (API privada): si la
+        estructura cambia en una versión futura, degrada a no-op (como los guards DPI).
+        """
+        try:
+            btn = self.tabview._segmented_button._buttons_dict[nombre]
+        except Exception:
+            return
+        # Captura del color de texto por defecto la primera vez (antes de pintarlo
+        # de rojo), para poder restaurarlo al volver a "completo" sin quedar rojo.
+        if not hasattr(self, "_tab_text_color_def"):
+            self._tab_text_color_def = {}
+        if nombre not in self._tab_text_color_def:
+            try:
+                self._tab_text_color_def[nombre] = btn.cget("text_color")
+            except Exception:
+                self._tab_text_color_def[nombre] = None
+        texto = f"{nombre}  ★" if incompleto else nombre
+        color = RED if incompleto else self._tab_text_color_def.get(nombre)
+        try:
+            if color is not None:
+                btn.configure(text=texto, text_color=color)
+            else:
+                btn.configure(text=texto)
+        except Exception:
+            try:
+                btn.configure(text=texto)
+            except Exception:
+                pass
+
+    def actualizar_indicadores_tabs(self):
+        """Marca como incompletas las pestañas que requieren acción del usuario."""
+        from config.persistencia import problemas_coherencia
+        self._marcar_tab("Inventario", self._stock_df is None)
+        self._marcar_tab("Generación de Cambios", self._cambios_generados is None)
+        self._marcar_tab("Configuración", bool(problemas_coherencia(self.user_cfg)))
+
     def _create_status_bar(self):
         self.status_bar = ctk.CTkFrame(self, height=25, corner_radius=0)
         self.status_bar.grid(row=1, column=0, columnspan=2, sticky="ew")
@@ -270,6 +312,7 @@ class App(ctk.CTk):
             # Stock nuevo ⇒ se descartan los cambios: limpiar el timeline.
             if getattr(self, "gen_widget", None) is not None:
                 self.gen_widget.refrescar_timeline()
+            self.actualizar_indicadores_tabs()
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar el stock: {e}")
 
@@ -376,6 +419,7 @@ class App(ctk.CTk):
             self.gen_widget.refrescar_timeline()
         self._log("Simulación finalizada. Use los controles de reproducción para ver los resultados.")
 
+        self.actualizar_indicadores_tabs()
         self.btn_simular.configure(state="normal")
         self._simulando = False
 
