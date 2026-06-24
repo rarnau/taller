@@ -198,6 +198,9 @@ Only **machine rectification** is gated by the calendar; the rolling line never 
 ### PARADA is all-or-nothing
 `_instalar_pareja_o_parar()` never installs a partial pair. If there are fewer than `_BUFFER_CRC_SIZE` cylinders available in a jaula's range, it installs **none** and returns `False`. A jaula with only one cylinder working is not a valid state.
 
+### The CRC buffer is filled in pairs — never a lone cylinder
+The Disponible→CRC transport moves a **complete pair** (`_BUFFER_CRC_SIZE`) per trip, never a single cylinder, so a jaula's CRC count is always **0 or 2** (never odd). Two places enforce this: (1) `reponer_buffer_crc()` is **all-or-nothing** — if there aren't enough disponibles to complete the pair it moves **none** (they stay Disponible) and returns `False`; (2) at startup, `_garantizar_parejas_iniciales()` does **not** park a lone partial cylinder in the CRC — it leaves it **Disponible but reserved** to its jaula via `jaula_destino` (so no other jaula can take it) and marks the jaula PARADA. Either way the lone cylinder waits as Disponible; reactivation still works because `_instalar_pareja_o_parar()` forms the pair from **CRC + disponibles** together (and `obtener_disponibles_para_jaula` honors the `jaula_destino` reservation). The golden master is **unchanged** (no golden scenario produced an odd CRC). Guarded by `tests/test_crc_pareja.py` (unit + the invariant "no snapshot shows an odd `crc_por_jaula`").
+
 ### PARADA stops the entire line, not just the affected jaula
 When any jaula goes PARADA, `_linea_parada_desde` is set and ALL subsequent `CAMBIO` events (those with `tiempo > _linea_parada_desde`) are moved to `_cambios_diferidos`. CAMBIO events at the exact same timestamp as the stoppage **do** execute. The line resumes only when **no** jaula remains stopped.
 

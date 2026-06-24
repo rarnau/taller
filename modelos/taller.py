@@ -493,13 +493,19 @@ class TallerCilindros:
             if len(jaula.cilindros_trabajando) < _BUFFER_CRC_SIZE:
                 parciales = jaula.cilindros_trabajando
                 jaula.cilindros_trabajando = []
+                # Regla del taller: el CRC se llena de a parejas, nunca un cilindro
+                # suelto. El parcial NO se mete al CRC: queda Disponible pero
+                # RESERVADO a esta jaula (jaula_destino), de modo que ninguna otra
+                # lo tome y _instalar_pareja_o_parar lo reincorpore en cuanto haya
+                # un segundo cilindro de su rango (la jaula arranca PARADA).
                 for cil in parciales:
-                    cil.estado = EstadoCilindro.CRC
-                    jaula.cilindros_crc.append(cil)
+                    cil.estado = EstadoCilindro.DISPONIBLE
+                    cil.jaula = None
+                    cil.jaula_destino = j_id
                 jaula.parada = True
                 logger.warning(
                     "Jaula %s arranca PARADA: solo %d cilindro(s) en su rango de "
-                    "diámetros (movidos al CRC a la espera de pareja).",
+                    "diámetros (reservados como Disponible a la espera de pareja).",
                     j_id, len(parciales)
                 )
 
@@ -903,7 +909,14 @@ class TallerCilindros:
         return destino, self.perfil_por_jaula(destino)
 
     def reponer_buffer_crc(self, jaula_id: int, tiempo: datetime) -> bool:
-        """Intenta llenar el CRC de una jaula con cilindros disponibles."""
+        """Intenta llenar el CRC de una jaula con cilindros disponibles.
+
+        El traslado al CRC se hace **de a parejas** (`_BUFFER_CRC_SIZE`): el recurso
+        de traslado mueve la pareja completa en un viaje, nunca un cilindro suelto.
+        Si no hay disponibles suficientes para completar lo que falta, **no mueve
+        ninguno** (quedan en estado Disponible) y devuelve False — la reactivación
+        de la jaula (`_instalar_pareja_o_parar`) igual los toma directo del stock.
+        """
         jaula = self.jaulas[jaula_id]
         necesarios = _BUFFER_CRC_SIZE - len(jaula.cilindros_crc)
         if necesarios <= 0:
@@ -912,17 +925,16 @@ class TallerCilindros:
         disponibles = sorted(
             self.obtener_disponibles_para_jaula(jaula_id), key=lambda c: c.diametro, reverse=True
         )
-        completados = 0
-        for cil in disponibles:
-            if completados >= necesarios:
-                break
+        if len(disponibles) < necesarios:
+            return False  # pareja incompleta: no se coloca un cilindro suelto en el CRC
+
+        for cil in disponibles[:necesarios]:
             cil.estado = EstadoCilindro.CRC
             cil.jaula = jaula_id
             jaula.cilindros_crc.append(cil)
             cil.registrar_evento(tiempo, f"Traslado a CRC Jaula {jaula_id}")
-            completados += 1
 
-        return completados >= necesarios
+        return True
 
     def _push_evento(self, cola: List[_ItemCola], evento: _EventoSim) -> None:
         """Inserta un evento en la cola de prioridad (heap) por (tiempo, secuencia).
