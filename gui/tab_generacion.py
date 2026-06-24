@@ -284,6 +284,11 @@ def _fila_fecha(parent, etiqueta):
 class TabGeneracion(ctk.CTkFrame):
     """Editor + generador + timeline del Programa_Cambios sintético."""
 
+    # Por debajo de este ancho (px) las tres tarjetas superiores se apilan a
+    # ancho completo (ver _aplicar_layout_top); tres columnas lado a lado
+    # necesitan ~1150px para no recortar sus widgets.
+    _UMBRAL_APILADO = 1150
+
     def __init__(self, parent, app):
         super().__init__(parent, fg_color="transparent")
         self.app = app
@@ -376,7 +381,38 @@ class TabGeneracion(ctk.CTkFrame):
         cont = _card(self, "Timeline de cambios generados (paradas de línea en rojo)",
                      fill="both", expand=True, padx=10, pady=(4, 10))
         self._timeline_holder = cont
+
+        # Layout responsivo de las tres tarjetas superiores: lado a lado cuando
+        # hay ancho, apiladas a ancho completo cuando es angosto (mismo patrón
+        # que tab_config). Se re-empacan en _aplicar_layout_top.
+        self._top = top
+        self._gen_cards = [cfg.master, adap.master, gen.master]
+        self._top_layout_mode = None
+        self._aplicar_layout_top("ancho")  # layout inicial; <Configure> lo ajusta
+        top.bind("<Configure>", self._on_resize_top)
+
         self._nueva_seed()
+
+    # ── Layout responsivo de la fila superior ────────────────────────────
+
+    def _on_resize_top(self, event=None):
+        ancho = event.width if event is not None else self.winfo_width()
+        modo = "ancho" if ancho >= self._UMBRAL_APILADO else "estrecho"
+        if modo != self._top_layout_mode:
+            self._aplicar_layout_top(modo)
+
+    def _aplicar_layout_top(self, modo):
+        """Reparte las tres tarjetas lado a lado ('ancho') o apiladas ('estrecho')."""
+        self._top_layout_mode = modo
+        for card in self._gen_cards:
+            card.pack_forget()
+        if modo == "ancho":
+            pads = [(0, 6), (6, 6), (6, 0)]
+            for card, padx in zip(self._gen_cards, pads):
+                card.pack(side="left", fill="x", expand=True, padx=padx, anchor="n")
+        else:
+            for i, card in enumerate(self._gen_cards):
+                card.pack(side="top", fill="x", anchor="n", pady=(0 if i == 0 else 8, 0))
 
     # ── Refresco desde la configuración ──────────────────────────────────
 
