@@ -15,9 +15,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pandas as pd
 
 from config.tema import *
-from config.persistencia import cargar_config
+from config.persistencia import cargar_config, obtener_estrategia_seleccion
 from config import modelo_generador as modmod
-from modelos.estrategias import ESTRATEGIAS_SELECCION
 from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
 from cli import (init_worker_simulacion, simular_cambios_worker, ctx_paralelo)
@@ -117,16 +116,9 @@ class App(ctk.CTk):
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
         # El stock se carga desde la pestaña Inventario y los cambios desde
-        # Generación; el sidebar solo dispara la simulación y exporta.
-        self.label_estrat = ctk.CTkLabel(self.sidebar, text="Estrategia de rectificado:", anchor="w")
-        self.label_estrat.grid(row=2, column=0, padx=20, pady=(10, 0))
-        # El combo muestra etiquetas legibles; se mapean a la clave de estrategia
-        # que espera el motor. Ambas se derivan del registro ESTRATEGIAS_SELECCION.
-        self._estrat_por_etiqueta = {e.etiqueta: clave for clave, e in ESTRATEGIAS_SELECCION.items()}
-        self.combo_est = ctk.CTkComboBox(self.sidebar, values=list(self._estrat_por_etiqueta.keys()))
-        self.combo_est.set(ESTRATEGIAS_SELECCION["mayor_diametro"].etiqueta)
-        self.combo_est.grid(row=3, column=0, padx=20, pady=10)
-
+        # Generación; el sidebar solo dispara la simulación y exporta. La
+        # estrategia de rectificado vive ahora en la pestaña Configuración
+        # (persistida en user_config.json) y se lee desde allí al simular.
         self.btn_simular = ctk.CTkButton(self.sidebar, text="Ejecutar Simulación", fg_color=GREEN, hover_color="#2BB46B", command=self._simular)
         self.btn_simular.grid(row=4, column=0, padx=20, pady=10)
 
@@ -300,7 +292,7 @@ class App(ctk.CTk):
         self.status_label.configure(text="Simulando...")
         self._mostrar_progreso(True)
 
-        estrat = self._estrat_por_etiqueta.get(self.combo_est.get(), "mayor_diametro")
+        estrat = obtener_estrategia_seleccion(self.user_cfg)
         cambios = self._cambios_generados
         if cambios is None:
             cambios = pd.DataFrame(columns=gencambios.COLUMNAS_SALIDA)
@@ -415,7 +407,7 @@ class App(ctk.CTk):
     def _sincronizar_vista_con_taller(self) -> None:
         """Actualiza los frames de Vista Real con las jaulas y máquinas del taller cargado."""
         self.hint_inicio.grid_remove()  # ya hay datos: ocultar el hint guía del sidebar
-        estrat = self._estrat_por_etiqueta.get(self.combo_est.get(), "mayor_diametro")
+        estrat = obtener_estrategia_seleccion(self.user_cfg)
         self.vista_rt.ajustar_jaulas(self.taller.cantidad_jaulas)
         self.vista_rt.mostrar_maquinas(list(self.taller.maquinas.keys()))
         self.vista_rt.set_estrategia(estrat)

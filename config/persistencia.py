@@ -59,6 +59,7 @@ DEFAULTS: Dict[str, Any] = {
     ],
     "tiempo_enfriado_h": 0.0,
     "max_iteraciones": 10000,
+    "estrategia_seleccion": "mayor_diametro",
     "estrategia_asignacion": "jaula_mas_necesitada",
     # Generador sintético del Programa_Cambios a partir de la historia real.
     # ``turnos_cambios`` (régimen propio del laminador) se omite ⇒ 24/7; sólo se
@@ -179,6 +180,11 @@ def obtener_max_iteraciones(cfg: Dict[str, Any]) -> int:
 def obtener_estrategia_asignacion(cfg: Dict[str, Any]) -> str:
     """Devuelve la clave de la estrategia de asignación de jaula destino."""
     return str(cfg.get("estrategia_asignacion", DEFAULTS["estrategia_asignacion"]))
+
+
+def obtener_estrategia_seleccion(cfg: Dict[str, Any]) -> str:
+    """Devuelve la clave de la estrategia de selección de la cola de rectificado."""
+    return str(cfg.get("estrategia_seleccion", DEFAULTS["estrategia_seleccion"]))
 
 
 def obtener_generador_cambios(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -377,7 +383,7 @@ def verificar_coherencia(cfg: Dict[str, Any]) -> None:
 
 
 def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
-            estrategia_asignacion=None) -> Dict[str, Any]:
+            estrategia_asignacion=None, estrategia_seleccion=None) -> Dict[str, Any]:
     """Actualiza los parámetros de simulación indicados."""
     if tiempo_enfriado is not None:
         t = round(float(tiempo_enfriado), 1)
@@ -391,6 +397,8 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
         cfg["max_iteraciones"] = n
     if estrategia_asignacion is not None:
         cfg["estrategia_asignacion"] = str(estrategia_asignacion)
+    if estrategia_seleccion is not None:
+        cfg["estrategia_seleccion"] = str(estrategia_seleccion)
     return cfg
 
 

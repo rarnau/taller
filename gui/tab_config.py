@@ -15,10 +15,10 @@ from config.tema import (
 from config.persistencia import (
     guardar_config, obtener_rangos, obtener_maquinas, obtener_config_global,
     obtener_tiempo_enfriado, obtener_max_iteraciones, verificar_coherencia,
-    obtener_estrategia_asignacion,
+    obtener_estrategia_asignacion, obtener_estrategia_seleccion,
 )
 from modelos.enums import TipoRectificado
-from modelos.estrategias import ESTRATEGIAS_ASIGNACION
+from modelos.estrategias import ESTRATEGIAS_ASIGNACION, ESTRATEGIAS_SELECCION
 from modelos import turnos as turnos_mod
 from gui.editor_turnos import abrir_editor_turnos
 
@@ -27,6 +27,9 @@ _TIPOS_RECT = [t.value for t in TipoRectificado]
 # de selección en gui/app.py). La GUI muestra la etiqueta y guarda la clave.
 _ASIGNACION_ETIQUETAS = {e.etiqueta: clave for clave, e in ESTRATEGIAS_ASIGNACION.items()}
 _ASIGNACION_CLAVE_A_ETIQUETA = {clave: e.etiqueta for clave, e in ESTRATEGIAS_ASIGNACION.items()}
+# Estrategias de selección de la cola de rectificado: etiqueta visible ↔ clave.
+_SELECCION_ETIQUETAS = {e.etiqueta: clave for clave, e in ESTRATEGIAS_SELECCION.items()}
+_SELECCION_CLAVE_A_ETIQUETA = {clave: e.etiqueta for clave, e in ESTRATEGIAS_SELECCION.items()}
 
 
 def _card(parent, titulo, subtitulo=None):
@@ -89,6 +92,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         # Entries de parámetros de simulación
         self._entry_max_iter = None
         self._combo_asignacion = None
+        self._combo_seleccion = None
         self._label_estado = None
         self._feedback_after = None   # id del timer que borra el feedback transitorio
 
@@ -119,7 +123,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         cuerpo_g = _card(
             col_izq,
             "Parámetros Globales del Taller",
-            "Rango de diámetro útil, traslado al CRC, cantidad de jaulas, tiempo de enfriado y estrategia de asignación.",
+            "Rango de diámetro útil, traslado al CRC, cantidad de jaulas, tiempo de enfriado, estrategia de rectificado y de asignación.",
         )
         self._e_diam_max = _fila_param(cuerpo_g, "Diámetro máximo (mm)")
         self._e_diam_min = _fila_param(cuerpo_g, "Diámetro mínimo (mm)", "bajo este, el cilindro es BAJA")
@@ -131,6 +135,17 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._e_jaulas.bind("<FocusOut>", self._on_cambio_cantidad_jaulas)
         self._e_jaulas.bind("<Return>", self._on_cambio_cantidad_jaulas)
         self._entry_enfriado = _fila_param(cuerpo_g, "Tiempo de enfriado (h)", "0 = sin enfriado")
+
+        # Estrategia de selección de la cola de rectificado (combo etiqueta↔clave).
+        fila_sel = ctk.CTkFrame(cuerpo_g, fg_color="transparent")
+        fila_sel.pack(fill="x", pady=3)
+        ctk.CTkLabel(
+            fila_sel, text="Estrategia de rectificado", width=220, anchor="w", text_color=FG,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_MD),
+        ).pack(side="left", padx=4)
+        self._combo_seleccion = ctk.CTkComboBox(
+            fila_sel, values=list(_SELECCION_ETIQUETAS.keys()), width=240, state="readonly")
+        self._combo_seleccion.pack(side="left", padx=4)
 
         # Estrategia de asignación de jaula destino (combo etiqueta↔clave).
         fila_asig = ctk.CTkFrame(cuerpo_g, fg_color="transparent")
@@ -422,6 +437,9 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self._entry_enfriado.insert(0, f"{obtener_tiempo_enfriado(cfg):.1f}")
         self._entry_max_iter.delete(0, "end")
         self._entry_max_iter.insert(0, str(obtener_max_iteraciones(cfg)))
+        clave_sel = obtener_estrategia_seleccion(cfg)
+        self._combo_seleccion.set(_SELECCION_CLAVE_A_ETIQUETA.get(
+            clave_sel, next(iter(_SELECCION_ETIQUETAS))))
         clave_asig = obtener_estrategia_asignacion(cfg)
         self._combo_asignacion.set(_ASIGNACION_CLAVE_A_ETIQUETA.get(
             clave_asig, next(iter(_ASIGNACION_ETIQUETAS))))
@@ -446,6 +464,8 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         self.app.user_cfg["rangos"] = rangos
         self.app.user_cfg["tiempo_enfriado_h"] = tiempo_enfriado
         self.app.user_cfg["max_iteraciones"] = max_iter
+        self.app.user_cfg["estrategia_seleccion"] = _SELECCION_ETIQUETAS.get(
+            self._combo_seleccion.get(), next(iter(_SELECCION_ETIQUETAS.values())))
         self.app.user_cfg["estrategia_asignacion"] = _ASIGNACION_ETIQUETAS.get(
             self._combo_asignacion.get(), next(iter(_ASIGNACION_ETIQUETAS.values())))
         self.app.user_cfg.pop("prioridades_maquinas", None)  # esquema viejo, ya migrado
