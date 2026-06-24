@@ -707,6 +707,7 @@ class TabGeneracion(ctk.CTkFrame):
                 return
             pop["canvas"] = FigureCanvasTkAgg(pop["fig"], master=chart_holder)
             pop["canvas"].draw()
+            conectar_zoom(pop["canvas"])
             pop["canvas"].get_tk_widget().pack(fill="both", expand=True)
 
         def _preview():
@@ -857,6 +858,7 @@ class TabGeneracion(ctk.CTkFrame):
         self._canvas = FigureCanvasTkAgg(self._fig, master=self._timeline_holder)
         self._canvas.mpl_connect("pick_event", self._on_pick_parada)
         self._canvas.draw()
+        conectar_zoom(self._canvas)
         self._canvas.get_tk_widget().pack(fill="both", expand=True)
 
     def _on_pick_parada(self, event):

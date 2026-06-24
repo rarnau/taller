@@ -32,6 +32,7 @@ from gui.tab_kpis import llenar_kpis
 from gui.tab_config import crear_tab_configuracion
 from gui.tab_generacion import crear_tab_generacion
 from gui.tab_generacion import _inicios_parada
+from gui.mpl_zoom import conectar_zoom
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -526,6 +527,7 @@ class App(ctk.CTk):
         self._figs[key] = fig
         cv = FigureCanvasTkAgg(fig, master=container)
         cv.draw()
+        conectar_zoom(cv)
         cv.get_tk_widget().pack(fill="both", expand=True)
 
     def _toggle_playback(self):
