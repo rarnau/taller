@@ -22,14 +22,17 @@ def _a_numero(txt: str):
     return float(str(txt).strip())
 
 
-def _estado_validacion(globales: dict, rangos: list) -> Tuple[str, bool]:
+def _estado_validacion(globales: dict, rangos: list,
+                       maquinas: list | None = None) -> Tuple[str, bool]:
     """Valida en vivo los campos de Configuración (valores crudos, sin Tk).
 
     ``globales`` = {"diam_max","diam_min","crc","jaulas","enfriado","max_iter"}
     (strings). ``rangos`` = lista de dicts {"jaula":int, "min":str, "max":str,
-    "perfil":str}. Devuelve ``(mensaje, es_error)``. El primer problema detectado
-    manda; si todo OK, devuelve un ✓ con un resumen. Mensajes verbosos con ⚠
-    (requerido), ❌ (inválido).
+    "perfil":str}. ``maquinas`` = lista de dicts {"nombre":str, "prod_mm":str,
+    "prod_min":str, "desb_mm":str, "desb_min":str} (opcional, retrocompat).
+    Devuelve ``(mensaje, es_error)``. El primer problema detectado manda; si
+    todo OK, devuelve un ✓ con un resumen. Mensajes verbosos con ⚠ (requerido),
+    ❌ (inválido).
     """
     # 1) Campos globales requeridos vacíos (en orden).
     for clave, etiqueta in _ETIQUETAS_GLOBALES.items():
@@ -76,5 +79,36 @@ def _estado_validacion(globales: dict, rangos: list) -> Tuple[str, bool]:
     r_n = len(rangos)
     if r_n != jaulas:
         return (f"⚠ Falta(n) rango(s): hay {r_n} de {jaulas} jaulas", True)
+
+    # 6) Máquinas rectificadoras (si se proporcionan).
+    if maquinas is not None:
+        if not maquinas:
+            return ("⚠ Debe definir al menos una máquina", True)
+        nombres_vistos: set = set()
+        _CAMPOS_TASA = ("prod_mm", "prod_min", "desb_mm", "desb_min")
+        _ETIQUETAS_TASA = {
+            "prod_mm": "Prod mm", "prod_min": "Prod min",
+            "desb_mm": "Desb mm", "desb_min": "Desb min",
+        }
+        for idx, m in enumerate(maquinas, 1):
+            nombre = str(m.get("nombre", "")).strip()
+            valores_tasa = [str(m.get(c, "")).strip() for c in _CAMPOS_TASA]
+            tiene_datos = nombre or any(valores_tasa)
+            if not tiene_datos:
+                continue
+            if not nombre:
+                return (f"❌ Máquina {idx}: falta el nombre", True)
+            if nombre in nombres_vistos:
+                return (f"❌ Nombre de máquina repetido: '{nombre}'", True)
+            nombres_vistos.add(nombre)
+            for campo, txt in zip(_CAMPOS_TASA, valores_tasa):
+                if txt == "":
+                    return (f"⚠ Máquina '{nombre}': campo {_ETIQUETAS_TASA[campo]} requerido", True)
+                try:
+                    val = _a_numero(txt)
+                except ValueError:
+                    return (f"❌ Máquina '{nombre}': {_ETIQUETAS_TASA[campo]} no es un número válido", True)
+                if val <= 0:
+                    return (f"❌ Máquina '{nombre}': {_ETIQUETAS_TASA[campo]} debe ser mayor que 0", True)
 
     return ("✓ Configuración válida — recuerde Guardar", False)

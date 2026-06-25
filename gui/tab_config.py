@@ -395,6 +395,9 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         e_dmm = _entry(58, desb_mm)
         e_dmin = _entry(58, desb_min)
 
+        for e in (e_nom, e_pmm, e_pmin, e_dmm, e_dmin):
+            e.bind("<KeyRelease>", self._validar_en_vivo)
+
         combo = ctk.CTkComboBox(fila, values=_TIPOS_RECT, width=110, state="readonly")
         combo.set(prioridad if prioridad in _TIPOS_RECT else _TIPOS_RECT[0])
         combo.pack(side="left", padx=2)
@@ -616,6 +619,7 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         for e_nom, e_pmm, e_pmin, e_dmm, e_dmin, combo, turnos_holder, _ in self._filas_maquinas:
             nombre = e_nom.get().strip()
             campos = [e_pmm.get().strip(), e_pmin.get().strip(), e_dmm.get().strip(), e_dmin.get().strip()]
+            etiquetas = ["Prod mm", "Prod min", "Desb mm", "Desb min"]
             if not nombre and not any(campos):
                 continue  # fila vacía, se ignora
             if not nombre:
@@ -623,10 +627,18 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
             if nombre in nombres:
                 raise ValueError(f"Nombre de máquina repetido: '{nombre}'.")
             nombres.add(nombre)
-            try:
-                pmm, pmin, dmm, dmin = (float(c) for c in campos)
-            except ValueError:
-                raise ValueError(f"Tasas inválidas en la máquina '{nombre}' (deben ser números).")
+            valores = []
+            for txt, etiq in zip(campos, etiquetas):
+                if not txt:
+                    raise ValueError(f"Máquina '{nombre}': campo {etiq} requerido.")
+                try:
+                    val = float(txt)
+                except ValueError:
+                    raise ValueError(f"Máquina '{nombre}': {etiq} no es un número válido.")
+                if val <= 0:
+                    raise ValueError(f"Máquina '{nombre}': {etiq} debe ser mayor que 0.")
+                valores.append(val)
+            pmm, pmin, dmm, dmin = valores
             maq = {
                 "nombre": nombre,
                 "prioridad": combo.get(),
@@ -635,7 +647,6 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
                     "desbaste": {"mm": dmm, "tiempo_min": dmin},
                 },
             }
-            # Turnos solo se persisten si no es 24/7 (None), para no ensuciar el JSON.
             if turnos_holder[0] is not None:
                 maq["turnos"] = turnos_holder[0]
             maquinas.append(maq)
@@ -646,10 +657,10 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
     # ── Validación en vivo ───────────────────────────────────────────────
 
     def _recoger_crudo(self):
-        """Arma los dicts/listas de strings crudos (globales + filas de rango).
+        """Arma los dicts/listas de strings crudos (globales + rangos + máquinas).
 
         Sin conversión ni validación: alimenta a ``_estado_validacion`` (puro).
-        Devuelve ``(globales, rangos)``.
+        Devuelve ``(globales, rangos, maquinas)``.
         """
         globales = {
             "diam_max": self._e_diam_max.get(),
@@ -667,7 +678,16 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
                 "max": e_max.get(),
                 "perfil": e_perfil.get(),
             })
-        return globales, rangos
+        maquinas = []
+        for e_nom, e_pmm, e_pmin, e_dmm, e_dmin, _combo, _th, _ in self._filas_maquinas:
+            maquinas.append({
+                "nombre": e_nom.get(),
+                "prod_mm": e_pmm.get(),
+                "prod_min": e_pmin.get(),
+                "desb_mm": e_dmm.get(),
+                "desb_min": e_dmin.get(),
+            })
+        return globales, rangos, maquinas
 
     def _validar_en_vivo(self, event=None):
         """Valida en vivo y refleja el resultado en el label (sin timer).
@@ -677,8 +697,8 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         """
         if self._label_estado is None:
             return
-        globales, rangos = self._recoger_crudo()
-        mensaje, es_error = _estado_validacion(globales, rangos)
+        globales, rangos, maquinas = self._recoger_crudo()
+        mensaje, es_error = _estado_validacion(globales, rangos, maquinas)
         # ⚠ (requerido) en amarillo; ❌ (inválido) en rojo; ✓ en verde.
         if not es_error:
             color = GREEN
@@ -687,20 +707,23 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
         else:
             color = RED
         self._label_estado.configure(text=mensaje, text_color=color)
-        self._marcar_entries_invalidos(es_error, globales, rangos)
+        self._marcar_entries_invalidos(es_error, globales, rangos, maquinas)
 
-    def _marcar_entries_invalidos(self, es_error, globales, rangos):
+    def _marcar_entries_invalidos(self, es_error, globales, rangos, maquinas):
         """Resalta en rojo el/los entry(s) que disparan el problema; el resto, normal."""
         culpables = set()
         if es_error:
-            culpables = self._entries_culpables(globales, rangos)
+            culpables = self._entries_culpables(globales, rangos, maquinas)
         for e in self._entries_globales:
             self._pintar_borde(e, e in culpables)
         for _jaula, e_min, e_max, e_perfil, _ in self._filas_rangos:
             for e in (e_min, e_max, e_perfil):
                 self._pintar_borde(e, e in culpables)
+        for e_nom, e_pmm, e_pmin, e_dmm, e_dmin, _combo, _th, _ in self._filas_maquinas:
+            for e in (e_nom, e_pmm, e_pmin, e_dmm, e_dmin):
+                self._pintar_borde(e, e in culpables)
 
-    def _entries_culpables(self, globales, rangos):
+    def _entries_culpables(self, globales, rangos, maquinas):
         """Devuelve el conjunto de entries asociados al primer problema detectado.
 
         Reproduce el orden de ``_estado_validacion`` para señalar el campo exacto.
@@ -752,6 +775,30 @@ class TabConfiguracion(ctk.CTkScrollableFrame):
                 culp.update({e_min, e_max}); return culp
             if desde <= hasta:
                 culp.update({e_min, e_max}); return culp
+        # Máquinas.
+        _CAMPOS_TASA = ("prod_mm", "prod_min", "desb_mm", "desb_min")
+        for idx, m_raw in enumerate(maquinas):
+            if idx >= len(self._filas_maquinas):
+                break
+            e_nom, e_pmm, e_pmin, e_dmm, e_dmin, *_ = self._filas_maquinas[idx]
+            mapa_campo = {"prod_mm": e_pmm, "prod_min": e_pmin,
+                          "desb_mm": e_dmm, "desb_min": e_dmin}
+            nombre = str(m_raw.get("nombre", "")).strip()
+            valores_tasa = [str(m_raw.get(c, "")).strip() for c in _CAMPOS_TASA]
+            tiene_datos = nombre or any(valores_tasa)
+            if not tiene_datos:
+                continue
+            if not nombre:
+                culp.add(e_nom); return culp
+            for campo, txt in zip(_CAMPOS_TASA, valores_tasa):
+                if txt == "":
+                    culp.add(mapa_campo[campo]); return culp
+                try:
+                    val = float(txt)
+                except ValueError:
+                    culp.add(mapa_campo[campo]); return culp
+                if val <= 0:
+                    culp.add(mapa_campo[campo]); return culp
         return culp
 
     def _pintar_borde(self, entry, invalido):
