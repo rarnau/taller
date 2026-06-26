@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QVBoxLayout, QWidget)
 
 from .. import theme as T
 from ..widgets import (Badge, chip_desde, columna, fila, label, limpiar_layout,
-                       titulo_seccion)
+                       marco, titulo_seccion)
 
 
 class VistaReal(QWidget):
@@ -107,9 +107,8 @@ class VistaReal(QWidget):
             num.setAlignment(Qt.AlignCenter)
             row_lay.addWidget(num)
             # Trabajando / PARADA
-            trab = QFrame()
-            trab.setStyleSheet(
-                f"QFrame{{background:{T.PANEL}; border:{j['trab_bw']}px solid {j['trab_border']}; border-radius:10px;}}")
+            trab = marco(QFrame(), bg=T.PANEL, border=j["trab_border"],
+                         radius=10, bw=j["trab_bw"])
             tl = QVBoxLayout(trab)
             tl.setContentsMargins(9, 8, 9, 8)
             tl.setSpacing(6)
@@ -117,8 +116,7 @@ class VistaReal(QWidget):
             tl.addWidget(self._chip_row(j["trab"]))
             row_lay.addWidget(trab, 1)
             # CRC
-            crc = QFrame()
-            crc.setStyleSheet(f"QFrame{{background:{T.PANEL}; border:1px solid {T.BORDER}; border-radius:10px;}}")
+            crc = marco(QFrame(), bg=T.PANEL, border=T.BORDER, radius=10)
             cl = QVBoxLayout(crc)
             cl.setContentsMargins(9, 8, 9, 8)
             cl.setSpacing(6)
@@ -159,8 +157,7 @@ class VistaReal(QWidget):
     def _render_maquinas(self, machines):
         limpiar_layout(self.maq_box)
         for m in machines:
-            f = QFrame()
-            f.setStyleSheet(f"QFrame{{background:{T.PANEL}; border:1px solid {m['border']}; border-radius:10px;}}")
+            f = marco(QFrame(), bg=T.PANEL, border=m["border"], radius=10)
             lay = QVBoxLayout(f)
             lay.setContentsMargins(12, 10, 12, 10)
             lay.setSpacing(5)
@@ -199,9 +196,7 @@ class VistaReal(QWidget):
 
 
 def _pill(text: str) -> QFrame:
-    f = QFrame()
-    f.setStyleSheet(
-        f"QFrame{{background:{T.PANEL}; border:1px solid {T.BORDER}; border-radius:7px;}}")
+    f = marco(QFrame(), bg=T.PANEL, border=T.BORDER, radius=7)
     lay = QHBoxLayout(f)
     lay.setContentsMargins(10, 6, 10, 6)
     lay.addWidget(label(text, color=T.TEXT_MUTE, size=11))

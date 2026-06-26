@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QWidget
 
 from .. import theme as T
-from ..widgets import label
+from ..widgets import label, marco
 
 
 class VistaConsola(QWidget):
@@ -13,9 +13,7 @@ class VistaConsola(QWidget):
         self.setStyleSheet("background:transparent;")
         out = QVBoxLayout(self)
         out.setContentsMargins(0, 0, 0, 0)
-        self.box = QFrame()
-        self.box.setStyleSheet(
-            f"QFrame{{background:#0c0f13; border:1px solid {T.BORDER}; border-radius:12px;}}")
+        self.box = marco(QFrame(), bg="#0c0f13", border=T.BORDER, radius=12)
         self.lay = QVBoxLayout(self.box)
         self.lay.setContentsMargins(18, 16, 18, 16)
         self.lay.setSpacing(3)

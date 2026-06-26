@@ -105,7 +105,8 @@ class App(QMainWindow):
         # Barra de pestañas
         tabbar = QFrame()
         tabbar.setFixedHeight(50)
-        tabbar.setStyleSheet(f"QFrame{{background:{T.BG}; border-bottom:1px solid {T.BORDER_SOFT};}}")
+        tabbar.setObjectName("tabbar")
+        tabbar.setStyleSheet(f"QFrame#tabbar{{background:{T.BG}; border-bottom:1px solid {T.BORDER_SOFT};}}")
         tb = QHBoxLayout(tabbar)
         tb.setContentsMargins(14, 0, 14, 0)
         tb.setSpacing(3)
@@ -169,7 +170,8 @@ class App(QMainWindow):
     def _build_statusbar(self) -> QFrame:
         bar = QFrame()
         bar.setFixedHeight(30)
-        bar.setStyleSheet(f"QFrame{{background:{T.PANEL}; border-top:1px solid {T.BORDER_SOFT};}}")
+        bar.setObjectName("statusbar")
+        bar.setStyleSheet(f"QFrame#statusbar{{background:{T.PANEL}; border-top:1px solid {T.BORDER_SOFT};}}")
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(18, 0, 18, 0)
         lay.setSpacing(18)

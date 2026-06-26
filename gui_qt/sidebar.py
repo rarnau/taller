@@ -52,8 +52,9 @@ class Sidebar(QFrame):
     def __init__(self):
         super().__init__()
         self.setFixedWidth(230)
+        self.setObjectName("sidebar")
         self.setStyleSheet(
-            f"QFrame{{background:{T.SIDEBAR}; border-right:1px solid {T.BORDER_SOFT};}}")
+            f"QFrame#sidebar{{background:{T.SIDEBAR}; border-right:1px solid {T.BORDER_SOFT};}}")
         self._speed_btns: dict[int, QPushButton] = {}
         self._build()
 

@@ -17,7 +17,7 @@ from config.persistencia import (obtener_config_global, obtener_estrategia_asign
 from modelos.estrategias import ESTRATEGIAS_ASIGNACION, ESTRATEGIAS_SELECCION
 
 from .. import theme as T
-from ..widgets import label, panel, titulo_seccion
+from ..widgets import label, marco, panel, titulo_seccion
 
 
 def _input(value: str, width: int = 88) -> QLineEdit:
@@ -170,9 +170,7 @@ class VistaConfig(QWidget):
                     m.get("prioridad", ""), turnos]
             row = QHBoxLayout()
             for i, v in enumerate(vals):
-                cell = QFrame()
-                cell.setStyleSheet(
-                    f"QFrame{{background:{T.HOLE}; border:1px solid {T.BORDER_IN}; border-radius:6px;}}")
+                cell = marco(QFrame(), bg=T.HOLE, border=T.BORDER_IN, radius=6)
                 cl = QHBoxLayout(cell)
                 cl.setContentsMargins(8, 6, 8, 6)
                 color = T.TEXT if i == 0 else T.TEXT_2

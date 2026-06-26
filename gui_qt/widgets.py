@@ -34,12 +34,30 @@ def titulo_seccion(text: str, color: str = T.ORANGE, size: int = 13,
                  family=T.FONT_DISPLAY, ls=ls)
 
 
+_marco_uid = 0
+
+
+def marco(frame: QFrame, *, bg: str = T.PANEL, border: str = T.BORDER,
+          radius: int = 12, bw: int = 1) -> QFrame:
+    """Aplica fondo/borde/radio **sólo a este QFrame** (selector por objectName).
+
+    Imprescindible: una regla ``QFrame{border:...}`` también matchea los QLabel
+    hijos (QLabel hereda de QFrame), por lo que un borde de color se "derramaría"
+    sobre cada etiqueta interna. El selector ``QFrame#id`` lo evita.
+    """
+    global _marco_uid
+    _marco_uid += 1
+    name = f"mc{_marco_uid}"
+    frame.setObjectName(name)
+    frame.setStyleSheet(
+        f"QFrame#{name}{{background:{bg}; border:{bw}px solid {border}; border-radius:{radius}px;}}")
+    return frame
+
+
 def panel(padding: int = 16, *, radius: int = 12, bg: str = T.PANEL,
           border: str = T.BORDER) -> QFrame:
     """Tarjeta con fondo, borde y radio (el contenedor base de las vistas)."""
-    f = QFrame()
-    f.setStyleSheet(
-        f"QFrame{{background:{bg}; border:1px solid {border}; border-radius:{radius}px;}}")
+    f = marco(QFrame(), bg=bg, border=border, radius=radius)
     lay = QVBoxLayout(f)
     lay.setContentsMargins(padding, padding, padding, padding)
     lay.setSpacing(10)

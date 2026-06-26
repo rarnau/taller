@@ -7,12 +7,11 @@ from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QVBoxLayout,
 from modelos.kpis import calcular_kpis
 
 from .. import theme as T
-from ..widgets import label, titulo_seccion
+from ..widgets import label, marco, titulo_seccion
 
 
 def _card(lbl: str, val: str, color: str) -> QFrame:
-    f = QFrame()
-    f.setStyleSheet(f"QFrame{{background:{T.PANEL}; border:1px solid {T.BORDER}; border-radius:12px;}}")
+    f = marco(QFrame(), bg=T.PANEL, border=T.BORDER, radius=12)
     lay = QVBoxLayout(f)
     lay.setContentsMargins(16, 18, 16, 18)
     lay.setSpacing(8)
@@ -26,8 +25,7 @@ def _card(lbl: str, val: str, color: str) -> QFrame:
 
 def _util_card(name: str, pct: float) -> QFrame:
     color = T.color_util(pct)
-    f = QFrame()
-    f.setStyleSheet(f"QFrame{{background:{T.PANEL}; border:2px solid {color}; border-radius:12px;}}")
+    f = marco(QFrame(), bg=T.PANEL, border=color, radius=12, bw=2)
     lay = QVBoxLayout(f)
     lay.setContentsMargins(16, 14, 16, 14)
     lay.setSpacing(8)
