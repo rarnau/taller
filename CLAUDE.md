@@ -8,12 +8,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install dependencies
 pip install -r requirements.txt
 
-# Launch the GUI
+# Launch the GUI (CustomTkinter, the original)
 python main.py
+
+# Launch the alternative PySide6/Qt GUI (clon del rediseño web)
+python main_qt.py
 
 # Generate test datasets
 python datos/generar_caso_parada.py
 ```
+
+There are **two GUIs** over the same engine: `gui/` (CustomTkinter, `main.py`) and `gui_qt/` (PySide6/Qt, `main_qt.py`). Both reuse `modelos/`, `config/` and the GUI-free entry points in `cli.py`; neither modifies the model layer. See "Second GUI — `gui_qt/` (PySide6)" below.
 
 ### Tests
 
@@ -35,13 +40,19 @@ python -m pytest                       # runs tests/
 ### Layer separation
 
 ```
-main.py
+main.py                     # launcher CustomTkinter
 └── gui/app.py              # CTk App — wires UI to model, owns playback state
     ├── modelos/taller.py   # TallerCilindros — all simulation logic (no GUI imports)
     └── gui/*.py            # Pure display components (no model imports except app.py)
+
+main_qt.py                  # launcher PySide6/Qt (alternativo)
+└── gui_qt/app.py           # QMainWindow — misma idea, mismo motor, look del rediseño web
+    ├── cli.py / config/ / modelos/kpis.py   # reuso sin tocar modelos/
+    └── gui_qt/**            # vistas Qt puras (no importan modelos salvo enums/kpis read-only)
 ```
 
-**The model layer (`modelos/`) must never import from `gui/`.**
+**The model layer (`modelos/`) must never import from `gui/` or `gui_qt/`.** Neither GUI
+modifies `modelos/`; the Qt one consumes the same GUI-free `cli.py` entry points.
 
 ### Simulation engine — `modelos/taller.py`
 
@@ -175,6 +186,26 @@ To still scale on high-DPI screens, `App.__init__` applies **one fixed scale at 
 Also at module load, `gui/app.py` wraps `CTkBaseClass._update_dimensions_event` with a guard (`_safe_update_dimensions_event`): a widget can receive a `<Configure>` event already queued in Tk **after** it was destroyed (its `_canvas` is `None`), so `_update_dimensions_event` → `_draw` would raise `AttributeError: 'NoneType' object has no attribute 'winfo_exists'`. The wrapper is a no-op when `_canvas` is `None` (the widget is gone — nothing to redraw), live widgets are unaffected. It happens e.g. when the inline filter panel (a `CTkScrollableFrame`) is closed/recreated mid-resize. The monkeypatch is wrapped in `try/except` so a future CTk layout change degrades gracefully instead of breaking startup.
 
 In `gui/vista_realtime.py`, the machine widgets ("rectificadoras") use a `grid` of uniform weighted columns (`grid_columnconfigure(..., weight=1, uniform="maq")`, `sticky="ew"`) so they share the available width responsively — do **not** give them a fixed width. The "Cargue un Excel y ejecute la simulación..." guidance hint (`self.hint_inicio` in `gui/app.py`) lives in the **sidebar** under the action buttons (not as an overlay on Vista Real), and is hidden with `grid_remove()` in `_sincronizar_vista_con_taller()` once data is loaded. The "EN ENFRIAMIENTO" section lives in the **right** column (under the queue) to keep all jaulas visible in the left column.
+
+### Second GUI — `gui_qt/` (PySide6)
+
+`gui_qt/` is an **alternative GUI in PySide6/Qt**, a faithful clone of the web redesign (`simulador_web.html`), launched with `python main_qt.py`. It is **parallel** to `gui/` (CustomTkinter) — both drive the **same engine** and **neither touches `modelos/`**. The Qt GUI reuses the GUI-free entry points in `cli.py`, the persistence layer in `config/`, and `modelos/kpis.py`/`modelos/enums.py` (read-only). The CustomTkinter GUI and `main.py` are the default and are left **unchanged**.
+
+Layout mirrors the web design: a 230px **sidebar** (logo, "Ejecutar Simulación", FLUJO, playback controls ⏮/play/⏹/⏭ + speeds 1×/2×/5×/10× + PARADA marks + seek), a **tab bar** over a `QStackedWidget` (Vista Real, Dashboard, Análisis, Inventario, KPIs, Generación, Configuración, Consola), a loading overlay and a status bar. Files:
+
+| File | Purpose |
+|------|---------|
+| `main_qt.py` | Launcher (`QApplication` + `gui_qt.app.App`). |
+| `gui_qt/theme.py` | Paleta, tipografías y QSS **extraídos del HTML** (`COL_ESTADO`/`TXT_ESTADO` por estado, `color_util` gradiente rojo→verde, `mezclar`). No hardcodear colores en las vistas. |
+| `gui_qt/app.py` | `QMainWindow`: arma sidebar+tabs+status bar, posee el estado de reproducción (un `QTimer` a `800/speed` ms, espejo de `_arm` del HTML) y dispara el runner. **Al arrancar autocarga el Excel de ejemplo y corre una simulación** (UI poblada con datos reales out-of-the-box; degrada con elegancia si falta el Excel). |
+| `gui_qt/runner.py` | `SimRunner(QObject)`: corre la simulación en un **proceso aparte** (`ProcessPoolExecutor` + sondeo con `QTimer`), con el **mismo `initializer`** (`cli.init_worker_simulacion` + `cli.simular_cambios_worker` + `cli.ctx_paralelo`) que `gui/app.py`. Emite `finished(taller)`/`error(str)`. |
+| `gui_qt/viewmodel.py` | `TallerVM`: adapta los `Snapshot` reales a dicts por vista (jaulas, máquinas en 3 estados, cola, enfriando, barras de disponibles, marcas de parada). Espejo de `_sn2interno`/`renderVals` del HTML. |
+| `gui_qt/charts.py` | `VectorChart`: un único widget **QPainter** que pinta polígonos/paths/rects/líneas/puntos en coordenadas **normalizadas** [0,1] (look plano del SVG). Lo comparten Dashboard y Análisis. |
+| `gui_qt/widgets.py` | `Chip`, `Badge`, `panel()`, `titulo_seccion()` y un **`FlowLayout`**/`leyenda()` que envuelve las leyendas a varias líneas (evita que su ancho mínimo desborde las grillas de 2 columnas). |
+| `gui_qt/views/*.py` | Una vista por pestaña. Vista Real se actualiza **por snapshot** (`update_snapshot(idx)`); las demás se refrescan **una vez por taller** (KPIs/Dashboard/Análisis/Inventario/Consola/Generación). |
+| `gui_qt/_capturar.py` | Utilidad de verificación: `QT_QPA_PLATFORM=offscreen python -m gui_qt._capturar <dir>` corre la app headless, simula y guarda un PNG por pestaña. |
+
+Notas de implementación: la simulación es CPU-bound, por eso va en un proceso aparte y el taller vuelve por pickle (igual que la GUI Tk). Los gráficos del HTML eran SVG hechos a mano; en Qt se reproducen con `QPainter` en vez de matplotlib para igualar el look. Para correr/verificar headless: `QT_QPA_PLATFORM=offscreen`; el entorno necesita las libs GL del sistema (`libegl1 libgl1 libxkbcommon0`). El motor y su golden master quedan intactos (la suite sigue en verde).
 
 ## Key Design Decisions
 
