@@ -33,13 +33,14 @@ _HEADERS = ["ID", "DIAMETRO", "ORIGINAL", "DESGASTE", "ESTADO", "JAULA"]
 
 def _state_colors() -> Dict[str, QColor]:
     """Mapa de estado->color de fila, alineado con el tema global."""
+    palette = tk_theme.COLORES_ESTADO_DASH
     return {
-        "Trabajando": QColor("#213347"),
-        "CRC": QColor("#383329"),
-        "Disponible": QColor("#17352D"),
-        "Enfriando": QColor("#1E3840"),
-        "A rectificar": QColor("#42262C"),
-        "Rectificando": QColor("#332C48"),
+        "Trabajando": QColor(palette["Trabajando"]).darker(320),
+        "CRC": QColor(palette["CRC"]).darker(320),
+        "Disponible": QColor(palette["Disponible"]).darker(320),
+        "Enfriando": QColor(palette["Enfriando"]).darker(320),
+        "A rectificar": QColor(palette["A rectificar"]).darker(320),
+        "Rectificando": QColor(palette["Rectificando"]).darker(320),
         "Baja": QColor("#262C35"),
     }
 
