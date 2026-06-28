@@ -3,10 +3,12 @@ from typing import Any, Dict
 
 import numpy as np
 
+from config import tema
 from modelos.enums import EstadoCilindro
+from modelos.taller import TallerCilindros
 
 
-def calcular_kpis(taller) -> Dict[str, Any]:
+def calcular_kpis(taller: TallerCilindros) -> Dict[str, Any]:
     """Devuelve los KPIs de una simulación ya ejecutada.
 
     Única fuente de verdad para las métricas: la GUI (tab KPIs) y el CLI la
@@ -45,13 +47,13 @@ def calcular_kpis(taller) -> Dict[str, Any]:
     utilizacion_maquinas: Dict[str, float] = {}
     utilizacion_neta: Dict[str, float] = {}
     for nombre, mq in taller.maquinas.items():
-        op_min = mq.minutos_operativos_entre(t0, t1) if t0 is not None else 0.0
+        op_min = mq.minutos_operativos_entre(t0, t1) if (t0 is not None and t1 is not None) else 0.0
         disp = (op_min / calendario_min * 100) if calendario_min > 0 else 0.0
         neta = (mq.tiempo_total_ocupada_min / op_min * 100) if op_min > 0 else 0.0
         utilizacion_maquinas[nombre] = disp
         utilizacion_neta[nombre] = neta
 
-    return {
+    kpis = {
         "cilindros_totales": total,
         "activos": activos,
         "bajas": bajas,
@@ -64,3 +66,21 @@ def calcular_kpis(taller) -> Dict[str, Any]:
         "utilizacion_maquinas_pct": utilizacion_maquinas,
         "utilizacion_neta_pct": utilizacion_neta,
     }
+
+    # Metadatos para vistas (GUI/CLI): sólo nombre/label (sin color).
+    metric_order = [
+        key for key, val in kpis.items()
+        if not isinstance(val, dict)
+    ]
+    metric_meta: Dict[str, Dict[str, str]] = {}
+    for key in metric_order:
+        base = tema.KPI_META_BASE.get(key, {})
+        label = str(base.get("label", key.replace("_", " ").title()))
+
+        metric_meta[key] = {
+            "label": label,
+        }
+
+    kpis["metric_order"] = metric_order
+    kpis["metric_meta"] = metric_meta
+    return kpis
