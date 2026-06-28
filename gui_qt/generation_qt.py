@@ -8,10 +8,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 import pandas as pd
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
@@ -45,6 +41,7 @@ from config.persistencia import (
 )
 from modelos import turnos as turnos_mod
 from modelos.generador_cambios import GENERADORES_CAMBIOS, ajustar_modelo, generar_cambios
+from gui_qt.widgets.generation_timeline_qt import GenerationTimelineChart
 from gui_qt.widgets import LabeledFieldRow, SectionCard
 
 
@@ -145,8 +142,8 @@ class GenerationPanel(QWidget):
         row.setSpacing(12)
         root.addLayout(row)
 
-        row.addWidget(self._build_config_card(), 1)
-        row.addWidget(self._build_adapt_card(), 1)
+        row.addWidget(self._build_config_card(), 1, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(self._build_adapt_card(), 1, Qt.AlignmentFlag.AlignTop)
 
         bottom = QFrame(self)
         bottom.setObjectName("CardSoft")
@@ -162,11 +159,11 @@ class GenerationPanel(QWidget):
         tl_title.setObjectName("CardTitle")
         bottom_col.addWidget(tl_title)
 
-        # Timeline visual (matplotlib simplificado)
-        self.fig_timeline = Figure(figsize=(9, 1.4), facecolor="#16191d", constrained_layout=True)
-        self.canvas_timeline = FigureCanvas(self.fig_timeline)
-        self.canvas_timeline.setMinimumHeight(100)
-        bottom_col.addWidget(self.canvas_timeline)
+        # Timeline visual nativa Qt (consistente con Dashboard/Análisis)
+        self.timeline_chart = GenerationTimelineChart(self)
+        self.timeline_chart.setMinimumHeight(100)
+        self.timeline_chart.snapshotSelected.connect(self._go_to_snapshot_from_marker)
+        bottom_col.addWidget(self.timeline_chart)
         
         # Tabla de cambios (sin headers)
         self.tbl_changes = QTableWidget(self)
@@ -210,7 +207,7 @@ class GenerationPanel(QWidget):
             self,
             object_name="CardSoft",
             title="Configuracion",
-            margins=(14, 4, 14, 14),
+            margins=(14, 8, 14, 14),
             spacing=6,
         )
         col = card.content_layout()
@@ -263,6 +260,9 @@ class GenerationPanel(QWidget):
         form.addRow("Régimen de turnos", turnos_row)
 
         col.addLayout(form)
+
+        # Mantiene la accion principal pegada al borde inferior de la card.
+        col.addStretch(1)
 
         btn_save = QPushButton("Guardar configuracion")
         btn_save.setObjectName("PlaybackButton")
@@ -743,20 +743,12 @@ class GenerationPanel(QWidget):
 
     def _render_timeline(self, cambios_df: pd.DataFrame | None) -> None:
         """Dibuja timeline visual con barras coloreadas por jaula, altura completa."""
-        self.fig_timeline.clear()
-        ax = self.fig_timeline.add_subplot(111)
-        ax.set_facecolor("#16191d")
         
         # Limpia la tabla
         self.tbl_changes.setRowCount(0)
         
         if cambios_df is None or cambios_df.empty:
-            ax.text(0.5, 0.5, "Sin cambios", color="#9aa3b2", 
-                   ha="center", va="center", transform=ax.transAxes, fontsize=9)
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, 1)
-            ax.axis("off")
-            self.canvas_timeline.draw_idle()
+            self.timeline_chart.set_data([], None, None, parada_marks=[], msg="Sin cambios")
             return
 
         df = cambios_df.copy()
@@ -764,67 +756,23 @@ class GenerationPanel(QWidget):
         df = df.dropna(subset=["Fecha_Hora"]).sort_values("Fecha_Hora")
         
         if df.empty:
-            ax.text(0.5, 0.5, "Fechas invalidas", color="#9aa3b2", 
-                   ha="center", va="center", transform=ax.transAxes, fontsize=9)
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, 1)
-            ax.axis("off")
-            self.canvas_timeline.draw_idle()
+            self.timeline_chart.set_data([], None, None, parada_marks=[], msg="Fechas invalidas")
             return
 
-        # Colores por jaula (cíclico sobre JAULA_COLORS)
-        def color_jaula(j: int) -> str:
-            return JAULA_COLORS[(int(j) - 1) % len(JAULA_COLORS)]
-        
-        # Timeline visual: barras verticales por cada cambio
         t_min = df["Fecha_Hora"].min().to_pydatetime()
         t_max = df["Fecha_Hora"].max().to_pydatetime()
-        t_range = (t_max - t_min).total_seconds()
-        
-        ax.set_xlim(-0.02, 1.02)
-        ax.set_ylim(0, 1)
-        
-        # Fondo sutil con color levemente diferente
-        ax.axhspan(0, 1, color="#1a1f26", alpha=0.4, zorder=0, linewidth=0)
-        
+
         # Agrupa cambios por fecha para desplazar múltiples en la misma fecha
         df["fecha_solo"] = df["Fecha_Hora"].dt.date
-        cambios_por_fecha = df.groupby("fecha_solo").size()
-        
-        # Dibuja barras verticales, desplazadas si hay múltiples en la misma fecha
+        rows_timeline: list[tuple[datetime, int]] = []
         for fecha_solo, group in df.groupby("fecha_solo"):
-            n_cambios_fecha = len(group)
-            for idx_dentro, (_, row) in enumerate(group.iterrows()):
+            for _, row in group.iterrows():
                 t = row["Fecha_Hora"].to_pydatetime()
-                x = (t - t_min).total_seconds() / t_range if t_range > 0 else 0.5
-                
-                # Desplazamiento lateral si hay múltiples cambios en la misma fecha
-                if n_cambios_fecha > 1:
-                    offset = (idx_dentro - (n_cambios_fecha - 1) / 2) * 0.003
-                    x = x + offset
-                
                 jaula = int(row["Jaula"]) if pd.notna(row["Jaula"]) else 1
-                color = color_jaula(jaula)
-                # Barra vertical de altura completa
-                ax.plot([x, x], [0, 1], color=color, linewidth=1.6,
-                       alpha=0.95, solid_capstyle="round", zorder=2)
-        
-        # Marcas de ejes de tiempo (ticks con etiquetas de fecha)
-        n_ticks = min(6, max(2, len(df)))
-        tick_positions = [i / (n_ticks - 1) for i in range(n_ticks)] if n_ticks > 1 else [0.5]
-        ax.set_xticks(tick_positions)
-        tick_labels = []
-        for tp in tick_positions:
-            t_tick = t_min + pd.Timedelta(seconds=tp * t_range)
-            tick_labels.append(t_tick.strftime("%d/%m %H:%M"))
-        ax.set_xticklabels(tick_labels, color="#9aa3b2", fontsize=7)
-        ax.tick_params(axis="x", colors="#3a4250", length=4, pad=4)
-        ax.set_yticks([])
-        # Quita bordes salvo eje inferior
-        for name, sp in ax.spines.items():
-            sp.set_visible(False)
-        
-        self.canvas_timeline.draw_idle()
+                rows_timeline.append((t, jaula))
+
+        parada_marks = self._parada_markers(t_min, t_max)
+        self.timeline_chart.set_data(rows_timeline, t_min, t_max, parada_marks=parada_marks)
         
         # Llena la tabla con los cambios
         self.tbl_changes.setRowCount(len(df))
@@ -850,6 +798,12 @@ class GenerationPanel(QWidget):
             item_mm = QTableWidgetItem(mm_val)
             item_mm.setForeground(Qt.GlobalColor.white)
             self.tbl_changes.setItem(row_idx, 2, item_mm)
+
+    def _go_to_snapshot_from_marker(self, idx: int) -> None:
+        """Navega al snapshot seleccionado desde la timeline nativa."""
+        if self._on_go_to_snapshot is None:
+            return
+        self._on_go_to_snapshot(int(idx))
 
     def _parada_markers(self, t0: datetime, t1: datetime) -> list[tuple[datetime, int]]:
         """Retorna marcas (tiempo, idx_snapshot) para cada inicio de PARADA en ventana."""
