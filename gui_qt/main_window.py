@@ -360,7 +360,7 @@ class MainWindow(QMainWindow):
         # Sincroniza paneles con el resultado final de la corrida.
         self._render_snapshot_summary()
         self.dashboard_panel.render(self.taller)
-        self.analysis_panel.render(self.taller)
+        self.analysis_panel.render(self.taller, self.stock_df)
         self.kpis_panel.render(self.taller)
         self.inventory_panel.refresh(taller=self.taller, stock_df=self.stock_df)
         # Entrega snapshots a Generacion para overlays/marcadores de PARADA.
@@ -413,6 +413,7 @@ class MainWindow(QMainWindow):
         self.status_strategy.setText(f"estrategia: {self.estrategia}")
         self._update_playback_markers()
         self.dashboard_panel.set_cursor(idx, total)
+        self.analysis_panel.set_cursor(idx, total)
         self.realtime_view.update_from_snapshot(snap)
 
     def _update_playback_markers(self) -> None:
