@@ -39,12 +39,15 @@ class DashboardPanel(QWidget):
         self.grid.setHorizontalSpacing(14)
         self.grid.setVerticalSpacing(14)
         host_box.addLayout(self.grid)
+        host_box.addStretch(1)  # cards al tope, el sobrante queda debajo (como el HTML).
         self.scroll.setWidget(self._grid_host)
         self._root.addWidget(self.scroll)
 
         # Gráficos (se crean una vez; render() les pasa datos).
         self.chart_estados = StackedAreaChart()
+        self.chart_estados.setMaximumHeight(300)
         self.chart_buffer = BufferChart()
+        self.chart_buffer.setMaximumHeight(300)
         self.chart_util = GroupedBarChart()
         self.chart_gantt = GanttChart()
 
@@ -85,9 +88,6 @@ class DashboardPanel(QWidget):
         self.grid.addWidget(self.card_gantt, 1, 1)
         self.grid.setColumnStretch(0, 1)
         self.grid.setColumnStretch(1, 1)
-        # Las dos filas se reparten el alto disponible (cards llenan el espacio).
-        self.grid.setRowStretch(0, 1)
-        self.grid.setRowStretch(1, 1)
 
     # ── API consumida por MainWindow ────────────────────────────────────────
     def render(self, taller) -> None:
