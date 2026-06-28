@@ -102,6 +102,11 @@ class _TimeChart(QWidget):
         p.setPen(QPen(_qc(tema.DASH_CURSOR, 210), 2))
         p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()))
 
+    def _draw_baseline_vacia(self, p: QPainter, r: QRectF) -> None:
+        """Sin datos: sólo la línea base, para que la card vacía se lea como un gráfico."""
+        p.setPen(QPen(_qc(tema.DASH_AXIS), 1.5))
+        p.drawLine(QPointF(r.left(), r.bottom()), QPointF(r.right(), r.bottom()))
+
 
 class StackedAreaChart(_TimeChart):
     """Área apilada del conteo de cilindros por estado a lo largo del tiempo."""
@@ -125,6 +130,7 @@ class StackedAreaChart(_TimeChart):
         r = self._plot_rect()
         n = len(self._tiempos)
         if n < 2:
+            self._draw_baseline_vacia(p, r)
             p.end()
             return
         t0, t1 = self._tiempos[0], self._tiempos[-1]
@@ -189,6 +195,7 @@ class BufferChart(_TimeChart):
         r = self._plot_rect()
         n = len(self._tiempos)
         if n < 2:
+            self._draw_baseline_vacia(p, r)
             p.end()
             return
         t0, t1 = self._tiempos[0], self._tiempos[-1]
@@ -218,11 +225,14 @@ class BufferChart(_TimeChart):
 
 # ── Gráficos sin eje temporal ────────────────────────────────────────────────
 class GroupedBarChart(QWidget):
-    """Barras agrupadas por máquina: Disponible (verde) vs Neta (púrpura), 0-100%."""
+    """Barras agrupadas por máquina: Disponible (verde) vs Neta (púrpura), 0-100%.
 
-    _BAR_W = 30
-    _BAR_GAP = 8
-    _GROUP_GAP = 26
+    Cada máquina se centra en un *slot* de ancho ``width/n`` para repartir los
+    grupos a lo ancho (y aprovechar el espacio) en vez de apelotonarlos.
+    """
+
+    _BAR_W = 34
+    _BAR_GAP = 12
     _BARS_H = 150
     _VAL_H = 16
     _NAME_H = 22
@@ -248,12 +258,12 @@ class GroupedBarChart(QWidget):
             return
         n = len(self._maquinas)
         group_w = 2 * self._BAR_W + self._BAR_GAP
-        total_w = n * group_w + (n - 1) * self._GROUP_GAP
-        start_x = max(0.0, (self.width() - total_w) / 2.0)
+        slot_w = self.width() / n
         baseline = self._VAL_H + self._BARS_H
 
         for gi, maq in enumerate(self._maquinas):
-            gx = start_x + gi * (group_w + self._GROUP_GAP)
+            center = slot_w * (gi + 0.5)
+            gx = center - group_w / 2
             pares = (
                 (float(self._disp.get(maq, 0.0)), tema.DASH_GREEN),
                 (float(self._neta.get(maq, 0.0)), tema.DASH_PURPLE),
@@ -275,7 +285,7 @@ class GroupedBarChart(QWidget):
             p.setFont(QFont(tema.FONT_MONO, 9))
             p.setPen(QPen(_qc(tema.DASH_LEGEND_TEXT)))
             p.drawText(
-                QRectF(gx - 10, baseline + 4, group_w + 20, self._NAME_H),
+                QRectF(center - slot_w / 2, baseline + 4, slot_w, self._NAME_H),
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
                 maq,
             )
