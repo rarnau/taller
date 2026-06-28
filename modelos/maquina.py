@@ -1,6 +1,7 @@
 """
 Modelo de una máquina rectificadora de cilindros.
 """
+import hashlib
 from bisect import bisect_right
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
@@ -50,6 +51,17 @@ class MaquinaRectificadora:
         self._inicio_rectificado: Optional[datetime] = None
         self._hitos_t: Optional[List[datetime]] = None
         self._hitos_min: Optional[List[float]] = None
+
+        # Tasa de falla: fracción [0,1] del tiempo OPERATIVO (en turno) en que la
+        # máquina está caída. 0.0 (defecto) = sin fallas, comportamiento histórico
+        # byte-for-byte. La realización es determinista y stateless (ver en_falla):
+        # cada hora operativa se sortea por hash(seed, nombre, hora), de modo que
+        # ~tasa_falla de las horas quedan en falla. La seed de la corrida (run-level)
+        # la fija TallerCilindros.simular(); None ⇒ sin fallas aunque tasa>0.
+        # Las fallas pausan el rectificado y se retoma al salir, igual que un hueco
+        # de turno (se hornean en calcular_fin_operativo vía _hora_trabajable).
+        self.tasa_falla: float = 0.0
+        self._seed_fallas: Optional[int] = None
 
     def reiniciar_estado_corrida(self) -> None:
         """Resetea el estado acumulado por una corrida (no la configuración).
@@ -132,6 +144,60 @@ class MaquinaRectificadora:
             t = tramo_fin
         return total
 
+    # ── Tasa de falla (capa de disponibilidad sobre los turnos) ──────────────
+
+    def _tiene_fallas(self) -> bool:
+        """True si esta corrida modela fallas (tasa > 0 y seed fijada)."""
+        return self.tasa_falla > 0 and self._seed_fallas is not None
+
+    def en_falla(self, dt: datetime) -> bool:
+        """True si la máquina está caída por falla en la hora de ``dt``.
+
+        Realización **determinista y stateless**: cada hora absoluta se sortea
+        por un hash de ``(seed, nombre, hora)`` mapeado a ``[0,1)`` y comparado
+        contra ``tasa_falla``. Así ~``tasa_falla`` de las horas quedan en falla,
+        de forma reproducible (misma seed ⇒ mismo patrón), sin estado ni orden de
+        consulta, e independiente de los desplazamientos por PARADA (la falla es
+        un proceso de reloj exógeno, como los turnos). Con ``tasa_falla == 0`` o
+        sin seed devuelve ``False`` siempre (comportamiento histórico).
+        """
+        if not self._tiene_fallas():
+            return False
+        clave = (f"{self._seed_fallas}|{self.nombre}|"
+                 f"{dt.year:04d}{dt.month:02d}{dt.day:02d}{dt.hour:02d}")
+        h = hashlib.sha256(clave.encode("utf-8")).digest()
+        val = int.from_bytes(h[:8], "big") / float(1 << 64)  # uniforme en [0,1)
+        return val < self.tasa_falla
+
+    def disponible_para_trabajo(self, dt: datetime) -> bool:
+        """True si la máquina puede rectificar en ``dt``: en turno **y** sin falla.
+
+        Es el predicado que reemplaza a ``esta_operativa`` en toda la maquinaria
+        de pausa/reanudación: una hora no trabajable (fuera de turno o en falla)
+        no consume trabajo y se saltea, de modo que el cilindro queda montado y
+        retoma al volver a estar trabajable. Sin fallas equivale a ``esta_operativa``.
+        """
+        return self.esta_operativa(dt) and not self.en_falla(dt)
+
+    def minutos_falla_entre(self, t0: datetime, t1: datetime) -> float:
+        """Minutos de tiempo **operativo** (en turno) perdidos por falla en [t0, t1).
+
+        Solo cuenta horas que están en turno y además en falla (la falla es 'del
+        tiempo disponible'). Alimenta el KPI explícito de fallas. Devuelve 0.0 si
+        no hay fallas en esta corrida.
+        """
+        if t1 <= t0 or not self._tiene_fallas():
+            return 0.0
+        total = 0.0
+        t = t0
+        while t < t1:
+            fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            tramo_fin = min(fin_hora, t1)
+            if self.esta_operativa(t) and self.en_falla(t):
+                total += (tramo_fin - t).total_seconds() / 60.0
+            t = tramo_fin
+        return total
+
     def _construir_hitos_progreso(
         self, inicio: datetime, total_min: float
     ) -> Tuple[List[datetime], List[float]]:
@@ -145,7 +211,9 @@ class MaquinaRectificadora:
         tiempo operativo. Cada segmento ``[hitos_t[i], hitos_t[i+1])`` cae
         íntegro dentro de una hora de grilla, así su operatividad es constante.
         Es la única fuente del fin operativo (ver ``calcular_fin_operativo``).
-        Solo tiene sentido con ``grilla_operativa is not None`` y ``total_min > 0``.
+        Solo tiene sentido cuando hay turnos o fallas (ver ``calcular_fin_operativo``)
+        y ``total_min > 0``. Las horas no trabajables (fuera de turno **o** en
+        falla) se saltean: el cilindro queda montado y retoma al volver.
         """
         hitos_t: List[datetime] = [inicio]
         hitos_min: List[float] = [0.0]
@@ -155,7 +223,7 @@ class MaquinaRectificadora:
         limite = inicio + timedelta(days=366)  # cota de seguridad anti-bucle
         while restante > 0 and t < limite:
             fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-            if self.grilla_operativa[t.weekday()][t.hour]:
+            if self.disponible_para_trabajo(t):
                 disp = (fin_hora - t).total_seconds() / 60.0
                 if disp >= restante:
                     acum += restante
@@ -174,11 +242,11 @@ class MaquinaRectificadora:
 
         Avanza desde ``inicio`` consumiendo solo las horas operativas y saltando
         los huecos no operativos (el cilindro queda montado y retoma donde quedó).
-        Con grilla None devuelve ``inicio + minutos_op`` (comportamiento histórico).
-        Se asume que la máquina está operativa en ``inicio`` (solo se asigna
-        trabajo en ese caso), por lo que siempre progresa.
+        Con grilla None y sin fallas devuelve ``inicio + minutos_op``
+        (comportamiento histórico). Se asume que la máquina está disponible en
+        ``inicio`` (solo se asigna trabajo en ese caso), por lo que siempre progresa.
         """
-        if self.grilla_operativa is None or minutos_op <= 0:
+        if (self.grilla_operativa is None and not self._tiene_fallas()) or minutos_op <= 0:
             return inicio + timedelta(minutes=minutos_op)
         return self._construir_hitos_progreso(inicio, minutos_op)[0][-1]
 
@@ -190,7 +258,9 @@ class MaquinaRectificadora:
         """
         if self._inicio_rectificado is None:
             return 0.0
-        if self.grilla_operativa is None or self._hitos_t is None:
+        # Sin hitos precalculados (grilla 24/7 y sin fallas) el progreso es reloj
+        # directo; si se construyeron hitos (por turnos y/o fallas) se resuelven.
+        if self._hitos_t is None:
             return max(0.0, (tiempo - self._inicio_rectificado).total_seconds() / 60.0)
 
         idx = bisect_right(self._hitos_t, tiempo) - 1
@@ -198,18 +268,23 @@ class MaquinaRectificadora:
             return 0.0
         consumido = self._hitos_min[idx]
         base = self._hitos_t[idx]
-        if tiempo > base and self.grilla_operativa[base.weekday()][base.hour]:
+        if tiempo > base and self.disponible_para_trabajo(base):
             consumido += (tiempo - base).total_seconds() / 60.0
         return min(consumido, self._hitos_min[-1])
 
     def proxima_apertura(self, desde: datetime) -> Optional[datetime]:
-        """Próximo instante operativo a partir de ``desde`` (None si nunca lo está)."""
-        if self.grilla_operativa is None or self.esta_operativa(desde):
+        """Próximo instante **trabajable** desde ``desde`` (turno y sin falla).
+
+        None si nunca vuelve a estar trabajable dentro de la cota. Sin turnos ni
+        fallas devuelve ``desde`` (siempre trabajable). Cubre tanto la reapertura
+        de turno como el fin de una falla.
+        """
+        if self.disponible_para_trabajo(desde):
             return desde
         t = desde.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
         limite = desde + timedelta(days=8)  # una semana basta para cubrir el ciclo
         while t < limite:
-            if self.grilla_operativa[t.weekday()][t.hour]:
+            if self.disponible_para_trabajo(t):
                 return t
             t += timedelta(hours=1)
         return None
@@ -232,11 +307,12 @@ class MaquinaRectificadora:
         self.cilindro_actual = cilindro
         self.minutos_trabajo_actual = duracion_minutos
         self._inicio_rectificado = tiempo_actual
-        # El fin contempla los turnos no operativos: si la máquina para en medio
-        # del trabajo, el cilindro retoma donde quedó al reabrir el turno. Con
-        # turnos se precalculan los hitos una sola vez (fuente única del fin); con
-        # grilla 24/7 el fin es la suma directa y el progreso es reloj directo.
-        if self.grilla_operativa is None or duracion_minutos <= 0:
+        # El fin contempla los huecos no trabajables (turno cerrado y/o falla): si
+        # la máquina para en medio del trabajo, el cilindro retoma donde quedó al
+        # reabrir. Con turnos y/o fallas se precalculan los hitos una sola vez
+        # (fuente única del fin); con grilla 24/7 y sin fallas el fin es la suma
+        # directa y el progreso es reloj directo.
+        if (self.grilla_operativa is None and not self._tiene_fallas()) or duracion_minutos <= 0:
             self._hitos_t = None
             self._hitos_min = None
             self.tiempo_fin_rectificado = tiempo_actual + timedelta(minutes=duracion_minutos)

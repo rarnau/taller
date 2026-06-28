@@ -224,13 +224,23 @@ def _buscar_maquina(cfg: Dict[str, Any], nombre: str) -> Optional[Dict[str, Any]
     return None
 
 
+def _validar_tasa_falla(tasa: float) -> float:
+    """Valida y normaliza una tasa de falla (fracción [0,1])."""
+    t = float(tasa)
+    if not (0.0 <= t <= 1.0):
+        raise ValueError("La tasa de falla debe estar entre 0 y 1 (fracción del tiempo disponible).")
+    return t
+
+
 def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: float,
                 desb_mm: float, desb_min: float, prioridad: str = "produccion",
-                turnos: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                turnos: Optional[Dict[str, Any]] = None,
+                tasa_falla: Optional[float] = None) -> Dict[str, Any]:
     """Agrega una máquina nueva. Lanza ValueError si el nombre ya existe.
 
     ``turnos`` (esquema de trabajo) es opcional; si se omite, la máquina opera
-    24/7 (no se persiste la clave).
+    24/7 (no se persiste la clave). ``tasa_falla`` (fracción [0,1] del tiempo
+    disponible perdido por fallas) es opcional; solo se persiste cuando es > 0.
     """
     nombre = str(nombre).strip()
     if not nombre:
@@ -247,16 +257,21 @@ def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: f
     }
     if turnos is not None:
         maq["turnos"] = turnos
+    if tasa_falla is not None and _validar_tasa_falla(tasa_falla) > 0:
+        maq["tasa_falla"] = _validar_tasa_falla(tasa_falla)
     cfg.setdefault("maquinas", []).append(maq)
     return cfg
 
 
 def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None,
                 desb_mm=None, desb_min=None, prioridad=None,
-                turnos: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                turnos: Optional[Dict[str, Any]] = None,
+                tasa_falla: Optional[float] = None) -> Dict[str, Any]:
     """Modifica los campos indicados de una máquina existente.
 
-    ``turnos`` reemplaza el esquema de trabajo cuando no es None.
+    ``turnos`` reemplaza el esquema de trabajo cuando no es None. ``tasa_falla``
+    (fracción [0,1]) reemplaza la tasa de falla cuando no es None: si es 0 se
+    elimina la clave (vuelve a 24/7 sin fallas), si es > 0 se persiste.
     """
     maq = _buscar_maquina(cfg, nombre)
     if not maq:
@@ -276,6 +291,12 @@ def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None
         maq["prioridad"] = prioridad
     if turnos is not None:
         maq["turnos"] = turnos
+    if tasa_falla is not None:
+        t = _validar_tasa_falla(tasa_falla)
+        if t > 0:
+            maq["tasa_falla"] = t
+        else:
+            maq.pop("tasa_falla", None)
     return cfg
 
 
@@ -283,6 +304,12 @@ def obtener_turnos(cfg: Dict[str, Any], nombre: str) -> Optional[Dict[str, Any]]
     """Devuelve el esquema de turnos de una máquina (None = 24/7 o inexistente)."""
     maq = _buscar_maquina(cfg, nombre)
     return maq.get("turnos") if maq else None
+
+
+def obtener_tasa_falla(cfg: Dict[str, Any], nombre: str) -> float:
+    """Devuelve la tasa de falla de una máquina (0.0 = sin fallas o inexistente)."""
+    maq = _buscar_maquina(cfg, nombre)
+    return float(maq.get("tasa_falla", 0.0)) if maq else 0.0
 
 
 def remove_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:

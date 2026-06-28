@@ -248,6 +248,9 @@ class TallerCilindros:
             # grilla horaria 7×24; si no, queda None (siempre operativa, 24/7).
             esquema = m.get("turnos")
             maq.grilla_operativa = turnos_mod.expandir(esquema) if esquema else None
+            # Tasa de falla por máquina (fracción del tiempo operativo). Ausente o
+            # 0 ⇒ sin fallas. La seed (run-level) la fija simular(); ver maquina.en_falla.
+            maq.tasa_falla = float(m.get("tasa_falla", 0.0) or 0.0)
             self.maquinas[nombre] = maq
 
     # ── Carga de datos desde Excel ──────────────────────────────────────────
@@ -803,6 +806,9 @@ class TallerCilindros:
 
         for m_nombre, maq in self.maquinas.items():
             sn.detalle_maquinas_operativa[m_nombre] = maq.esta_operativa(tiempo)
+            # Estado de falla en este instante (para que la GUI marque demoras por
+            # falla en Vista Real y el Gantt). False siempre con tasa_falla=0.
+            sn.detalle_maquinas_falla[m_nombre] = maq.en_falla(tiempo)
             if maq.ocupada and maq.cilindro_actual:
                 c = maq.cilindro_actual
                 progreso = 0.0
@@ -837,9 +843,11 @@ class TallerCilindros:
         for nombre, maq in self.maquinas.items():
             if maq.ocupada:
                 continue
-            # Fuera de turno: no rectifica. Si hay cola, programar un despertar
-            # en la próxima apertura (sin duplicar) y seguir con otras máquinas.
-            if not maq.esta_operativa(tiempo):
+            # No disponible (fuera de turno o caída por falla): no rectifica. Si
+            # hay cola, programar un despertar en la próxima hora trabajable (sin
+            # duplicar) y seguir con otras máquinas. proxima_apertura cubre tanto
+            # la reapertura de turno como el fin de la falla.
+            if not maq.disponible_para_trabajo(tiempo):
                 if cola and not maq._despertar_programado:
                     apertura = maq.proxima_apertura(tiempo)
                     if apertura is not None:
@@ -1143,8 +1151,18 @@ class TallerCilindros:
 
     # ── Simulación ──────────────────────────────────────────────────────────
 
-    def simular(self, estrategia: str = "mayor_diametro", callback_log: Optional[Callable[[str], None]] = None) -> None:
-        """Ejecuta la simulación completa basada en los eventos programados."""
+    def simular(self, estrategia: str = "mayor_diametro",
+                callback_log: Optional[Callable[[str], None]] = None,
+                seed: Optional[int] = None) -> None:
+        """Ejecuta la simulación completa basada en los eventos programados.
+
+        ``seed`` es la semilla (run-level) que determina la realización de las
+        fallas de máquina (cuándo y cuánto cae cada una para alcanzar su
+        ``tasa_falla``). ``None`` ⇒ sin fallas reproducibles (cada máquina sin
+        seed no falla, ver ``MaquinaRectificadora.en_falla``); para Monte Carlo se
+        barre esta seed (típicamente la misma de la generación de cambios). No se
+        persiste. Con todas las ``tasa_falla == 0`` la seed no tiene efecto.
+        """
         self.estrategia_seleccion = estrategia
         self.alertas.clear()
         self.snapshots.clear()
@@ -1152,9 +1170,11 @@ class TallerCilindros:
         # Estado acumulado por corrida de las máquinas: se reinicia para que
         # volver a llamar simular() sobre la misma instancia no duplique el
         # historial ni tiempo_total_ocupada_min (lo que inflaría la utilización
-        # y el Gantt). No toca la configuración (tasas, prioridad, turnos).
+        # y el Gantt). No toca la configuración (tasas, prioridad, turnos,
+        # tasa_falla). La seed de fallas (run-level) se fija acá en cada máquina.
         for maq in self.maquinas.values():
             maq.reiniciar_estado_corrida()
+            maq._seed_fallas = seed
         self._sin_maquina_alertados.clear()
 
         def _log(msg: str) -> None:
