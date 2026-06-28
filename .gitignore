@@ -8,6 +8,3 @@ dist/
 build/
 .env
 .venv
-
-# Artefacto de adaptación del generador de cambios (modelo aprendido, se regenera)
-config/generator_model.json
