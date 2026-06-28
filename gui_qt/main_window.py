@@ -344,7 +344,7 @@ class MainWindow(QMainWindow):
         self.slider.setMaximum(max(0, self.playback.total_snapshots - 1))
         self.slider.setValue(0)
         self.realtime_view.set_jaula_count(self.taller.cantidad_jaulas)
-        self.realtime_view.set_machine_names(list(self.taller.maquinas.keys()))
+        self.realtime_view.set_machine_names(list(self.taller.machines.keys()))
         mapa = {}
         for i in range(1, self.taller.cantidad_jaulas + 1):
             ss = self.taller.obtener_substock_por_jaula(i)

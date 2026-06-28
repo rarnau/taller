@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
 )
 
 from config import tema as tk_theme
-from modelos.enums import EstadoCilindro
 
 
 _HEADERS = ["ID", "DIAMETRO", "ORIGINAL", "DESGASTE", "ESTADO", "JAULA"]
@@ -122,14 +121,14 @@ class InventoryPanel(QWidget):
 
     def _build_rows(self, taller=None, stock_df: pd.DataFrame | None = None) -> List[List[str]]:
         """Normaliza el origen activo a filas compatibles con la tabla."""
-        if taller is not None and getattr(taller, "cilindros", None):
+        if taller is not None and getattr(taller, "cylinders", None):
             rows = []
-            for c in sorted(taller.cilindros.values(), key=lambda x: x.diametro, reverse=True):
-                d0 = float(getattr(c, "diametro_original", c.diametro))
-                d1 = float(c.diametro)
+            for c in sorted(taller.cylinders.values(), key=lambda x: x.diameter, reverse=True):
+                d0 = float(getattr(c, "original_diameter", c.diameter))
+                d1 = float(c.diameter)
                 desgaste = d1 - d0
-                estado = c.estado.value if hasattr(c, "estado") else "-"
-                jaula = str(c.jaula) if c.jaula is not None else "-"
+                estado = c.state.value if hasattr(c, "state") else "-"
+                jaula = str(c.stand) if c.stand is not None else "-"
                 rows.append(
                     [
                         str(c.id),

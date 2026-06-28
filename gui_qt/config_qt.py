@@ -44,8 +44,8 @@ from config.persistencia import (
     set_rango,
     set_sim,
 )
-from modelos import turnos as turnos_mod
-from modelos.estrategias import ESTRATEGIAS_ASIGNACION, ESTRATEGIAS_SELECCION
+from models import shifts as turnos_mod
+from models.strategies import ASSIGNMENT_STRATEGIES, SELECTION_STRATEGIES
 from gui_qt.widgets import StyledTableWidget, make_config_cell_input, make_priority_combo
 
 
@@ -73,13 +73,13 @@ class TurnosDialog(QDialog):
         self._checks: Dict[str, list[QCheckBox]] = {}
 
         self.grid.addWidget(QLabel("Dia"), 0, 0)
-        for col, tlabel in enumerate(turnos_mod.TURNO_LABELS, start=1):
+        for col, tlabel in enumerate(turnos_mod.SHIFT_LABELS, start=1):
             self.grid.addWidget(QLabel(tlabel), 0, col)
 
-        for row, (dia_key, dia_name) in enumerate(zip(turnos_mod.DIAS, turnos_mod.DIAS_NOMBRES), start=1):
+        for row, (dia_key, dia_name) in enumerate(zip(turnos_mod.DAYS, turnos_mod.DAY_NAMES), start=1):
             self.grid.addWidget(QLabel(dia_name), row, 0)
             cks: list[QCheckBox] = []
-            for col in range(1, len(turnos_mod.TURNO_LABELS) + 1):
+            for col in range(1, len(turnos_mod.SHIFT_LABELS) + 1):
                 ck = QCheckBox()
                 self.grid.addWidget(ck, row, col, alignment=Qt.AlignmentFlag.AlignCenter)
                 cks.append(ck)
@@ -112,8 +112,8 @@ class TurnosDialog(QDialog):
             self._load_turnos(turnos_mod.PRESETS[key])
 
     def _load_turnos(self, turnos: Dict[str, list[bool]] | None) -> None:
-        norm = turnos_mod.normalizar(turnos)
-        for dia in turnos_mod.DIAS:
+        norm = turnos_mod.normalize(turnos)
+        for dia in turnos_mod.DAYS:
             vals = norm.get(dia, [False, False, False])
             for i, ck in enumerate(self._checks[dia]):
                 ck.setChecked(bool(vals[i]))
@@ -121,7 +121,7 @@ class TurnosDialog(QDialog):
     def collect_turnos(self) -> Dict[str, list[bool]]:
         """Recolecta el estado actual de la grilla de checks."""
         out: Dict[str, list[bool]] = {}
-        for dia in turnos_mod.DIAS:
+        for dia in turnos_mod.DAYS:
             out[dia] = [ck.isChecked() for ck in self._checks[dia]]
         return out
 
@@ -244,13 +244,13 @@ class ConfigPanel(QWidget):
         self.sp_cooling = self._make_float(min_v=0.0, max_v=240.0, decimals=1, step=0.1)
 
         self.cb_strategy_select = QComboBox()
-        for key, strat in ESTRATEGIAS_SELECCION.items():
-            self.cb_strategy_select.addItem(strat.etiqueta, key)
+        for key, strat in SELECTION_STRATEGIES.items():
+            self.cb_strategy_select.addItem(strat.label, key)
         self.cb_strategy_select.setMinimumWidth(220)
 
         self.cb_strategy_assign = QComboBox()
-        for key, strat in ESTRATEGIAS_ASIGNACION.items():
-            self.cb_strategy_assign.addItem(strat.etiqueta, key)
+        for key, strat in ASSIGNMENT_STRATEGIES.items():
+            self.cb_strategy_assign.addItem(strat.label, key)
         self.cb_strategy_assign.setMinimumWidth(220)
 
         form.addRow("Diametro maximo (mm)", self.sp_diam_max)
@@ -486,7 +486,7 @@ class ConfigPanel(QWidget):
                 },
             }
             turnos = self._machine_turnos_value(row)
-            if turnos is not None and not turnos_mod.es_completo(turnos):
+            if turnos is not None and not turnos_mod.is_full(turnos):
                 maq["turnos"] = turnos
             new_cfg["maquinas"].append(maq)
 
@@ -687,7 +687,7 @@ class ConfigPanel(QWidget):
             idx = combo.findData(preset)
             combo.setCurrentIndex(idx if idx >= 0 else 0)
         else:
-            resumen = turnos_mod.resumen(turnos_mod.normalizar(turnos))
+            resumen = turnos_mod.summary(turnos_mod.normalize(turnos))
             combo.addItem(resumen, {"custom": copy.deepcopy(turnos)})
             combo.setCurrentIndex(combo.count() - 1)
 
@@ -775,10 +775,10 @@ class ConfigPanel(QWidget):
 
     def _preset_for_turnos(self, turnos: dict | None) -> str | None:
         """Mapea un dict de turnos al preset equivalente, si existe."""
-        if turnos is None or turnos_mod.es_completo(turnos):
+        if turnos is None or turnos_mod.is_full(turnos):
             return "24x7"
         for key, preset in turnos_mod.PRESETS.items():
-            if turnos_mod.normalizar(preset) == turnos_mod.normalizar(turnos):
+            if turnos_mod.normalize(preset) == turnos_mod.normalize(turnos):
                 return key
         return None
 
