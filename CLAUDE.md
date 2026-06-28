@@ -12,8 +12,52 @@ pip install -r requirements.txt
 python main_qt.py
 
 # Generate test datasets
-python datos/generar_caso_parada.py
+python data/generate_stoppage_case.py
 ```
+
+## Code naming (English code, Spanish data & UI)
+
+The codebase was rewritten so that **all Python identifiers, comments and
+docstrings are in English**, while everything that crosses a persistence /
+external boundary or is shown to the user **stays Spanish**. When reading the
+sections below, translate any old Spanish identifier via this map:
+
+**Packages / modules** — `modelos/`→`models/`, `datos/`→`data/`;
+`taller.py`→`workshop.py`, `cilindro.py`→`cylinder.py`, `jaula.py`→`stand.py`,
+`maquina.py`→`machine.py`, `eventos.py`→`events.py`, `estrategias.py`→
+`strategies.py`, `turnos.py`→`shifts.py`, `generador_cambios.py`→
+`change_generator.py` (`enums.py`, `substock.py`, `kpis.py` keep their names).
+
+**Engine symbols** — `TallerCilindros`→`CylinderWorkshop`, `Cilindro`→`Cylinder`,
+`Jaula`→`Stand`, `MaquinaRectificadora`→`GrindingMachine`, `EventoCambio`→
+`ChangeEvent`, `Alerta`→`Alert`, `EstadoCilindro`→`CylinderState`,
+`TipoRectificado`→`GrindingType`, `_EventoSim`→`_SimEvent`. Methods:
+`configurar`→`configure`, `cargar_datos`→`load_data`,
+`cargar_datos_desde_dataframes`→`load_data_from_dataframes`, `simular`→`simulate`,
+`generar_snapshot`→`generate_snapshot`, `asignar_trabajo_maquinas`→
+`assign_machine_work`, `_parar_jaula`→`_stop_stand`, `_reanudar_linea`→
+`_resume_line`, `obtener_*`→`get_*`, etc. Attributes: `cilindros`→`cylinders`,
+`jaulas`→`stands`, `maquinas`→`machines`, `alertas`→`alerts`,
+`lista_substocks`→`substocks`, `eventos_programados`→`scheduled_events`,
+`diametro`→`diameter`, `estado`→`state`, etc. Internal event-type tags became
+`CHANGE`/`GRIND_END`/`REPLENISH_CRC`/`COOLING_END`/`RESUME_MACHINE`. Strategy
+registries: `ESTRATEGIAS_SELECCION`→`SELECTION_STRATEGIES`,
+`ESTRATEGIAS_ASIGNACION`→`ASSIGNMENT_STRATEGIES`; `models/shifts.py`:
+`expandir`→`expand`, `normalizar`→`normalize`, `resumen`→`summary`, `DIAS`→`DAYS`,
+`TURNOS`→`SHIFTS`; `models/change_generator.py`: `ajustar`/`ajustar_modelo`→
+`fit`/`fit_model`, `generar`/`generar_cambios`→`generate`/`generate_changes`,
+`GENERADORES_CAMBIOS`→`CHANGE_GENERATORS`.
+
+**Kept Spanish (do NOT rename — data/UI contracts):** enum **string values**
+(`"Trabajando"`, `"produccion"`…); **Snapshot attribute names**
+(`conteo_por_estado`, `detalle_jaulas`…) — they feed `snapshots_sha256`; **KPI
+dict keys** (`utilizacion_maquinas_pct`…); **JSON config keys** in
+`user_config.json` and the **`config/` package public function names + keyword
+params** (`cargar_config`, `obtener_maquinas`, `set_rango`, `diametro_maximo`…),
+which mirror the persisted vocabulary; **Excel sheet/column names**
+(`Stock_Inicial`, `Diámetro_mm`…); **CLI subcommands/flags** (`simular`,
+`--estrategia`…); **strategy/preset registry keys** (`fifo`, `3escuadras`…); and
+**all log/alert message text + Qt UI strings**.
 
 > **GUI migration (Tk → Qt):** the application now runs on a **PySide6 (Qt)**
 > front-end under `gui_qt/` (`main_qt.py`). The old CustomTkinter/Tkinter GUI
@@ -25,7 +69,7 @@ python datos/generar_caso_parada.py
 
 ### Tests
 
-A golden-master regression suite guards the simulation engine (`modelos/taller.py`):
+A golden-master regression suite guards the simulation engine (`models/workshop.py`):
 
 ```bash
 pip install -r requirements-dev.txt   # adds pytest
@@ -45,14 +89,14 @@ python -m pytest                       # runs tests/
 ```
 main_qt.py
 └── gui_qt/main_window.py   # Qt MainWindow — wires UI to model, owns playback state
-    ├── modelos/taller.py   # TallerCilindros — all simulation logic (no GUI imports)
+    ├── models/workshop.py  # CylinderWorkshop — all simulation logic (no GUI imports)
     ├── gui_qt/*.py         # Pure Qt display components (model only via main_window/services)
     └── gui/dashboard_*.py  # Shared Matplotlib renderers reused by gui_qt (no Tk)
 ```
 
-**The model layer (`modelos/`) must never import from `gui/` or `gui_qt/`.**
+**The model layer (`models/`) must never import from `gui/` or `gui_qt/`.**
 
-### Simulation engine — `modelos/taller.py`
+### Simulation engine — `models/workshop.py`
 
 `TallerCilindros` is the central class. Key flow:
 
