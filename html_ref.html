@@ -1,0 +1,1323 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Hanken+Grotesk:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+  html,body { margin:0; height:100%; background:#12161b; }
+  *::-webkit-scrollbar { width:10px; height:10px; }
+  *::-webkit-scrollbar-thumb { background:#2b333d; border-radius:5px; }
+  *::-webkit-scrollbar-track { background:transparent; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; background:transparent; }
+  input[type=range]::-webkit-slider-runnable-track{ height:6px; background:#232a33; border-radius:3px; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:13px; height:13px; margin-top:-3.5px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.5); cursor:pointer; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+</style>
+</helmet>
+<template id="__bundler_thumbnail">
+<svg viewBox="0 0 80 56" xmlns="http://www.w3.org/2000/svg">
+  <rect width="80" height="56" fill="#12161b"></rect>
+  <rect x="8" y="10" width="28" height="36" rx="3" fill="#1a1f26" stroke="#2b333d" stroke-width="1"></rect>
+  <rect x="42" y="10" width="30" height="36" rx="3" fill="#1a1f26" stroke="#2b333d" stroke-width="1"></rect>
+  <rect x="10" y="16" width="14" height="7" rx="2" fill="#4a9eff" opacity=".8"></rect>
+  <rect x="10" y="26" width="14" height="7" rx="2" fill="#f0a32e" opacity=".8"></rect>
+  <rect x="10" y="36" width="14" height="7" rx="2" fill="#35c98a" opacity=".8"></rect>
+  <rect x="44" y="16" width="26" height="4" rx="1" fill="#b08cf5" opacity=".7"></rect>
+  <rect x="44" y="23" width="26" height="4" rx="1" fill="#b08cf5" opacity=".5"></rect>
+  <rect x="44" y="30" width="26" height="4" rx="1" fill="#35c98a" opacity=".7"></rect>
+  <text x="40" y="53" font-size="5" fill="#e8a13a" text-anchor="middle" font-family="monospace">SIMULADOR CILINDROS v4</text>
+</svg>
+</template>
+<div style="height:100vh; width:100%; display:flex; flex-direction:column; background:#12161b; color:#e9ecef; font-family:'Hanken Grotesk',sans-serif; overflow:hidden;">
+  <div style="flex:1; display:flex; min-height:0;">
+    <!-- ===================== SIDEBAR ===================== -->
+    <div style="width:230px; flex:none; background:#1a1f26; border-right:1px solid #262d36; display:flex; flex-direction:column; padding:18px 16px;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:20px;">
+        <div style="width:32px; height:32px; border-radius:8px; background:linear-gradient(135deg,#e8a13a,#c47a1d); display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk'; font-weight:700; color:#1a1206; font-size:18px;">◎</div>
+        <div style="font-family:'Space Grotesk'; font-weight:700; font-size:14px; line-height:1.05;">SIMULADOR<br><span style="color:#8b939d; font-weight:500; font-size:12px;">cilindros · v4</span></div>
+      </div>
+      <button style="border:none; background:linear-gradient(180deg,#39d18f,#2bb579); color:#062014; font-weight:700; font-family:'Hanken Grotesk'; font-size:13.5px; padding:11px; border-radius:9px; cursor:pointer; box-shadow:0 2px 8px rgba(43,181,121,.3);">▶  Ejecutar Simulación</button>
+      
+
+      <div style="margin-top:18px; font-size:11px; letter-spacing:.08em; color:#59616b; font-weight:600;">FLUJO</div>
+      <div style="margin-top:10px; display:flex; flex-direction:column; gap:7px;">
+        <div style="display:flex; align-items:center; gap:9px; font-size:13px;"><span style="width:19px;height:19px;border-radius:50%;background:#2bb579;color:#062014;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">✓</span> Inventario <span style="margin-left:auto;color:#59616b;font-size:11px;">320</span></div>
+        <div style="display:flex; align-items:center; gap:9px; font-size:13px;"><span style="width:19px;height:19px;border-radius:50%;background:#2bb579;color:#062014;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">✓</span> Generación <span style="margin-left:auto;color:#59616b;font-size:11px;">48</span></div>
+        <div style="display:flex; align-items:center; gap:9px; font-size:13px;"><span style="width:19px;height:19px;border-radius:50%;background:#2bb579;color:#062014;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">✓</span> Simulación</div>
+      </div>
+      <div style="height:1px; background:#262d36; margin:18px 0;"></div>
+      <div style="font-size:11px; letter-spacing:.08em; color:#59616b; font-weight:600; margin-bottom:10px;">REPRODUCCIÓN</div>
+      <div style="display:flex; gap:6px; justify-content:center;">
+        <button onClick="{{ stepBack }}" style="flex:1;background:#232a33;border:1px solid #313a45;color:#cfd5dc;border-radius:7px;padding:7px 0;cursor:pointer;font-size:12px;">⏮</button>
+        <button onClick="{{ togglePlay }}" style="flex:1.7;background:#e8a13a;border:none;color:#1a1206;border-radius:7px;padding:7px 0;cursor:pointer;font-weight:700;font-size:12px;">{{ playLabel }}</button>
+        <button onClick="{{ stop }}" style="flex:1;background:#232a33;border:1px solid #313a45;color:#cfd5dc;border-radius:7px;padding:7px 0;cursor:pointer;font-size:12px;">⏹</button>
+        <button onClick="{{ stepFwd }}" style="flex:1;background:#232a33;border:1px solid #313a45;color:#cfd5dc;border-radius:7px;padding:7px 0;cursor:pointer;font-size:12px;">⏭</button>
+      </div>
+      <div style="display:flex; gap:6px; margin-top:9px; align-items:center;">
+        <span style="font-size:11px;color:#59616b;">Veloc.</span>
+        <sc-for list="{{ speeds }}" as="sp" hint-placeholder-count="4">
+          <button onClick="{{ sp.onClick }}" style="flex:1;border-radius:6px;padding:4px 0;font-size:11px;font-weight:700;cursor:pointer;background:{{ sp.bg }};border:1px solid {{ sp.border }};color:{{ sp.color }};">{{ sp.label }}</button>
+        </sc-for>
+      </div>
+      <div style="margin-top:14px; position:relative; height:9px;">
+        <sc-for list="{{ paradaMarks }}" as="pm" hint-placeholder-count="2">
+          <div style="position:absolute; top:0; left:{{ pm.leftPct }}%; width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #f56b6b; transform:translateX(-4px);"></div>
+        </sc-for>
+      </div>
+      <input type="range" min="0" max="{{ seekMax }}" value="{{ seekVal }}" onChange="{{ seek }}" onInput="{{ seek }}" style="width:100%; height:13px; cursor:pointer;">
+      <div style="margin-top:6px; font-size:10.5px; color:#59616b; text-align:center; font-family:'IBM Plex Mono';">snapshot {{ snapNum }} / {{ snapTotal }}</div>
+      <div style="margin-top:auto; padding-top:14px; font-size:11px; color:#59616b; cursor:pointer;">Exportar resultados →</div>
+    </div>
+
+    <!-- ===================== RIGHT ===================== -->
+    <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
+      <!-- tabs -->
+      <div style="height:50px; flex:none; border-bottom:1px solid #262d36; display:flex; align-items:center; gap:3px; padding:0 14px; font-size:13px; overflow-x:auto; overflow-y:hidden; scrollbar-width:none;">
+        <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="8">
+          <span onClick="{{ tab.onClick }}" style="padding:7px 12px; border-radius:8px; cursor:pointer; font-weight:600; background:{{ tab.bg }}; color:{{ tab.color }};">{{ tab.label }}</span>
+        </sc-for>
+        <span style="margin-left:auto; font-family:'IBM Plex Mono'; font-size:12px; color:#8b939d;">{{ clock }}</span>
+      </div>
+      <!-- content -->
+      <div style="flex:1; overflow:auto; padding:18px; min-height:0;">
+
+        <!-- ============ VISTA REAL ============ -->
+        <sc-if value="{{ isVista }}" hint-placeholder-val="{{ true }}">
+        <div data-screen-label="Vista Real" style="display:flex; gap:18px; height:100%; min-height:0;">
+          <!-- JAULAS -->
+          <div style="flex:1.15; display:flex; flex-direction:column; min-width:0;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+              <span style="font-family:'Space Grotesk'; font-weight:700; font-size:14px; letter-spacing:.04em;">JAULAS</span>
+              <div style="display:flex; gap:7px; margin-left:auto; font-size:10px;">
+                <span style="color:#4a9eff;">● Trabajando</span><span style="color:#f0a32e;">● CRC</span><span style="color:#35c98a;">● Disponible</span>
+              </div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:9px;">
+              <sc-for list="{{ jaulas }}" as="j" hint-placeholder-count="4">
+                <div style="display:flex; align-items:stretch; gap:9px;">
+                  <div style="width:30px; flex:none; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk'; font-weight:700; font-size:18px; color:#cfd5dc;">{{ j.n }}</div>
+                  <div style="flex:1; background:#1a1f26; border-style:solid; border-color:{{ j.trabBorder }}; border-width:{{ j.trabBW }}; border-radius:10px; padding:8px 9px;">
+                    <div style="font-size:9.5px; letter-spacing:.08em; font-weight:700; margin-bottom:6px; color:{{ j.trabLabelColor }};">{{ j.trabLabel }}</div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                      <sc-for list="{{ j.trab }}" as="c" hint-placeholder-count="1">
+                        <div style="background:{{ c.color }};color:{{ c.txt }};border-radius:7px;padding:5px 8px;text-align:center;font-family:'IBM Plex Mono';line-height:1.1;min-width:48px;"><div style="font-size:11px;font-weight:600;">{{ c.id }}</div><div style="font-size:9px;opacity:.65;">{{ c.dia }}</div></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <div style="flex:1; background:#1a1f26; border:1px solid #2b333d; border-radius:10px; padding:8px 9px;">
+                    <div style="font-size:9.5px; letter-spacing:.08em; color:#f0a32e; font-weight:700; margin-bottom:6px;">BUFFER CRC</div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                      <sc-for list="{{ j.crc }}" as="c" hint-placeholder-count="2">
+                        <div style="background:{{ c.color }};color:{{ c.txt }};border-radius:7px;padding:5px 8px;text-align:center;font-family:'IBM Plex Mono';line-height:1.1;min-width:48px;"><div style="font-size:11px;font-weight:600;">{{ c.id }}</div><div style="font-size:9px;opacity:.65;">{{ c.dia }}</div></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="margin-top:16px; font-family:'Space Grotesk'; font-weight:700; font-size:12px; letter-spacing:.04em; color:#35c98a;">STOCK DISPONIBLE POR JAULA</div>
+            <div style="margin-top:10px; display:flex; gap:14px; align-items:flex-end;">
+              <sc-for list="{{ dispBars }}" as="b" hint-placeholder-count="4">
+                <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:5px;">
+                  <span style="font-family:'IBM Plex Mono'; font-size:12px; font-weight:600; color:{{ b.color }};">{{ b.val }}</span>
+                  <div style="width:100%; height:64px; background:#11151a; border-radius:6px; display:flex; align-items:flex-end; overflow:hidden;"><div style="width:100%; height:{{ b.hpct }}%; background:{{ b.color }}; border-radius:6px;"></div></div>
+                  <span style="font-size:11px; color:#8b939d;">{{ b.n }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <!-- MACHINES -->
+          <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
+            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:14px; letter-spacing:.04em; margin-bottom:12px;">RECTIFICADORAS</div>
+            <div style="display:flex; flex-direction:column; gap:9px;">
+              <sc-for list="{{ machines }}" as="m" hint-placeholder-count="3">
+                <div style="background:#1a1f26; border:1px solid {{ m.border }}; border-radius:10px; padding:10px 12px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-family:'IBM Plex Mono'; font-weight:600; font-size:13px;">{{ m.name }}</span><span style="font-size:11px; color:{{ m.subColor }};">{{ m.sub }}</span></div>
+                  <div style="margin-top:8px; height:7px; background:#232a33; border-radius:4px; overflow:hidden;"><div style="height:100%; width:{{ m.pct }}%; background:{{ m.barColor }}; border-radius:4px;"></div></div>
+                  <div style="margin-top:5px; font-size:10.5px; color:#8b939d;">{{ m.status }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="margin-top:16px; display:flex; align-items:center; gap:8px;"><span style="font-family:'Space Grotesk'; font-weight:700; font-size:12px; letter-spacing:.04em; color:#f56b6b;">COLA A RECTIFICAR</span><span style="font-size:10px; color:#8b939d;">{{ colaLabel }}</span></div>
+            <div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">
+              <sc-for list="{{ cola }}" as="c" hint-placeholder-count="5">
+                <div style="background:{{ c.color }};color:{{ c.txt }};border-radius:7px;padding:5px 7px;text-align:center;font-family:'IBM Plex Mono';line-height:1.1;"><div style="font-size:10.5px;font-weight:700;">{{ c.id }}</div><div style="font-size:8.5px;opacity:.7;">{{ c.dia }}</div></div>
+              </sc-for>
+            </div>
+            <div style="margin-top:16px; font-family:'Space Grotesk'; font-weight:700; font-size:12px; letter-spacing:.04em; color:#34d3e0;">EN ENFRIAMIENTO</div>
+            <div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">
+              <sc-for list="{{ enf }}" as="c" hint-placeholder-count="3">
+                <div style="background:{{ c.color }};color:{{ c.txt }};border-radius:7px;padding:5px 7px;text-align:center;font-family:'IBM Plex Mono';line-height:1.1;"><div style="font-size:10.5px;font-weight:700;">{{ c.id }}</div><div style="font-size:8.5px;opacity:.7;">{{ c.dia }}</div></div>
+              </sc-for>
+            </div>
+            <div style="margin-top:auto; padding-top:14px; display:flex; gap:8px; font-size:11px; color:#8b939d;">
+              <span style="background:#1a1f26; border:1px solid #2b333d; border-radius:7px; padding:6px 10px;">{{ totalCil }} cilindros</span>
+              <span style="background:#1a1f26; border:1px solid #2b333d; border-radius:7px; padding:6px 10px;">{{ paradasN }} paradas</span>
+              <span style="background:#f56b6b1a; border:1px solid #f56b6b55; color:#f56b6b; border-radius:7px; padding:6px 10px;">{{ alertasN }} alerta crítica</span>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ KPIs ============ -->
+        <sc-if value="{{ isKpis }}">
+        <div data-screen-label="KPIs">
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px;">
+            <sc-for list="{{ kpiCards }}" as="k" hint-placeholder-count="9">
+              <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:18px 16px; text-align:center;">
+                <div style="font-size:11px; font-weight:700; letter-spacing:.06em; color:#8b939d;">{{ k.label }}</div>
+                <div style="margin-top:8px; font-family:'Space Grotesk'; font-size:30px; font-weight:700; color:{{ k.color }};">{{ k.val }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:22px; font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; letter-spacing:.04em;">UTILIZACIÓN DISPONIBLE</div>
+          <div style="margin-top:10px; display:grid; grid-template-columns:repeat(3,1fr); gap:12px;">
+            <sc-for list="{{ utilDisp }}" as="u" hint-placeholder-count="3">
+              <div style="background:#1a1f26; border:2px solid {{ u.color }}; border-radius:12px; padding:14px 16px;">
+                <div style="display:flex; justify-content:space-between; align-items:baseline;"><span style="font-family:'IBM Plex Mono'; font-size:12px; color:#8b939d;">{{ u.name }}</span><span style="font-family:'Space Grotesk'; font-size:22px; font-weight:700; color:{{ u.color }};">{{ u.pct }}%</span></div>
+                <div style="margin-top:8px; height:6px; background:#232a33; border-radius:3px; overflow:hidden;"><div style="height:100%; width:{{ u.fillpct }}%; background:{{ u.color }};"></div></div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:22px; font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; letter-spacing:.04em;">UTILIZACIÓN NETA</div>
+          <div style="margin-top:10px; display:grid; grid-template-columns:repeat(3,1fr); gap:12px;">
+            <sc-for list="{{ utilNeta }}" as="u" hint-placeholder-count="3">
+              <div style="background:#1a1f26; border:2px solid {{ u.color }}; border-radius:12px; padding:14px 16px;">
+                <div style="display:flex; justify-content:space-between; align-items:baseline;"><span style="font-family:'IBM Plex Mono'; font-size:12px; color:#8b939d;">{{ u.name }}</span><span style="font-family:'Space Grotesk'; font-size:22px; font-weight:700; color:{{ u.color }};">{{ u.pct }}%</span></div>
+                <div style="margin-top:8px; height:6px; background:#232a33; border-radius:3px; overflow:hidden;"><div style="height:100%; width:{{ u.fillpct }}%; background:{{ u.color }};"></div></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ CONSOLA ============ -->
+        <sc-if value="{{ isConsola }}">
+        <div data-screen-label="Consola" style="background:#0c0f13; border:1px solid #2b333d; border-radius:12px; padding:16px 18px; font-family:'IBM Plex Mono'; font-size:12.5px; line-height:1.7; color:#9fb0bd; min-height:100%;">
+          <sc-for list="{{ logLines }}" as="ln" hint-placeholder-count="12">
+            <div>{{ ln }}</div>
+          </sc-for>
+        </div>
+        </sc-if>
+
+        <!-- ============ DASHBOARD ============ -->
+        <sc-if value="{{ isDashboard }}">
+        <div data-screen-label="Dashboard" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+          <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:10px;">Evolución temporal de estados</div>
+            <svg viewBox="0 0 1000 300" preserveAspectRatio="none" style="width:100%; height:210px; display:block;">
+              <sc-for list="{{ stackPolys }}" as="p" hint-placeholder-count="7"><polygon points="{{ p.points }}" fill="{{ p.color }}" opacity="0.88"></polygon></sc-for>
+              <line x1="0" x2="1000" y1="281" y2="281" stroke="#2b333d" stroke-width="1.5"></line>
+              <sc-for list="{{ chartTicks }}" as="tk" hint-placeholder-count="6"><line x1="{{ tk.x }}" x2="{{ tk.x }}" y1="274" y2="281" stroke="#59616b" stroke-width="1"></line><text x="{{ tk.x }}" y="297" font-size="22" fill="#8b939d" text-anchor="middle" font-family="monospace">{{ tk.label }}</text></sc-for>
+              <line x1="{{ chartCursorX }}" x2="{{ chartCursorX }}" y1="0" y2="280" stroke="#e8a13a" stroke-width="2" opacity="0.8"></line>
+            </svg>
+            <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px 14px;">
+              <sc-for list="{{ stackLegend }}" as="l" hint-placeholder-count="7"><span style="display:flex; align-items:center; gap:5px; font-size:10.5px; color:#cfd5dc;"><span style="width:9px; height:9px; border-radius:2px; background:{{ l.color }};"></span>{{ l.label }}</span></sc-for>
+            </div>
+          </div>
+          <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:10px;">Buffer de seguridad global</div>
+            <svg viewBox="0 0 1000 300" preserveAspectRatio="none" style="width:100%; height:210px; display:block;">
+              <path d="{{ bufArea }}" fill="#35c98a" opacity="0.14"></path>
+              <path d="{{ bufLine }}" fill="none" stroke="#35c98a" stroke-width="3"></path>
+              <path d="{{ dispLine }}" fill="none" stroke="#66BB6A" stroke-width="2" stroke-dasharray="7 6"></path>
+              <path d="{{ crcLine }}" fill="none" stroke="#f0a32e" stroke-width="2" stroke-dasharray="7 6"></path>
+              <line x1="0" x2="1000" y1="281" y2="281" stroke="#2b333d" stroke-width="1.5"></line>
+              <sc-for list="{{ chartTicks }}" as="tk" hint-placeholder-count="6"><line x1="{{ tk.x }}" x2="{{ tk.x }}" y1="274" y2="281" stroke="#59616b" stroke-width="1"></line><text x="{{ tk.x }}" y="297" font-size="22" fill="#8b939d" text-anchor="middle" font-family="monospace">{{ tk.label }}</text></sc-for>
+              <line x1="{{ chartCursorX }}" x2="{{ chartCursorX }}" y1="0" y2="280" stroke="#e8a13a" stroke-width="2" opacity="0.8"></line>
+            </svg>
+            <div style="margin-top:10px; display:flex; gap:16px; font-size:10.5px; color:#cfd5dc;">
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:14px;height:3px;background:#35c98a;"></span>Disp + CRC</span>
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:14px;height:3px;background:#66BB6A;"></span>Disponible</span>
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:14px;height:3px;background:#f0a32e;"></span>CRC</span>
+            </div>
+          </div>
+          <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:14px;">Utilización de máquinas — Disponible vs Neta</div>
+            <div style="display:flex; gap:24px; align-items:flex-end; padding:0 10px;">
+              <sc-for list="{{ utilPairs }}" as="u" hint-placeholder-count="3">
+                <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:8px;">
+                  <div style="display:flex; gap:8px; align-items:flex-end; height:150px;">
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%;"><span style="font-size:10px; color:#8b939d; margin-bottom:3px;">{{ u.disp }}%</span><div style="width:30px; height:{{ u.disp }}%; background:{{ u.dispColor }}; border-radius:4px 4px 0 0;"></div></div>
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%;"><span style="font-size:10px; color:#8b939d; margin-bottom:3px;">{{ u.neta }}%</span><div style="width:30px; height:{{ u.neta }}%; background:{{ u.netaColor }}; border-radius:4px 4px 0 0;"></div></div>
+                  </div>
+                  <span style="font-family:'IBM Plex Mono'; font-size:11px; color:#cfd5dc;">{{ u.name }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="margin-top:12px; display:flex; gap:16px; font-size:10.5px; color:#cfd5dc; justify-content:center;">
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:10px;height:10px;border-radius:2px;background:#35c98a;"></span>Disponible</span>
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:10px;height:10px;border-radius:2px;background:#b08cf5;"></span>Neta</span>
+            </div>
+          </div>
+          <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:14px;">Cronograma de rectificado</div>
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              <sc-for list="{{ gantt }}" as="g" hint-placeholder-count="3">
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <span style="width:62px; flex:none; font-family:'IBM Plex Mono'; font-size:11px; color:#cfd5dc;">{{ g.name }}</span>
+                  <div style="flex:1; position:relative; height:24px; background:#11151a; border-radius:5px; overflow:hidden;">
+                    <sc-for list="{{ g.segs }}" as="seg" hint-placeholder-count="6"><div style="position:absolute; top:3px; bottom:3px; left:{{ seg.x }}%; width:{{ seg.w }}%; background:{{ seg.color }};"></div></sc-for>
+                    <sc-for list="{{ g.par }}" as="p" hint-placeholder-count="1"><div style="position:absolute; top:0; bottom:0; left:{{ p.x }}%; width:{{ p.w }}%; background:#7f1d1d;"></div></sc-for>
+                    <sc-for list="{{ chartTicks }}" as="tk" hint-placeholder-count="6"><div style="position:absolute; top:0; bottom:0; left:{{ tk.xPct }}%; width:1px; background:#ffffff; opacity:0.15;"></div></sc-for>
+                    <div style="position:absolute; top:0; bottom:0; left:{{ chartCursorPct }}%; width:2px; background:#e8a13a; opacity:0.9;"></div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="padding:0 0 0 72px; margin-top:4px;">
+              <svg viewBox="0 0 1000 28" preserveAspectRatio="none" style="width:100%; height:22px; display:block;">
+                <line x1="0" x2="1000" y1="0" y2="0" stroke="#2b333d" stroke-width="1.5"></line>
+                <sc-for list="{{ chartTicks }}" as="tk" hint-placeholder-count="6"><line x1="{{ tk.x }}" x2="{{ tk.x }}" y1="0" y2="6" stroke="#59616b" stroke-width="1"></line><text x="{{ tk.x }}" y="22" font-size="22" fill="#8b939d" text-anchor="middle" font-family="monospace">{{ tk.label }}</text></sc-for>
+              </svg>
+            </div>
+            <div style="margin-top:10px; display:flex; gap:16px; font-size:10.5px; color:#cfd5dc;">
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:10px;height:10px;border-radius:2px;background:#35c98a;"></span>Producción</span>
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:10px;height:10px;border-radius:2px;background:#f0a32e;"></span>Desbaste</span>
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:10px;height:10px;border-radius:2px;background:#7f1d1d;"></span>Parada (turno)</span>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ ANÁLISIS ============ -->
+        <sc-if value="{{ isAnalisis }}">
+        <div data-screen-label="Análisis" style="display:flex; flex-direction:column; gap:14px;">
+          <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:12px;">Mapa de cilindros · estado vs diámetro</div>
+            <div style="display:flex; gap:10px;">
+              <div style="width:90px; flex:none; height:230px; display:flex; flex-direction:column; justify-content:space-around;">
+                <sc-for list="{{ mapaLanes }}" as="l" hint-placeholder-count="7"><span style="font-size:10.5px; color:{{ l.color }};">{{ l.label }}</span></sc-for>
+              </div>
+              <div style="flex:1; min-width:0;">
+                <svg viewBox="0 0 1000 308" preserveAspectRatio="none" style="width:100%; height:230px; display:block;">
+                  <sc-for list="{{ mapaLanes }}" as="l" hint-placeholder-count="7"><line x1="0" x2="1000" y1="{{ l.y }}" y2="{{ l.y }}" stroke="#232a33" stroke-width="1"></line></sc-for>
+                  <sc-for list="{{ mapaPuntos }}" as="p" hint-placeholder-count="60"><circle cx="{{ p.cx }}" cy="{{ p.cy }}" r="5" fill="{{ p.color }}" fill-opacity="0.78" stroke="#12161b" stroke-width="0.8"></circle></sc-for>
+                </svg>
+                <div style="display:flex; justify-content:space-between; margin-top:5px;">
+                  <sc-for list="{{ mapaTicks }}" as="t" hint-placeholder-count="5"><span style="font-family:'IBM Plex Mono'; font-size:10px; color:#8b939d;">{{ t.label }}</span></sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:14px;">Distribución de diámetros (activos)</div>
+              <div style="position:relative; height:190px;">
+                <sc-for list="{{ distZones }}" as="z" hint-placeholder-count="4"><div style="position:absolute; top:0; bottom:24px; left:{{ z.leftPct }}%; width:{{ z.widthPct }}%; background:{{ z.color }}; opacity:0.10;"></div></sc-for>
+                <sc-for list="{{ distZones }}" as="z" hint-placeholder-count="4"><div style="position:absolute; top:0; left:{{ z.leftPct }}%; width:{{ z.widthPct }}%; height:14px; background:{{ z.color }}; opacity:0.6; border-radius:2px; text-align:center; font-size:9px; color:#0b0f14; font-weight:700; line-height:14px;">{{ z.label }}</div></sc-for>
+                <sc-for list="{{ distBars }}" as="b" hint-placeholder-count="13"><div style="position:absolute; bottom:24px; left:{{ b.leftPct }}%; width:{{ b.widthPct }}%; height:{{ b.hPx }}px; background:#5AA9FF; opacity:0.85; border-radius:3px 3px 0 0;"></div></sc-for>
+                <div style="position:absolute; top:0; bottom:24px; left:{{ distMin.leftPct }}%; width:0; border-left:2px dashed #f56b6b;"></div>
+                <div style="position:absolute; top:0; bottom:24px; left:{{ distMax.leftPct }}%; width:0; border-left:2px dashed #35c98a;"></div>
+                <div style="position:absolute; bottom:2px; left:0; right:0; display:flex; justify-content:space-between;"><span style="font-family:'IBM Plex Mono'; font-size:10px; color:#f56b6b;">{{ distMin.label }}</span><span style="font-family:'IBM Plex Mono'; font-size:10px; color:#35c98a;">{{ distMax.label }}</span></div>
+              </div>
+              <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px 12px;">
+                <sc-for list="{{ distZones }}" as="z" hint-placeholder-count="4"><span style="display:flex; align-items:center; gap:5px; font-size:10.5px; color:#cfd5dc;"><span style="width:9px;height:9px;border-radius:2px;background:{{ z.color }};"></span>{{ z.label }}</span></sc-for>
+              </div>
+            </div>
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:14px;">Evolución de SubStock (disponibles)</div>
+              <svg viewBox="0 0 1000 290" preserveAspectRatio="none" style="width:100%; height:190px; display:block;">
+                <sc-for list="{{ ssParadaBands }}" as="p" hint-placeholder-count="2"><rect x="{{ p.xU }}" y="0" width="{{ p.wU }}" height="270" fill="#f56b6b" opacity="0.12"></rect></sc-for>
+                <sc-for list="{{ ssEvol }}" as="e" hint-placeholder-count="4"><path d="{{ e.path }}" fill="none" stroke="{{ e.color }}" stroke-width="2.4"></path></sc-for>
+                <line x1="0" x2="1000" y1="271" y2="271" stroke="#2b333d" stroke-width="1.5"></line>
+                <sc-for list="{{ chartTicks }}" as="tk" hint-placeholder-count="6"><line x1="{{ tk.x }}" x2="{{ tk.x }}" y1="264" y2="271" stroke="#59616b" stroke-width="1"></line><text x="{{ tk.x }}" y="287" font-size="22" fill="#8b939d" text-anchor="middle" font-family="monospace">{{ tk.label }}</text></sc-for>
+                <line x1="{{ chartCursorX }}" x2="{{ chartCursorX }}" y1="0" y2="270" stroke="#e8a13a" stroke-width="2" opacity="0.8"></line>
+              </svg>
+              <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px 12px;">
+                <sc-for list="{{ ssEvol }}" as="e" hint-placeholder-count="4"><span style="display:flex; align-items:center; gap:5px; font-size:10.5px; color:#cfd5dc;"><span style="width:14px;height:3px;background:{{ e.color }};"></span>{{ e.label }}</span></sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ INVENTARIO ============ -->
+        <sc-if value="{{ isInventario }}">
+        <div data-screen-label="Inventario">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+            <span style="font-family:'Space Grotesk'; font-weight:700; font-size:15px;">Inventario de cilindros</span>
+            <span style="font-family:'IBM Plex Mono'; font-size:12px; color:#8b939d;">320 registros</span>
+            <button style="margin-left:auto; background:#232a33; border:1px solid #313a45; color:#cfd5dc; border-radius:8px; padding:7px 12px; font-size:12px; cursor:pointer;">⤓ Cargar stock (Excel)</button>
+            <button style="background:#232a33; border:1px solid #313a45; color:#cfd5dc; border-radius:8px; padding:7px 12px; font-size:12px; cursor:pointer;">↧ Descargar resultado</button>
+          </div>
+          <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; overflow:hidden;">
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr 1.2fr 0.8fr; padding:11px 16px; font-size:10.5px; letter-spacing:.06em; color:#8b939d; font-weight:700; border-bottom:1px solid #2b333d; background:#161b22;">
+              <span>ID</span><span>DIÁMETRO</span><span>ORIGINAL</span><span>DESGASTE</span><span>ESTADO</span><span>JAULA</span>
+            </div>
+            <sc-for list="{{ invRows }}" as="r" hint-placeholder-count="14">
+              <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr 1.2fr 0.8fr; padding:10px 16px; font-size:12.5px; align-items:center; border-bottom:1px solid #20262e; border-left:3px solid {{ r.color }}; background:{{ r.bg }};">
+                <span style="font-family:'IBM Plex Mono'; font-weight:600;">{{ r.id }}</span>
+                <span style="font-family:'IBM Plex Mono'; color:#cfd5dc;">{{ r.dia }}</span>
+                <span style="font-family:'IBM Plex Mono'; color:#8b939d;">{{ r.orig }}</span>
+                <span style="font-family:'IBM Plex Mono'; color:#f0a32e;">−{{ r.desg }}</span>
+                <span><span style="background:{{ r.bg }}; border:1px solid {{ r.color }}; color:{{ r.color }}; border-radius:20px; padding:3px 10px; font-size:11px; font-weight:600;">{{ r.estado }}</span></span>
+                <span style="font-family:'IBM Plex Mono'; color:#cfd5dc;">{{ r.jaula }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ GENERACIÓN ============ -->
+        <sc-if value="{{ isGeneracion }}">
+        <div data-screen-label="Generación">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+            <span style="font-family:'Space Grotesk'; font-weight:700; font-size:15px;">Generación de cambios</span>
+            <button style="margin-left:auto; background:linear-gradient(180deg,#39d18f,#2bb579); border:none; color:#062014; border-radius:8px; padding:7px 14px; font-size:12px; font-weight:700; cursor:pointer;">↻ Regenerar</button>
+            <button style="background:#232a33; border:1px solid #313a45; color:#cfd5dc; border-radius:8px; padding:7px 12px; font-size:12px; cursor:pointer;">⤓ Subir cambios</button>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:16px;">
+            <sc-for list="{{ genParams }}" as="p" hint-placeholder-count="6">
+              <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+                <div style="font-size:11px; color:#8b939d; font-weight:700; letter-spacing:.04em;">{{ p.k }}</div>
+                <div style="margin-top:6px; font-family:'IBM Plex Mono'; font-size:17px; color:#e9ecef;">{{ p.v }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:16px;">
+            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:12px; color:#e8a13a; margin-bottom:12px;">LÍNEA DE TIEMPO · 10–12 Mar</div>
+            <div style="position:relative; height:40px; background:#11151a; border-radius:6px; margin-bottom:18px;">
+              <sc-for list="{{ cambios }}" as="c" hint-placeholder-count="8"><div style="position:absolute; top:0; bottom:0; left:{{ c.pos }}%; width:3px; background:{{ c.color }}; transform:translateX(-1.5px);"></div></sc-for>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:2px;">
+              <sc-for list="{{ cambios }}" as="c" hint-placeholder-count="8">
+                <div style="display:grid; grid-template-columns:1.2fr 0.6fr 1fr 1.4fr; gap:10px; padding:9px 6px; font-size:12.5px; border-bottom:1px solid #20262e; align-items:center;">
+                  <span style="font-family:'IBM Plex Mono'; color:#cfd5dc;">{{ c.fecha }}</span>
+                  <span style="font-family:'IBM Plex Mono'; color:#8b939d;">{{ c.jaula }}</span>
+                  <span style="font-family:'IBM Plex Mono'; color:#cfd5dc;">{{ c.sale }} → {{ c.entra }}</span>
+                  <span style="display:flex; align-items:center; gap:7px; color:#cfd5dc;"><span style="width:8px;height:8px;border-radius:50%;background:{{ c.color }};"></span>{{ c.motivo }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ CONFIGURACIÓN ============ -->
+        <sc-if value="{{ isConfig }}">
+        <div data-screen-label="Configuración" style="display:flex; flex-direction:column; gap:18px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start;">
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:16px 18px;">
+              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:14px; color:#e8a13a;">Parámetros globales del taller</div>
+              <div style="font-size:11px; color:#8b939d; margin-top:3px; margin-bottom:14px;">Rango de diámetro útil, traslado al CRC, jaulas, enfriado y estrategias.</div>
+              <div style="display:flex; flex-direction:column; gap:9px;">
+                <sc-for list="{{ cfgGlobales }}" as="g" hint-placeholder-count="5">
+                  <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="flex:1; font-size:12.5px; color:#cfd5dc;">{{ g.label }}</span>
+                    <span style="width:88px; flex:none; background:#11151a; border:1px solid #313a45; border-radius:7px; padding:6px 10px; text-align:center; font-family:'IBM Plex Mono'; font-size:12.5px; color:#e9ecef;">{{ g.val }}</span>
+                    <span style="width:108px; flex:none; font-size:10px; color:#59616b;">{{ g.hint }}</span>
+                  </div>
+                </sc-for>
+                <sc-for list="{{ cfgEstrategias }}" as="g" hint-placeholder-count="2">
+                  <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="flex:1; font-size:12.5px; color:#cfd5dc;">{{ g.label }}</span>
+                    <span style="width:206px; flex:none; background:#11151a; border:1px solid #313a45; border-radius:7px; padding:6px 10px; display:flex; align-items:center; justify-content:space-between; font-size:12px; color:#e9ecef;">{{ g.val }}<span style="color:#8b939d;">▾</span></span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:16px 18px;">
+              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:14px; color:#e8a13a;">Rangos de SubStock por jaula</div>
+              <div style="font-size:11px; color:#8b939d; margin-top:3px; margin-bottom:14px;">Cada jaula admite cilindros con  Desde (mín) &lt; diámetro ≤ Hasta (máx).</div>
+              <div style="display:grid; grid-template-columns:0.6fr 1fr 1fr 0.8fr; gap:8px; font-size:10px; letter-spacing:.05em; color:#8b939d; font-weight:700; margin-bottom:8px;"><span>JAULA</span><span>DESDE (mín)</span><span>HASTA (máx)</span><span>PERFIL</span></div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <sc-for list="{{ cfgRangos }}" as="r" hint-placeholder-count="4">
+                  <div style="display:grid; grid-template-columns:0.6fr 1fr 1fr 0.8fr; gap:8px; align-items:center;">
+                    <span style="display:flex; align-items:center; gap:6px; font-family:'Space Grotesk'; font-weight:700;"><span style="width:9px;height:9px;border-radius:2px;background:{{ r.color }};"></span>J{{ r.jaula }}</span>
+                    <span style="background:#11151a; border:1px solid #313a45; border-radius:7px; padding:5px 8px; text-align:center; font-family:'IBM Plex Mono'; font-size:12px; color:#e9ecef;">{{ r.desde }}</span>
+                    <span style="background:#11151a; border:1px solid #313a45; border-radius:7px; padding:5px 8px; text-align:center; font-family:'IBM Plex Mono'; font-size:12px; color:#e9ecef;">{{ r.hasta }}</span>
+                    <span style="background:#11151a; border:1px solid #313a45; border-radius:7px; padding:5px 8px; text-align:center; font-family:'IBM Plex Mono'; font-size:12px; color:#8b939d;">{{ r.perfil }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="margin-top:10px; font-size:10.5px; color:#59616b;">Las jaulas se crean/eliminan al cambiar «Cantidad de jaulas».</div>
+            </div>
+          </div>
+          <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:16px 18px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
+              <span style="font-family:'Space Grotesk'; font-weight:700; font-size:14px; color:#e8a13a;">Máquinas rectificadoras</span>
+              <button style="margin-left:auto; background:transparent; border:1px solid #e8a13a; color:#e8a13a; border-radius:7px; padding:5px 11px; font-size:11.5px; cursor:pointer;">+ Agregar máquina</button>
+            </div>
+            <div style="font-size:11px; color:#8b939d; margin-bottom:14px;">Tasas por tipo (mm removidos y minutos), prioridad y esquema de turnos.</div>
+            <div style="display:grid; grid-template-columns:1.1fr 0.7fr 0.7fr 0.7fr 0.7fr 1fr 1fr 0.35fr; gap:8px; font-size:9.5px; letter-spacing:.03em; color:#8b939d; font-weight:700; margin-bottom:9px;"><span>NOMBRE</span><span>PROD mm</span><span>PROD min</span><span>DESB mm</span><span>DESB min</span><span>PRIORIDAD</span><span>TURNOS</span><span></span></div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <sc-for list="{{ cfgMaquinas }}" as="m" hint-placeholder-count="3">
+                <div style="display:grid; grid-template-columns:1.1fr 0.7fr 0.7fr 0.7fr 0.7fr 1fr 1fr 0.35fr; gap:8px; align-items:center;">
+                  <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 8px; font-family:'IBM Plex Mono'; font-size:12px; color:#e9ecef; font-weight:600;">{{ m.nombre }}</span>
+                  <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 4px; text-align:center; font-family:'IBM Plex Mono'; font-size:11.5px; color:#cfd5dc;">{{ m.prodMm }}</span>
+                  <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 4px; text-align:center; font-family:'IBM Plex Mono'; font-size:11.5px; color:#cfd5dc;">{{ m.prodMin }}</span>
+                  <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 4px; text-align:center; font-family:'IBM Plex Mono'; font-size:11.5px; color:#cfd5dc;">{{ m.desbMm }}</span>
+                  <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 4px; text-align:center; font-family:'IBM Plex Mono'; font-size:11.5px; color:#cfd5dc;">{{ m.desbMin }}</span>
+                  <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 8px; font-size:11px; color:#e9ecef; display:flex; justify-content:space-between; align-items:center;">{{ m.prioridad }}<span style="color:#8b939d;">▾</span></span>
+                  <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 6px; font-size:10.5px; color:#cfd5dc; text-align:center;">{{ m.turnos }}</span>
+                  <span style="text-align:center; color:#f56b6b; cursor:pointer; font-size:13px;">✕</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:center;">
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:16px 18px;">
+              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:14px; color:#e8a13a; margin-bottom:14px;">Parámetros de simulación</div>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="flex:1; font-size:12.5px; color:#cfd5dc;">Máximo de iteraciones</span>
+                <span style="width:120px; flex:none; background:#11151a; border:1px solid #313a45; border-radius:7px; padding:6px 10px; text-align:center; font-family:'IBM Plex Mono'; font-size:12.5px; color:#e9ecef;">{{ cfgMaxIter }}</span>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:14px;">
+              <button style="background:#2563EB; border:none; color:#fff; border-radius:9px; padding:11px 20px; font-size:13px; font-weight:700; cursor:pointer; font-family:'Hanken Grotesk';">⤓ Guardar configuración</button>
+              <span style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:#35c98a;">✓ Configuración coherente</span>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ MONTE CARLO ============ -->
+        <sc-if value="{{ isMonteCarlo }}">
+        <div data-screen-label="Monte Carlo" style="display:flex; gap:18px; height:100%;">
+
+          <!-- LEFT: panel de parámetros -->
+          <div style="width:290px; flex:none; display:flex; flex-direction:column; gap:10px; overflow-y:auto; padding-bottom:18px;">
+
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#b08cf5; letter-spacing:.04em; margin-bottom:4px;">PARÁMETROS DE VARIACIÓN</div>
+              <div style="font-size:11px; color:#59616b; line-height:1.55;">Cada corrida samplea un valor uniforme dentro del rango definido.</div>
+            </div>
+
+            <sc-for list="{{ mcParams }}" as="p" hint-placeholder-count="7">
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:13px 15px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <span style="font-size:12px; font-weight:600; color:#cfd5dc;">{{ p.label }}</span>
+                <span style="font-family:'IBM Plex Mono'; font-size:10px; color:#59616b;">{{ p.unit }}</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:7px;">
+                <span style="font-size:10px; color:#59616b; width:24px; flex:none;">Mín</span>
+                <input type="range" min="{{ p.absMin }}" max="{{ p.absMax }}" step="{{ p.step }}" value="{{ p.minV }}" onInput="{{ p.onMin }}" style="flex:1;">
+                <span style="font-family:'IBM Plex Mono'; font-size:11px; color:#f56b6b; width:38px; text-align:right; flex:none;">{{ p.minLabel }}</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:10px; color:#59616b; width:24px; flex:none;">Máx</span>
+                <input type="range" min="{{ p.absMin }}" max="{{ p.absMax }}" step="{{ p.step }}" value="{{ p.maxV }}" onInput="{{ p.onMax }}" style="flex:1;">
+                <span style="font-family:'IBM Plex Mono'; font-size:11px; color:#35c98a; width:38px; text-align:right; flex:none;">{{ p.maxLabel }}</span>
+              </div>
+            </div>
+            </sc-for>
+
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:13px 15px;">
+              <div style="font-size:12px; font-weight:600; color:#cfd5dc; margin-bottom:10px;">Número de corridas</div>
+              <div style="display:flex; gap:5px;">
+                <sc-for list="{{ mcRunOptions }}" as="ro" hint-placeholder-count="4">
+                  <button onClick="{{ ro.onClick }}" style="flex:1; background:{{ ro.bg }}; border:1px solid {{ ro.border }}; color:{{ ro.color }}; border-radius:7px; padding:6px 0; font-size:11px; font-weight:700; cursor:pointer; font-family:'IBM Plex Mono';">{{ ro.label }}</button>
+                </sc-for>
+                <input type="number" min="1" max="100000" value="{{ mcCustomVal }}" onInput="{{ mcCustomChange }}" placeholder="otro" style="width:64px; flex:none; background:{{ mcCustomBg }}; border:1px solid {{ mcCustomBorder }}; color:{{ mcCustomColor }}; border-radius:7px; padding:6px 6px; font-size:11px; font-weight:700; font-family:'IBM Plex Mono'; text-align:center; outline:none;"></input>
+              </div>
+            </div>
+
+            <button onClick="{{ mcRun }}" style="background:linear-gradient(180deg,#b08cf5,#8b5cf6); border:none; color:#fff; font-weight:700; font-family:'Hanken Grotesk'; font-size:14px; padding:13px; border-radius:10px; cursor:pointer; box-shadow:0 2px 10px rgba(139,92,246,.35);">{{ mcRunLabel }}</button>
+
+            <sc-if value="{{ mcRunning }}">
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:13px 15px;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:7px;">
+                <span style="font-size:11px; color:#8b939d;">Simulando...</span>
+                <span style="font-family:'IBM Plex Mono'; font-size:11px; color:#b08cf5;">{{ mcProgress }}%</span>
+              </div>
+              <div style="height:6px; background:#232a33; border-radius:3px; overflow:hidden;">
+                <div style="height:100%; width:{{ mcProgress }}%; background:#b08cf5; border-radius:3px;"></div>
+              </div>
+            </div>
+            </sc-if>
+
+          </div>
+
+          <!-- RIGHT: resultados -->
+          <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-bottom:18px;">
+
+            <sc-if value="{{ mcNoResults }}">
+            <div style="flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:14px; min-height:320px;">
+              <div style="font-size:56px; opacity:.12; font-family:'Space Grotesk';">◎</div>
+              <div style="font-family:'Space Grotesk'; font-size:15px; font-weight:600; color:#3a424d;">Configurá los rangos y ejecutá la simulación</div>
+              <div style="font-size:12px; color:#59616b;">Los resultados estadísticos aparecerán aquí</div>
+            </div>
+            </sc-if>
+
+            <sc-if value="{{ mcHasResults }}">
+
+            <!-- KPI cards -->
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px;">
+              <sc-for list="{{ mcKpiCards }}" as="k" hint-placeholder-count="4">
+              <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+                <div style="font-size:10px; font-weight:700; letter-spacing:.06em; color:#8b939d; margin-bottom:7px;">{{ k.label }}</div>
+                <div style="font-family:'Space Grotesk'; font-size:26px; font-weight:700; color:{{ k.color }};">{{ k.p50 }}</div>
+                <div style="margin-top:6px; font-size:10.5px; color:#59616b;">P10: <span style="color:#5AA9FF;">{{ k.p10 }}</span> · P90: <span style="color:#35c98a;">{{ k.p90 }}</span></div>
+              </div>
+              </sc-for>
+            </div>
+
+            <!-- Histogramas -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+              <sc-for list="{{ mcHistograms }}" as="hg" hint-placeholder-count="4">
+              <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+                <div style="font-family:'Space Grotesk'; font-weight:700; font-size:12px; color:#e8a13a; margin-bottom:12px; letter-spacing:.04em;">{{ hg.title }}</div>
+                <svg viewBox="0 0 400 120" style="width:100%; height:100px; display:block; overflow:visible;">
+                  <sc-for list="{{ hg.bars }}" as="b" hint-placeholder-count="12">
+                    <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" fill="{{ hg.color }}" rx="2" opacity="0.8"></rect>
+                  </sc-for>
+                  <line x1="{{ hg.p10x }}" x2="{{ hg.p10x }}" y1="0" y2="100" stroke="#5AA9FF" stroke-width="1.5" stroke-dasharray="4 3"></line>
+                  <line x1="{{ hg.p50x }}" x2="{{ hg.p50x }}" y1="0" y2="100" stroke="#e8a13a" stroke-width="2"></line>
+                  <line x1="{{ hg.p90x }}" x2="{{ hg.p90x }}" y1="0" y2="100" stroke="#35c98a" stroke-width="1.5" stroke-dasharray="4 3"></line>
+                  <text x="{{ hg.p10x }}" y="116" font-size="11" fill="#5AA9FF" text-anchor="middle" font-family="monospace">P10</text>
+                  <text x="{{ hg.p50x }}" y="116" font-size="11" fill="#e8a13a" text-anchor="middle" font-family="monospace">P50</text>
+                  <text x="{{ hg.p90x }}" y="116" font-size="11" fill="#35c98a" text-anchor="middle" font-family="monospace">P90</text>
+                </svg>
+                <div style="display:flex; justify-content:space-between; margin-top:10px; font-family:'IBM Plex Mono'; font-size:10px; color:#59616b;">
+                  <span>{{ hg.xMin }}</span><span>{{ hg.xMax }}</span>
+                </div>
+              </div>
+              </sc-for>
+            </div>
+
+            <!-- Tabla resumen -->
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
+              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:12px; letter-spacing:.04em;">RESUMEN ESTADÍSTICO · {{ mcRunsLabel }} corridas</div>
+              <div style="display:grid; grid-template-columns:1.6fr 1fr 1fr 1fr 1fr 1fr; padding:9px 12px; font-size:9.5px; letter-spacing:.05em; color:#8b939d; font-weight:700; border-bottom:1px solid #2b333d; background:#161b22; border-radius:8px 8px 0 0;">
+                <span>VARIABLE</span><span style="text-align:right;">MEDIA</span><span style="text-align:right;">DESV. STD</span><span style="text-align:right;">P10</span><span style="text-align:right;">P50</span><span style="text-align:right;">P90</span>
+              </div>
+              <sc-for list="{{ mcTableRows }}" as="r" hint-placeholder-count="4">
+              <div style="display:grid; grid-template-columns:1.6fr 1fr 1fr 1fr 1fr 1fr; padding:9px 12px; font-size:12px; align-items:center; border-bottom:1px solid #20262e;">
+                <span style="font-weight:600; color:{{ r.color }};">{{ r.label }}</span>
+                <span style="text-align:right; font-family:'IBM Plex Mono'; color:#cfd5dc;">{{ r.mean }}</span>
+                <span style="text-align:right; font-family:'IBM Plex Mono'; color:#59616b;">± {{ r.std }}</span>
+                <span style="text-align:right; font-family:'IBM Plex Mono'; color:#5AA9FF;">{{ r.p10 }}</span>
+                <span style="text-align:right; font-family:'IBM Plex Mono'; color:#e8a13a;">{{ r.p50 }}</span>
+                <span style="text-align:right; font-family:'IBM Plex Mono'; color:#35c98a;">{{ r.p90 }}</span>
+              </div>
+              </sc-for>
+            </div>
+
+            </sc-if>
+          </div>
+        </div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+  <!-- ===================== LOADING OVERLAY ===================== -->
+  <sc-if value="{{ loading }}">
+  <div style="position:fixed; inset:0; background:rgba(0,0,0,.65); display:flex; align-items:center; justify-content:center; z-index:999; flex-direction:column; gap:16px;">
+    <div style="width:44px; height:44px; border:4px solid #262d36; border-top-color:#e8a13a; border-radius:50%; animation:spin 0.8s linear infinite;"></div>
+    <div style="font-family:'Space Grotesk'; font-weight:600; font-size:15px; color:#e9ecef;">Ejecutando simulación…</div>
+    <div style="font-size:12px; color:#8b939d;">Puede tomar algunos segundos</div>
+  </div>
+  </sc-if>
+  <!-- ===================== API ERROR ===================== -->
+  <sc-if value="{{ apiError }}">
+  <div style="position:fixed; bottom:50px; left:50%; transform:translateX(-50%); background:#2a0e0e; border:1px solid #f56b6b; border-radius:10px; padding:12px 18px; font-size:12.5px; color:#f56b6b; display:flex; align-items:center; gap:10px; z-index:998; max-width:500px;">
+    <span style="font-size:16px;">⚠</span><span>{{ apiError }}</span>
+  </div>
+  </sc-if>
+  <!-- ===================== STATUS BAR ===================== -->
+  <div style="height:30px; flex:none; background:#1a1f26; border-top:1px solid #262d36; display:flex; align-items:center; padding:0 18px; font-size:11.5px; color:#8b939d; gap:18px;">
+    <span style="color:#35c98a;">● Listo</span>
+    <span style="font-family:'IBM Plex Mono';">{{ clock }}</span>
+    <span>Snapshot {{ snapNum }}/{{ snapTotal }}</span>
+    <span style="margin-left:auto; font-family:'IBM Plex Mono'; color:{{ apiStatusColor }};">{{ apiStatusLabel }}</span>
+    <span style="color:#59616b;">v4 · {{ estrategiaLabel }}</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;estrategia&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;Mayor diámetro&quot;, &quot;Menor diámetro&quot;, &quot;FIFO&quot;], &quot;default&quot;: &quot;Mayor diámetro&quot;, &quot;tsType&quot;: &quot;string&quot;},
+  &quot;velocidadInicial&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;1×&quot;, &quot;2×&quot;, &quot;5×&quot;, &quot;10×&quot;], &quot;default&quot;: &quot;2×&quot;, &quot;tsType&quot;: &quot;string&quot;},
+  &quot;autoplay&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;}
+}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const SPD = { "1×": 1, "2×": 2, "5×": 5, "10×": 10 };
+    this.state = {
+      tab: "vista", snapIdx: 64, playing: false,
+      speed: SPD[props.velocidadInicial] || 2,
+      apiMode: false, loading: false, apiError: null,
+      apiStatus: "mock", simId: null,
+      mcRuns: 500, mcRunning: false, mcProgress: 0, mcResults: null,
+      mcParamState: {
+        desgaste:     { min: 1.2, max: 2.4 },
+        tiempoRect:   { min: 2.0, max: 3.0 },
+        tiempoEnf:    { min: 3.0, max: 5.0 },
+        tasaFalla:    { min: 0.02, max: 0.10 },
+        stockInicial: { min: 290,  max: 350  },
+        rateProd:     { min: 0.004, max: 0.008 },
+        rateDesb:     { min: 0.015, max: 0.025 },
+      },
+    };
+    this._build();
+  }
+
+  componentDidMount() {
+    if (this.props.autoplay) { this.setState({ playing: true }); this._arm(this.state.speed); }
+    this._pingApi();
+  }
+
+  _apiBase() { return (this.props.apiUrl || "http://localhost:8000").replace(/\/$/, ""); }
+
+  _pingApi() {
+    fetch(this._apiBase() + "/api/config", { signal: AbortSignal.timeout(1500) })
+      .then(r => r.ok && this.setState({ apiStatus: "conectado" }))
+      .catch(() => this.setState({ apiStatus: "sin servidor" }));
+  }
+
+  // Convierte un snapshot de la API (formato serializers.py) al formato interno
+  _sn2interno(raw, maqNombres) {
+    const COL = this.COL, TXT = this.TXT;
+    const chip = (id, d, st) => ({ id, dia: String(d), color: COL[st] || "#8b939d", txt: TXT[st] || "#fff" });
+    const t = new Date(raw.t);
+
+    // jaulas
+    const jaulas = Object.entries(raw.jaulas || {})
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .map(([jid, j]) => ({
+        n: Number(jid),
+        trab: (j.trabajando || []).map(c => chip(c.id, c.d, "Trabajando")),
+        crc:  (j.crc       || []).map(c => chip(c.id, c.d, "CRC")),
+        parada: !!j.parada,
+      }));
+
+    // machines
+    const machines = maqNombres.map(nombre => {
+      const m = (raw.maquinas || {})[nombre] || {};
+      const busy = !!m.id, op = m.operativa !== false;
+      const statusText = busy ? `Rectificando · ${m.pct}%` : op ? "Libre · operativa" : "Fuera de turno";
+      return { name: nombre, busy, pct: busy ? m.pct : 0, cyl: m.id || "", dia: m.d || "", operativa: op, statusText, color: busy ? "#b08cf5" : op ? "#35c98a" : "#f56b6b" };
+    });
+
+    // cola / enf
+    const cola = (raw.cola || []).map((c, i) => chip(c.id, c.d, i === 0 ? "CRC" : "A rectificar"));
+    if (cola[0]) cola[0] = Object.assign({}, cola[0], { color: "#e8a13a", txt: "#1a1206" });
+    const enf = (raw.enfriando || []).map(c => chip(c.id, c.d, "Enfriando"));
+
+    // disponibles por jaula desde disp_ss
+    const dispSS = raw.disp_ss || {};
+    const ssEntries = Object.entries(dispSS).sort((a, b) => {
+      const na = parseInt((a[0].match(/SS(\d+)/) || [0, 0])[1]);
+      const nb = parseInt((b[0].match(/SS(\d+)/) || [0, 0])[1]);
+      return na - nb;
+    });
+    const disp = ssEntries.length ? ssEntries.map(e => e[1]) : new Array(jaulas.length).fill(0);
+
+    return { t, jaulas, machines, cola, enf, disp, bajas: raw.n_bajas || 0, alertas: (raw.paradas || []).length > 0 ? 1 : 0, paradas: (raw.paradas || []).length };
+  }
+
+  cargarExcel(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    this._disarm();
+    this.setState({ loading: true, apiError: null, playing: false });
+    const fd = new FormData();
+    fd.append("excel", file);
+    fd.append("estrategia", this.props.estrategia === "FIFO" ? "fifo" : this.props.estrategia === "Menor diámetro" ? "menor_diametro" : "mayor_diametro");
+    fetch(this._apiBase() + "/api/simular", { method: "POST", body: fd })
+      .then(r => r.json().then(j => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        if (!ok) throw new Error(j.detail || "Error en el servidor");
+        this._cargarSnapsDeApi(j);
+        this.setState({ loading: false, apiMode: true, apiStatus: "conectado", simId: j.sim_id, snapIdx: 0, tab: "vista" });
+        if (this.props.autoplay) { this.setState({ playing: true }); this._arm(this.state.speed); }
+      })
+      .catch(err => this.setState({ loading: false, apiError: err.message || String(err) }));
+  }
+
+  _cargarSnapsDeApi(resp) {
+    const maqNombres = resp.snapshots.length
+      ? Object.keys(resp.snapshots[0].maquinas || {})
+      : Object.keys(this.snaps[0].machines.map(m => m.name));
+    const snaps = resp.snapshots.map(raw => this._sn2interno(raw, maqNombres));
+    if (!snaps.length) return;
+    this.snaps = snaps;
+    this.N = snaps.length;
+    this.paradaMarks = [];
+    for (let i = 0; i < this.N; i++) if (snaps[i].paradas > 0 && (i === 0 || snaps[i - 1].paradas === 0)) this.paradaMarks.push(i);
+    this.maxDisp = Math.max(1, ...snaps.flatMap(s => s.disp));
+    // KPIs reales
+    if (resp.kpis) {
+      const k = resp.kpis;
+      this.kpisApi = [
+        { label: "Cilindros Totales", val: String(k.cilindros_totales || "—"), color: "#e9ecef" },
+        { label: "Activos", val: String(k.activos || "—"), color: "#35c98a" },
+        { label: "Bajas", val: String(k.bajas || 0), color: (k.bajas || 0) ? "#f56b6b" : "#35c98a" },
+        { label: "Alertas Críticas", val: String(k.alertas_criticas || 0), color: (k.alertas_criticas || 0) ? "#f56b6b" : "#35c98a" },
+        { label: "Cambios Programados", val: String(k.cambios_programados || "—"), color: "#f0a32e" },
+        { label: "Rectificados Realizados", val: String(k.rectificados_realizados || "—"), color: "#b08cf5" },
+        { label: "Horizonte Simulación (h)", val: String(k.horizonte_simulacion_h || "—"), color: "#34d3e0" },
+        { label: "Diámetro Promedio", val: k.diametro_promedio_mm ? k.diametro_promedio_mm.toFixed(1) + " mm" : "—", color: "#fbbf24" },
+        { label: "Desgaste Medio", val: k.desgaste_medio_mm ? k.desgaste_medio_mm.toFixed(2) + " mm" : "—", color: "#f97316" },
+      ];
+      const util = k.utilizacion_maquinas_pct || {}, neta = k.utilizacion_neta_pct || {};
+      this.utilDispApi = Object.entries(util).map(([n, p]) => ({ name: n, pct: Math.round(p), fillpct: Math.round(p), color: this._utilColor(p) }));
+      this.utilNetaApi = Object.entries(neta).map(([n, p]) => ({ name: n, pct: Math.round(p), fillpct: Math.round(p), color: this._utilColor(p) }));
+    }
+    // Log real
+    if (resp.log) this.logLines = resp.log;
+    // Alertas → consola
+    if (resp.alertas) this.logLines = [...(resp.log || []), ...resp.alertas.map(a => `[${a.tiempo.slice(11, 16)}] ${a.tipo}: ${a.mensaje}`)];
+    // Reconstruir gráficos con los datos reales (ejes de tiempo reales)
+    this._buildCharts(); this._buildExtra();
+  }
+  componentWillUnmount() { this._disarm(); }
+
+  _build() {
+    const COL = { Trabajando:"#4a9eff", CRC:"#f0a32e", Disponible:"#35c98a", Enfriando:"#34d3e0", "A rectificar":"#f56b6b", Rectificando:"#b08cf5", Baja:"#6b7480" };
+    const TXT = { Trabajando:"#06121f", CRC:"#231603", Disponible:"#062014", Enfriando:"#062227", "A rectificar":"#2a0808", Rectificando:"#1b0f33", Baja:"#ffffff" };
+    this.COL = COL; this.TXT = TXT;
+    this.STATES = ["Trabajando","CRC","Disponible","Enfriando","A rectificar","Rectificando","Baja"];
+    const dia = (n) => 595 + ((n * 37) % 270) / 10;
+    const cid = (n) => "C-" + String((n % 320) + 1).padStart(3, "0");
+    const chip = (n, st) => ({ id: cid(n), dia: dia(n).toFixed(1), color: COL[st], txt: TXT[st] });
+
+    const N = 120, snaps = [], start = new Date(2026, 2, 10, 6, 0);
+    for (let i = 0; i < N; i++) {
+      const t = new Date(start.getTime() + i * 30 * 60000);
+      const hour = t.getHours();
+      const par = {}; if (i >= 38 && i <= 50) par[2] = 1; if (i >= 92 && i <= 101) par[4] = 1;
+      const jaulas = [];
+      for (let j = 1; j <= 4; j++) {
+        const trabSeed = (10 + j * 7) * 5 + Math.floor(i / 22) * 4 + j;
+        const trab = [chip(trabSeed, "Trabajando")];
+        const crcCount = Math.max(0, Math.min(2, Math.round(1.1 + 1.1 * Math.sin(i / 6 + j))));
+        const crc = []; for (let k = 0; k < crcCount; k++) crc.push(chip(40 + j * 9 + i + k * 3, "CRC"));
+        jaulas.push({ n: j, trab, crc, parada: !!par[j] });
+      }
+      const mk = (name, cyc, gap, base) => {
+        const pos = i % cyc, busy = pos < (cyc - gap), pct = busy ? Math.round((pos + 1) / (cyc - gap) * 100) : 0, cn = base + Math.floor(i / cyc) * 3;
+        return { name, busy, pct, cyl: cid(cn), dia: dia(cn).toFixed(1), tipo: "produccion" };
+      };
+      const m1 = mk("RECT-01", 8, 1, 200), m2 = mk("RECT-02", 10, 2, 240);
+      const operativaDesb = hour >= 6 && hour < 22, desbBusy = ((i % 13) < 3) && operativaDesb, dn = 280 + Math.floor(i / 13) * 2;
+      const m3 = { name: "DESB-01", busy: desbBusy, pct: desbBusy ? Math.round(((i % 13) + 1) / 3 * 100) : 0, cyl: cid(dn), dia: dia(dn).toFixed(1), tipo: "desbaste", operativa: operativaDesb };
+      const machines = [m1, m2, m3].map((m) => {
+        const operativa = m.operativa !== undefined ? m.operativa : true;
+        let statusText, color;
+        if (m.busy) { statusText = "Rectificando · " + m.pct + "%"; color = "#b08cf5"; }
+        else if (operativa) { statusText = "Libre · operativa"; color = "#35c98a"; }
+        else { statusText = "Fuera de turno"; color = "#f56b6b"; }
+        return Object.assign({}, m, { operativa, statusText, color });
+      });
+      const colaN = Math.max(1, Math.min(7, 4 + Math.round(2 * Math.sin(i / 7))));
+      const cola = []; for (let k = 0; k < colaN; k++) cola.push(chip(150 + i + k * 5, "A rectificar"));
+      if (cola[0]) cola[0] = Object.assign({}, cola[0], { color: "#e8a13a", txt: "#1a1206" });
+      const enfN = Math.max(0, Math.min(4, 2 + Math.round(1.5 * Math.sin(i / 5 + 1))));
+      const enf = []; for (let k = 0; k < enfN; k++) enf.push(chip(300 + i + k * 4, "Enfriando"));
+      const disp = [12, 5, 9, 14].map((b, jx) => Math.max(0, b + Math.round(3 * Math.sin(i / 9 + jx))));
+      const bajas = Math.floor(i / 26), minDisp = Math.min.apply(null, disp), alertas = minDisp < 4 ? 1 : 0;
+      snaps.push({ t, hour, jaulas, machines, cola, enf, disp, bajas, alertas, paradas: Object.keys(par).length });
+    }
+    this.snaps = snaps; this.N = N;
+    this.maxDisp = Math.max.apply(null, [1].concat(snaps.reduce((a, s) => a.concat(s.disp), [])));
+    this.paradaMarks = [];
+    for (let i = 0; i < N; i++) if (snaps[i].paradas > 0 && (i === 0 || snaps[i - 1].paradas === 0)) this.paradaMarks.push(i);
+    this._buildCharts(); this._buildStatic(); this._buildExtra();
+  }
+
+  _counts(s) {
+    const trab = 4, rect = s.machines.filter((m) => m.busy).length, arect = s.cola.length, enf = s.enf.length;
+    const crc = s.jaulas.reduce((a, j) => a + j.crc.length, 0), baja = s.bajas;
+    let disp = 320 - (trab + rect + arect + enf + crc + baja); if (disp < 0) disp = 0;
+    return { Trabajando: trab, CRC: crc, Disponible: disp, Enfriando: enf, "A rectificar": arect, Rectificando: rect, Baja: baja };
+  }
+
+  _buildCharts() {
+    const W = 1000, H = 280, N = this.N, snaps = this.snaps, total = 320;
+
+    // ── Coordenadas X basadas en tiempo real ──────────────────────────────
+    const t0ms = snaps[0].t.getTime();
+    const t1ms = snaps[N - 1].t.getTime();
+    const tRangeMs = t1ms - t0ms || 1;
+    this._t0ms = t0ms; this._tRangeMs = tRangeMs;
+    const xt  = (i) => ((snaps[i].t.getTime() - t0ms) / tRangeMs * W).toFixed(1);
+    const xpct = (i) => (snaps[i].t.getTime() - t0ms) / tRangeMs * 100;
+
+    // ── Ticks adaptativos según horizonte ─────────────────────────────────
+    const totalH = tRangeMs / 3600000;
+    const stepH = totalH <= 24 ? 4 : totalH <= 96 ? 12 : 24;
+    const stepMs = stepH * 3600000;
+    const fmtTick = (d) => {
+      if (totalH <= 24) return String(d.getHours()).padStart(2, "0") + "h";
+      const diffH = (d.getTime() - t0ms) / 3600000;
+      if (totalH <= 96) return d.getHours() === 0 ? "D" + (Math.round(diffH / 24) + 1) : String(d.getHours()) + "h";
+      return "D" + (Math.floor(diffH / 24) + 1);
+    };
+    const ticks = [];
+    let tickT = Math.ceil(t0ms / stepMs) * stepMs;
+    while (tickT <= t1ms) {
+      const xPos = ((tickT - t0ms) / tRangeMs * W).toFixed(1);
+      const xPct = ((tickT - t0ms) / tRangeMs * 100).toFixed(2);
+      ticks.push({ x: xPos, xPct, label: fmtTick(new Date(tickT)) });
+      tickT += stepMs;
+    }
+    this.chartTicks = ticks;
+
+    // ── Stack chart ───────────────────────────────────────────────────────
+    let lower = new Array(N).fill(0); const polys = [];
+    for (const st of this.STATES) {
+      const upper = snaps.map((s, i) => lower[i] + this._counts(s)[st]);
+      const pts = [];
+      for (let i = 0; i < N; i++) pts.push(xt(i) + "," + (H - upper[i] / total * H).toFixed(1));
+      for (let i = N - 1; i >= 0; i--) pts.push(xt(i) + "," + (H - lower[i] / total * H).toFixed(1));
+      polys.push({ points: pts.join(" "), color: this.COL[st], label: st });
+      lower = upper;
+    }
+    this.stackPolys = polys;
+
+    // ── Buffer / disponibles / CRC ────────────────────────────────────────
+    const dispT = snaps.map((s) => s.disp.reduce((a, b) => a + b, 0));
+    const crcT  = snaps.map((s) => s.jaulas.reduce((a, j) => a + j.crc.length, 0));
+    const buf   = dispT.map((d, i) => d + crcT[i]);
+    const maxB  = Math.max.apply(null, buf.concat([1]));
+    const xy    = (arr) => arr.map((v, i) => xt(i) + "," + (H - v / maxB * H).toFixed(1));
+    const line  = (arr) => "M" + xy(arr).join(" L");
+    this.bufLine = line(buf); this.dispLine = line(dispT); this.crcLine = line(crcT);
+    this.bufArea = "M0," + H + " L" + xy(buf).join(" L") + " L" + W + "," + H + " Z";
+
+    // ── Gantt (x por tiempo real, sin huecos entre producciones) ─────────
+    const rectColors = { produccion: "#35c98a", desbaste: "#f0a32e" };
+    this.gantt = ["RECT-01", "RECT-02", "DESB-01"].map((name) => {
+      const tipo  = name.indexOf("DESB") === 0 ? "desbaste" : "produccion";
+      const color = rectColors[tipo];
+      const segs  = [], par = [];
+      let rs = null, ps = null;
+      for (let i = 0; i < N; i++) {
+        const m  = snaps[i].machines.find((x) => x.name === name);
+        const op = m ? (m.operativa !== false) : true;
+        if (op) {
+          if (rs === null) rs = i;
+          if (ps !== null) { par.push({ x: xpct(ps).toFixed(2), w: (xpct(i) - xpct(ps)).toFixed(2) }); ps = null; }
+        } else {
+          if (ps === null) ps = i;
+          if (rs !== null) { segs.push({ x: xpct(rs).toFixed(2), w: (xpct(i) - xpct(rs)).toFixed(2), color }); rs = null; }
+        }
+      }
+      if (rs !== null) segs.push({ x: xpct(rs).toFixed(2), w: (100 - xpct(rs)).toFixed(2), color });
+      if (ps !== null) par.push({ x: xpct(ps).toFixed(2), w: (100 - xpct(ps)).toFixed(2) });
+      return { name, segs, par };
+    });
+
+    // ── Histograma (estático — diámetros del stock mock) ──────────────────
+    const diam = []; for (let n = 0; n < 320; n++) diam.push(595 + ((n * 37) % 270) / 10);
+    const bins = 9, lo = 595, hi = 622, bw = (hi - lo) / bins, hc = new Array(bins).fill(0);
+    diam.forEach((d) => { let b = Math.floor((d - lo) / bw); if (b < 0) b = 0; if (b >= bins) b = bins - 1; hc[b]++; });
+    const maxh = Math.max.apply(null, hc);
+    this.hist = hc.map((c, i) => ({ label: (lo + i * bw).toFixed(0), hpct: Math.round(c / maxh * 100), count: c }));
+
+    // ── Bajas ─────────────────────────────────────────────────────────────
+    const bajasArr = snaps.map((s) => s.bajas), maxBaj = Math.max.apply(null, bajasArr.concat([1]));
+    this.bajasLine = "M" + bajasArr.map((v, i) => xt(i) + "," + (H - v / maxBaj * H).toFixed(1)).join(" L");
+
+    const cf = this._counts(snaps[N - 1]), tot = Object.keys(cf).reduce((a, k) => a + cf[k], 0);
+    this.estadoDist = this.STATES.map((st) => ({ label: st, pct: Math.round(cf[st] / tot * 100), val: cf[st], color: this.COL[st] }));
+  }
+
+  _buildStatic() {
+    const tint = (c) => c + "1a";
+    const inv = [
+      ["C-104", 612.4, 618.0, "Trabajando", "J1"], ["C-211", 615.0, 621.5, "CRC", "J1"],
+      ["C-198", 614.2, 620.0, "CRC", "J1"], ["C-087", 598.7, 612.3, "Trabajando", "J2"],
+      ["C-145", 616.1, 622.0, "CRC", "J2"], ["C-176", 604.9, 615.8, "Trabajando", "J3"],
+      ["C-301", 620.5, 622.0, "Rectificando", "—"], ["C-260", 621.8, 622.0, "A rectificar", "—"],
+      ["C-312", 622.3, 622.5, "Enfriando", "—"], ["C-052", 609.3, 619.1, "Trabajando", "J4"],
+      ["C-160", 613.7, 620.4, "CRC", "J4"], ["C-019", 596.2, 611.0, "Disponible", "J3"],
+      ["C-244", 618.9, 622.0, "Disponible", "J4"], ["C-077", 588.4, 621.0, "Baja", "—"],
+    ];
+    this.invRows = inv.map((r) => {
+      const [id, d, o, st, j] = r;
+      return { id, dia: d.toFixed(1), orig: o.toFixed(1), desg: (o - d).toFixed(1), estado: st, jaula: j, color: this.COL[st], bg: tint(this.COL[st]) };
+    });
+    const mot = { "Cambio programado": "#4a9eff", "Cambio por desgaste": "#f0a32e", "Parada mantenimiento": "#f56b6b", "Cambio de campaña": "#b08cf5" };
+    const camb = [
+      ["10/03 06:00", "J1", "C-090", "C-104", "Cambio programado"],
+      ["10/03 14:30", "J3", "C-141", "C-176", "Cambio por desgaste"],
+      ["11/03 02:00", "J2", "C-066", "C-087", "Cambio programado"],
+      ["11/03 09:00", "J2", "—", "—", "Parada mantenimiento"],
+      ["11/03 18:30", "J4", "C-038", "C-052", "Cambio de campaña"],
+      ["12/03 05:00", "J1", "C-104", "C-211", "Cambio por desgaste"],
+      ["12/03 12:00", "J3", "C-176", "C-233", "Cambio programado"],
+      ["12/03 22:00", "J4", "—", "—", "Parada mantenimiento"],
+    ];
+    this.cambios = camb.map((c, i) => ({ fecha: c[0], jaula: c[1], sale: c[2], entra: c[3], motivo: c[4], color: mot[c[4]], pos: (i + 0.5) / camb.length * 100 }));
+    this.globals = [
+      ["Diámetro mínimo", "585.0 mm"], ["Tiempo de enfriado", "4.0 h"], ["Duración de rectificado", "2.5 h"],
+      ["Desgaste por campaña", "1.8 mm"], ["Régimen de trabajo", "Rect. 24/7 · Desb. por turno"], ["Estrategia de selección", "Mayor diámetro primero"],
+    ];
+    this.maquinas = [
+      { name: "RECT-01", tipo: "Producción", tiempo: "2.5 h", color: "#35c98a" },
+      { name: "RECT-02", tipo: "Producción", tiempo: "2.5 h", color: "#35c98a" },
+      { name: "DESB-01", tipo: "Desbaste", tiempo: "3.0 h", color: "#f0a32e" },
+    ];
+    const ssc = ["#5AA9FF", "#f0a32e", "#35c98a", "#F472B6"];
+    this.rangos = [
+      { jaula: "J1", substock: "SS-A", min: "610.0", max: "622.0", color: ssc[0] },
+      { jaula: "J2", substock: "SS-B", min: "600.0", max: "615.0", color: ssc[1] },
+      { jaula: "J3", substock: "SS-C", min: "595.0", max: "610.0", color: ssc[2] },
+      { jaula: "J4", substock: "SS-D", min: "608.0", max: "620.0", color: ssc[3] },
+    ];
+    this.logLines = [
+      "[06:00] Bienvenido al Simulador de Cilindros Pro v4",
+      "[06:00] Stock cargado: stock_inicial.xlsx — 320 cilindros",
+      "[06:00] Configuración aplicada: 4 jaulas · 3 máquinas · estrategia 'mayor diámetro'",
+      "[06:00] Cambios generados: 48 eventos en el horizonte de simulación",
+      "[06:01] Simulación iniciada (proceso en segundo plano)…",
+      "[12:30] Cambio en J1: C-090 → C-104 (cambio programado)",
+      "[19:00] ⚠ Parada en J2 — buffer CRC por debajo del mínimo",
+      "[22:00] DESB-01 fuera de turno (régimen de trabajo)",
+      "[03:30] Rectificado completado: C-301 (620.5 mm) en RECT-01",
+      "[08:40] Baja: C-077 alcanzó el diámetro mínimo (588.4 mm)",
+      "[08:40] Snapshots generados: 120",
+      "[08:40] Simulación finalizada — use la reproducción para revisar los resultados.",
+    ];
+  }
+
+  _buildExtra() {
+    const JC = ["#5AA9FF", "#f0a32e", "#35c98a", "#F472B6"];
+    this.JC = JC;
+    const domLo = 583, domHi = 625, W = 1000, H = 308;
+    const lanes = this.STATES, rowH = H / lanes.length;
+    this.mapaLanes = lanes.map((st, i) => ({ label: st, color: this.COL[st], y: (i * rowH + rowH / 2).toFixed(1) }));
+    let seed = 99; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const spec = [["Trabajando", 4, 598, 616], ["CRC", 6, 600, 620], ["Disponible", 44, 589, 622], ["Enfriando", 3, 617, 623], ["A rectificar", 5, 614, 622], ["Rectificando", 2, 619, 622], ["Baja", 6, 585, 590]];
+    const pts = [];
+    spec.forEach((sp, li) => { for (let k = 0; k < sp[1]; k++) { const d = sp[2] + (sp[3] - sp[2]) * rnd(); const cx = (d - domLo) / (domHi - domLo) * W; const cy = li * rowH + rowH / 2 + (rnd() - 0.5) * rowH * 0.6; pts.push({ cx: cx.toFixed(1), cy: cy.toFixed(1), color: this.COL[sp[0]] }); } });
+    this.mapaPuntos = pts;
+    this.mapaTicks = [585, 595, 605, 615, 622].map((v) => ({ label: String(v) }));
+    const pct = (v) => ((v - domLo) / (domHi - domLo) * 100).toFixed(2);
+    const labels = [585, 588, 591, 594, 597, 600, 603, 606, 609, 612, 615, 618, 621];
+    const counts = [2, 4, 7, 12, 19, 28, 38, 45, 44, 36, 46, 32, 7];
+    const maxc = Math.max.apply(null, counts);
+    this.distBars = labels.map((lab, i) => ({ leftPct: pct(lab + 0.2), widthPct: (2.6 / (domHi - domLo) * 100).toFixed(2), hPx: Math.round(counts[i] / maxc * 150), count: counts[i] }));
+    this.distZones = [["J1", 610, 622, JC[0]], ["J2", 600, 615, JC[1]], ["J3", 595, 610, JC[2]], ["J4", 608, 620, JC[3]]].map((z) => ({ label: z[0], leftPct: pct(z[1]), widthPct: ((z[2] - z[1]) / (domHi - domLo) * 100).toFixed(2), color: z[3] }));
+    this.distMin = { leftPct: pct(585), label: "Mín 585" };
+    this.distMax = { leftPct: pct(622), label: "Máx 622" };
+    const N = this.N, snaps = this.snaps, WW = 1000, HH = 270, maxV = Math.max(1, this.maxDisp);
+    const ssn = ["SS-A", "SS-B", "SS-C", "SS-D"];
+    // Usar coordenadas de tiempo ya calculadas en _buildCharts
+    const t0ms = this._t0ms || snaps[0].t.getTime();
+    const tRangeMs = this._tRangeMs || ((snaps[N - 1].t.getTime() - t0ms) || 1);
+    const xtE = (i) => ((snaps[i].t.getTime() - t0ms) / tRangeMs * WW).toFixed(1);
+    this.ssEvol = [0, 1, 2, 3].map((jx) => {
+      const seg = [];
+      for (let i = 0; i < N; i++) {
+        const x = xtE(i), y = (HH - (snaps[i].disp[jx] / maxV * HH)).toFixed(1);
+        if (i === 0) seg.push("M" + x + "," + y);
+        else { const py = (HH - (snaps[i - 1].disp[jx] / maxV * HH)).toFixed(1); seg.push("L" + x + "," + py + " L" + x + "," + y); }
+      }
+      return { path: seg.join(" "), color: JC[jx], label: "J" + (jx + 1) + " · " + ssn[jx] };
+    });
+    const bands = []; let bs = null;
+    for (let i = 0; i < N; i++) {
+      const p = snaps[i].paradas > 0;
+      if (p && bs === null) bs = i;
+      else if (!p && bs !== null) { bands.push({ xU: xtE(bs), wU: ((snaps[i].t.getTime() - snaps[bs].t.getTime()) / tRangeMs * WW).toFixed(1) }); bs = null; }
+    }
+    if (bs !== null) bands.push({ xU: xtE(bs), wU: ((snaps[N - 1].t.getTime() - snaps[bs].t.getTime()) / tRangeMs * WW).toFixed(1) });
+    this.ssParadaBands = bands;
+    this.cfgGlobales = [
+      { label: "Diámetro máximo (mm)", val: "622.0", hint: "" },
+      { label: "Diámetro mínimo (mm)", val: "585.0", hint: "bajo este → BAJA" },
+      { label: "Traslado Disp.→CRC (min)", val: "30", hint: "" },
+      { label: "Cantidad de jaulas", val: "4", hint: "" },
+      { label: "Tiempo de enfriado (h)", val: "4.0", hint: "0 = sin enfriado" },
+    ];
+    this.cfgRangos = [
+      { jaula: "1", desde: "610.0", hasta: "622.0", perfil: "P-A", color: JC[0] },
+      { jaula: "2", desde: "600.0", hasta: "615.0", perfil: "P-B", color: JC[1] },
+      { jaula: "3", desde: "595.0", hasta: "610.0", perfil: "—", color: JC[2] },
+      { jaula: "4", desde: "608.0", hasta: "620.0", perfil: "—", color: JC[3] },
+    ];
+    this.cfgMaquinas = [
+      { nombre: "RECT-01", prodMm: "0.8", prodMin: "150", desbMm: "2.0", desbMin: "90", prioridad: "Producción", turnos: "24/7" },
+      { nombre: "RECT-02", prodMm: "0.8", prodMin: "150", desbMm: "2.0", desbMin: "90", prioridad: "Producción", turnos: "24/7" },
+      { nombre: "DESB-01", prodMm: "0.6", prodMin: "180", desbMm: "2.5", desbMin: "120", prioridad: "Desbaste", turnos: "L–V 06–22" },
+    ];
+    this.cfgMaxIter = "100000";
+  }
+
+  _mix(a, b, t) {
+    const pa = [parseInt(a.slice(1, 3), 16), parseInt(a.slice(3, 5), 16), parseInt(a.slice(5, 7), 16)];
+    const pb = [parseInt(b.slice(1, 3), 16), parseInt(b.slice(3, 5), 16), parseInt(b.slice(5, 7), 16)];
+    return "#" + pa.map((v, i) => Math.round(v + (pb[i] - v) * t).toString(16).padStart(2, "0")).join("");
+  }
+  _utilColor(p) {
+    const t = Math.max(0, Math.min(1, p / 100));
+    return t < 0.5 ? this._mix("#f56b6b", "#fbbf24", t / 0.5) : this._mix("#fbbf24", "#35c98a", (t - 0.5) / 0.5);
+  }
+
+  _runMC() {
+    if (this.state.mcRunning) return;
+    this.setState({ mcRunning: true, mcProgress: 0, mcResults: null });
+    const runs = this.state.mcRuns, ps = this.state.mcParamState;
+    const results = [];
+    const BATCH = 30;
+    let done = 0;
+    const runBatch = () => {
+      const end = Math.min(done + BATCH, runs);
+      for (let i = done; i < end; i++) {
+        results.push(this._mcOneRun({
+          desgaste:     ps.desgaste.min     + Math.random() * (ps.desgaste.max     - ps.desgaste.min),
+          tiempoRect:   ps.tiempoRect.min   + Math.random() * (ps.tiempoRect.max   - ps.tiempoRect.min),
+          tiempoEnf:    ps.tiempoEnf.min    + Math.random() * (ps.tiempoEnf.max    - ps.tiempoEnf.min),
+          tasaFalla:    ps.tasaFalla.min    + Math.random() * (ps.tasaFalla.max    - ps.tasaFalla.min),
+          stockInicial: Math.round(ps.stockInicial.min + Math.random() * (ps.stockInicial.max - ps.stockInicial.min)),
+          rateProd:     ps.rateProd.min + Math.random() * (ps.rateProd.max - ps.rateProd.min),
+          rateDesb:     ps.rateDesb.min + Math.random() * (ps.rateDesb.max  - ps.rateDesb.min),
+        }));
+      }
+      done = end;
+      this.setState({ mcProgress: Math.round(done / runs * 100) });
+      if (done < runs) { setTimeout(runBatch, 0); }
+      else { this.setState({ mcRunning: false, mcResults: results }); }
+    };
+    setTimeout(runBatch, 0);
+  }
+
+  _mcOneRun(params) {
+    const { desgaste, tiempoRect, tiempoEnf, tasaFalla, stockInicial, rateProd = 0.006, rateDesb = 0.020 } = params;
+    let seed = (Math.random() * 99991) | 0;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const minD = 585, maxD = 622;
+    const cyls = [];
+    for (let i = 0; i < stockInicial; i++) cyls.push(595 + rnd() * 27);
+    let bajas = 0, paradas = 0, stockMin = cyls.length, paradaH = 0;
+    const H = 60;
+    const rectEvery = Math.max(1, Math.round(tiempoRect + tiempoEnf));
+    for (let h = 0; h < H; h++) {
+      if (rnd() < tasaFalla) { paradas++; paradaH++; }
+      if (cyls.length > 0) {
+        let maxI = 0;
+        for (let i = 1; i < cyls.length; i++) if (cyls[i] > cyls[maxI]) maxI = i;
+        cyls[maxI] -= (desgaste / 8) * (0.85 + rnd() * 0.3) * (rateDesb / 0.020);
+        if (cyls[maxI] < minD) { bajas++; cyls.splice(maxI, 1); }
+      }
+      if (h % rectEvery === 0) {
+        let bestI = -1, bestD = Infinity;
+        for (let i = 0; i < cyls.length; i++) { if (cyls[i] > minD && cyls[i] < maxD - 1.5 && cyls[i] < bestD) { bestD = cyls[i]; bestI = i; } }
+        if (bestI >= 0) { const mmR = Math.max(0.5, rateProd * tiempoRect * 60) * (0.95 + rnd() * 0.1); cyls[bestI] = Math.min(maxD, cyls[bestI] + mmR); }
+      }
+      const av = cyls.filter(d => d > minD).length;
+      if (av < stockMin) stockMin = av;
+    }
+    return { bajas, paradas, stockMin, nivelServicio: Math.round((H - paradaH) / H * 100) };
+  }
+
+  _mcStats(arr) {
+    const n = arr.length;
+    if (!n) return { mean: 0, std: 0, p10: 0, p50: 0, p90: 0 };
+    const sorted = arr.slice().sort((a, b) => a - b);
+    const mean = arr.reduce((s, v) => s + v, 0) / n;
+    const std  = Math.sqrt(arr.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n);
+    const p    = (pct) => sorted[Math.min(n - 1, Math.max(0, Math.round(pct / 100 * (n - 1))))];
+    return { mean, std, p10: p(10), p50: p(50), p90: p(90) };
+  }
+
+  _mcHistogram(values, bins) {
+    const n = values.length;
+    if (!n) return { bars: [], p10x: "200", p50x: "200", p90x: "200", xMin: "0", xMax: "0" };
+    const sorted = values.slice().sort((a, b) => a - b);
+    const lo = sorted[0], hi = sorted[n - 1], range = hi - lo || 1;
+    const bc = bins || 12;
+    const counts = new Array(bc).fill(0);
+    values.forEach(v => { let b = Math.floor((v - lo) / range * bc); if (b >= bc) b = bc - 1; counts[b]++; });
+    const maxC = Math.max.apply(null, counts.concat([1]));
+    const W = 400, H = 100, bw = W / bc;
+    const bars = counts.map((c, i) => ({ x: (i * bw + 1).toFixed(1), y: (H - c / maxC * H).toFixed(1), w: (bw - 2).toFixed(1), h: (c / maxC * H).toFixed(1) }));
+    const p    = (pct) => sorted[Math.min(n - 1, Math.max(0, Math.round(pct / 100 * (n - 1))))];
+    const px   = (v) => ((v - lo) / range * W).toFixed(1);
+    return { bars, p10x: px(p(10)), p50x: px(p(50)), p90x: px(p(90)), xMin: lo.toFixed(1), xMax: hi.toFixed(1) };
+  }
+
+  _mcFmtRow(stats, fmt) {
+    return { mean: fmt(stats.mean), std: fmt(stats.std), p10: fmt(stats.p10), p50: fmt(stats.p50), p90: fmt(stats.p90) };
+  }
+
+  _arm(speed) {
+    this._disarm();
+    this._timer = setInterval(() => {
+      this.setState((st) => {
+        const ni = st.snapIdx + 1;
+        if (ni >= this.N) { this._disarm(); return { snapIdx: this.N - 1, playing: false }; }
+        return { snapIdx: ni };
+      });
+    }, Math.round(800 / speed));
+  }
+  _disarm() { if (this._timer) { clearInterval(this._timer); this._timer = null; } }
+
+  _fmt(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  _kpiCards(s) {
+    const activos = 320 - s.bajas;
+    const realizados = Math.floor(this.state.snapIdx / 8) + Math.floor(this.state.snapIdx / 10) + Math.floor(this.state.snapIdx / 13);
+    const horizonte = ((s.t.getTime() - this.snaps[0].t.getTime()) / 3600000).toFixed(1);
+    return [
+      { label: "Cilindros Totales", val: "320", color: "#e9ecef" },
+      { label: "Activos", val: String(activos), color: "#35c98a" },
+      { label: "Bajas", val: String(s.bajas), color: s.bajas ? "#f56b6b" : "#35c98a" },
+      { label: "Alertas Críticas", val: String(s.alertas), color: s.alertas ? "#f56b6b" : "#35c98a" },
+      { label: "Cambios Programados", val: "48", color: "#f0a32e" },
+      { label: "Rectificados Realizados", val: String(realizados), color: "#b08cf5" },
+      { label: "Horizonte Simulación (h)", val: horizonte, color: "#34d3e0" },
+      { label: "Diámetro Promedio", val: "609.4 mm", color: "#fbbf24" },
+      { label: "Desgaste Medio", val: "2.18 mm", color: "#f97316" },
+    ];
+  }
+
+  renderVals() {
+    const tab = this.state.tab, s = this.snaps[this.state.snapIdx];
+    const TABS = [["vista", "Vista Real"], ["dashboard", "Dashboard"], ["analisis", "Análisis"], ["inventario", "Inventario"], ["kpis", "KPIs"], ["generacion", "Generación"], ["config", "Configuración"], ["consola", "Consola"], ["montecarlo", "Monte Carlo"]];
+    const tabs = TABS.map((p) => ({ key: p[0], label: p[1], active: tab === p[0], onClick: () => this.setState({ tab: p[0] }), bg: tab === p[0] ? "#e8a13a1f" : "transparent", color: tab === p[0] ? "#e8a13a" : "#8b939d" }));
+    const speeds = [1, 2, 5, 10].map((v) => ({ v, label: v + "×", onClick: () => { this.setState({ speed: v }); if (this._timer) this._arm(v); }, bg: this.state.speed === v ? "#e8a13a22" : "transparent", border: this.state.speed === v ? "#e8a13a" : "#313a45", color: this.state.speed === v ? "#e8a13a" : "#8b939d" }));
+    const jaulas = s.jaulas.map((j) => ({
+      n: "J" + j.n, trab: j.trab, crc: j.crc,
+      trabBorder: j.parada ? "#f56b6b" : "#2b333d", trabBW: j.parada ? "2px" : "1px",
+      trabLabel: j.parada ? "⚠ PARADA" : "TRABAJANDO", trabLabelColor: j.parada ? "#f56b6b" : "#4a9eff",
+    }));
+    const machines = s.machines.map((m) => ({
+      name: m.name, sub: m.busy ? (m.cyl + " · " + m.dia + " mm") : (m.operativa ? "● Libre · operativa" : "● Fuera de turno"),
+      subColor: m.color, pct: m.busy ? m.pct : 0, barColor: m.color, border: m.color, status: m.statusText,
+    }));
+    const dispBars = s.disp.map((v, i) => ({ n: "J" + (i + 1), val: v, hpct: Math.round(v / this.maxDisp * 100), color: v < 4 ? "#f56b6b" : "#35c98a" }));
+    const estr = this.props.estrategia || "Mayor diámetro";
+    const colaLabels = { "Mayor diámetro": "mayor diámetro primero →", "Menor diámetro": "menor diámetro primero →", "FIFO": "orden de llegada (FIFO) →" };
+    let cola = s.cola.slice();
+    if (estr === "Mayor diámetro") cola.sort((a, b) => parseFloat(b.dia) - parseFloat(a.dia));
+    else if (estr === "Menor diámetro") cola.sort((a, b) => parseFloat(a.dia) - parseFloat(b.dia));
+    cola = cola.map((c, i) => i === 0 ? Object.assign({}, c, { color: "#e8a13a", txt: "#1a1206" }) : Object.assign({}, c, { color: "#f56b6b", txt: "#2a0808" }));
+    // ── Monte Carlo ────────────────────────────────────────────────────────
+    const mps = this.state.mcParamState;
+    const mkP = (key, label, unit, absMin, absMax, step, fmt) => ({
+      label, unit, absMin, absMax, step,
+      minV: mps[key].min, maxV: mps[key].max,
+      minLabel: fmt(mps[key].min), maxLabel: fmt(mps[key].max),
+      onMin: (e) => { const v = parseFloat(e.target.value); this.setState(st => { const ps = Object.assign({}, st.mcParamState); ps[key] = Object.assign({}, ps[key], { min: Math.min(v, ps[key].max) }); return { mcParamState: ps }; }); },
+      onMax: (e) => { const v = parseFloat(e.target.value); this.setState(st => { const ps = Object.assign({}, st.mcParamState); ps[key] = Object.assign({}, ps[key], { max: Math.max(v, ps[key].min) }); return { mcParamState: ps }; }); },
+    });
+    const mcParams = [
+      mkP("desgaste",     "Desgaste por campaña",  "mm",   0.5,  4.0, 0.1,  v => v.toFixed(1)),
+      mkP("tiempoRect",   "Tiempo de rectificado", "h",    0.5,  6.0, 0.5,  v => v.toFixed(1)),
+      mkP("tiempoEnf",    "Tiempo de enfriado",    "h",    0.5,  8.0, 0.5,  v => v.toFixed(1)),
+      mkP("tasaFalla",    "Prob. falla / hora",    "%/h",  0.00, 0.30, 0.01, v => (v * 100).toFixed(0) + "%"),
+      mkP("stockInicial", "Stock inicial",         "cil.", 200,  450,  5,   v => String(Math.round(v))),
+      mkP("rateProd",     "Rate producción",         "mm/min", 0.003, 0.012, 0.001, v => v.toFixed(3)),
+      mkP("rateDesb",     "Rate desbaste",           "mm/min", 0.010, 0.035, 0.001, v => v.toFixed(3)),
+    ];
+    const RUN_OPTS = [100, 500, 1000, 2000];
+    const mcRunOptions = RUN_OPTS.map(v => ({
+      label: v >= 1000 ? (v / 1000) + "k" : String(v),
+      onClick: () => this.setState({ mcRuns: v }),
+      bg:     this.state.mcRuns === v ? "#b08cf522" : "transparent",
+      border: this.state.mcRuns === v ? "#b08cf5"   : "#313a45",
+      color:  this.state.mcRuns === v ? "#b08cf5"   : "#8b939d",
+    }));
+    const mcIsCustom = !RUN_OPTS.includes(this.state.mcRuns);
+    const mcCustomVal = String(this.state.mcRuns);
+    const mcCustomChange = (e) => { const n = parseInt(e.target.value, 10); if (n > 0) this.setState({ mcRuns: n }); };
+    const mcCustomBg     = mcIsCustom ? "#b08cf522" : "transparent";
+    const mcCustomBorder = mcIsCustom ? "#b08cf5"   : "#313a45";
+    const mcCustomColor  = mcIsCustom ? "#b08cf5"   : "#8b939d";
+    const mcRes = this.state.mcResults;
+    const mcHasResults = !!(mcRes && mcRes.length > 0);
+    const mcNoResults  = !mcHasResults && !this.state.mcRunning;
+    let mcKpiCards = [], mcHistograms = [], mcTableRows = [], mcRunsLabel = String(this.state.mcRuns);
+    if (mcHasResults) {
+      const bst = this._mcStats(mcRes.map(r => r.bajas));
+      const pst = this._mcStats(mcRes.map(r => r.paradas));
+      const sst = this._mcStats(mcRes.map(r => r.stockMin));
+      const nst = this._mcStats(mcRes.map(r => r.nivelServicio));
+      const f0  = v => Math.round(v).toString();
+      const fp  = v => Math.round(v) + "%";
+      mcKpiCards = [
+        { label: "BAJAS (mediana)",          p50: f0(bst.p50), p10: f0(bst.p10), p90: f0(bst.p90), color: "#f56b6b" },
+        { label: "PARADAS (mediana)",         p50: f0(pst.p50), p10: f0(pst.p10), p90: f0(pst.p90), color: "#f0a32e" },
+        { label: "STOCK MÍN (mediana)",       p50: f0(sst.p50), p10: f0(sst.p10), p90: f0(sst.p90), color: "#35c98a" },
+        { label: "NIVEL SERVICIO (mediana)",  p50: fp(nst.p50), p10: fp(nst.p10), p90: fp(nst.p90), color: "#b08cf5" },
+      ];
+      mcHistograms = [
+        Object.assign(this._mcHistogram(mcRes.map(r => r.bajas),         12), { title: "DISTRIBUCIÓN · Bajas totales",      color: "#f56b6b" }),
+        Object.assign(this._mcHistogram(mcRes.map(r => r.paradas),       12), { title: "DISTRIBUCIÓN · Paradas de jaula",   color: "#f0a32e" }),
+        Object.assign(this._mcHistogram(mcRes.map(r => r.stockMin),      12), { title: "DISTRIBUCIÓN · Stock mínimo",       color: "#35c98a" }),
+        Object.assign(this._mcHistogram(mcRes.map(r => r.nivelServicio), 12), { title: "DISTRIBUCIÓN · Nivel de servicio", color: "#b08cf5" }),
+      ];
+      mcTableRows = [
+        Object.assign({ label: "Bajas totales",       color: "#f56b6b" }, this._mcFmtRow(bst, f0)),
+        Object.assign({ label: "Paradas de jaula",    color: "#f0a32e" }, this._mcFmtRow(pst, f0)),
+        Object.assign({ label: "Stock mínimo global", color: "#35c98a" }, this._mcFmtRow(sst, f0)),
+        Object.assign({ label: "Nivel de servicio",   color: "#b08cf5" }, this._mcFmtRow(nst, fp)),
+      ];
+      mcRunsLabel = String(mcRes.length);
+    }
+    return {
+      tabs,
+      isVista: tab === "vista", isDashboard: tab === "dashboard", isAnalisis: tab === "analisis",
+      isInventario: tab === "inventario", isKpis: tab === "kpis", isGeneracion: tab === "generacion",
+      isConfig: tab === "config", isConsola: tab === "consola", isMonteCarlo: tab === "montecarlo",
+      playLabel: this.state.playing ? "❚❚ Pausa" : "▶ Play",
+      togglePlay: () => { if (this.state.playing) { this._disarm(); this.setState({ playing: false }); } else { this.setState({ playing: true }); this._arm(this.state.speed); } },
+      stop: () => { this._disarm(); this.setState({ playing: false, snapIdx: 0 }); },
+      stepBack: () => { this._disarm(); this.setState((st) => ({ playing: false, snapIdx: Math.max(0, st.snapIdx - 1) })); },
+      stepFwd: () => { this._disarm(); this.setState((st) => ({ playing: false, snapIdx: Math.min(this.N - 1, st.snapIdx + 1) })); },
+      speeds,
+      clock: this._fmt(s.t), snapNum: this.state.snapIdx + 1, snapTotal: this.N,
+      seek: (e) => { this._disarm(); this.setState({ playing: false, snapIdx: parseInt(e.target.value, 10) }); },
+      seekMax: this.N - 1, seekVal: this.state.snapIdx,
+      paradaMarks: this.paradaMarks.map((i) => ({ leftPct: i / (this.N - 1) * 100 })),
+      jaulas, machines, cola, enf: s.enf, dispBars, colaLabel: colaLabels[estr], estrategiaLabel: estr,
+      apiMode: this.state.apiMode,
+      loading: this.state.loading,
+      apiError: this.state.apiError,
+      apiStatusColor: ({ "conectado": "#35c98a", "mock": "#f0a32e", "sin servidor": "#f56b6b", "desconectado": "#59616b" })[this.state.apiStatus] || "#59616b",
+      apiStatusLabel: this.state.apiMode ? ("● API · sim " + (this.state.simId || "—")) : ("◌ " + this.state.apiStatus),
+      cargarExcel: (e) => this.cargarExcel(e),
+      openFilePicker: () => {
+        const inp = document.createElement("input");
+        inp.type = "file"; inp.accept = ".xlsx";
+        inp.onchange = (e) => this.cargarExcel(e);
+        inp.click();
+      },
+      totalCil: 320, paradasN: s.paradas, alertasN: s.alertas,
+      kpiCards: this.state.apiMode && this.kpisApi ? this.kpisApi : this._kpiCards(s),
+      utilDisp: this.state.apiMode && this.utilDispApi ? this.utilDispApi : [{ name: "RECT-01", pct: 82 }, { name: "RECT-02", pct: 76 }, { name: "DESB-01", pct: 64 }].map((u) => ({ name: u.name, pct: u.pct, fillpct: u.pct, color: this._utilColor(u.pct) })),
+      utilNeta: this.state.apiMode && this.utilNetaApi ? this.utilNetaApi : [{ name: "RECT-01", pct: 64 }, { name: "RECT-02", pct: 58 }, { name: "DESB-01", pct: 22 }].map((u) => ({ name: u.name, pct: u.pct, fillpct: u.pct, color: this._utilColor(u.pct) })),
+      utilPairs: [["RECT-01", 82, 64], ["RECT-02", 76, 58], ["DESB-01", 64, 22]].map((u) => ({ name: u[0], disp: u[1], neta: u[2], dispColor: this._utilColor(u[1]), netaColor: "#b08cf5" })),
+      genParams: [{ k: "Semilla", v: "7" }, { k: "Nº de cambios", v: "48" }, { k: "Horizonte", v: "60 h" }, { k: "Distribución", v: "Poisson" }, { k: "Cambios / día", v: "~16" }, { k: "Ventana", v: "10–12 Mar" }],
+      stackPolys: this.stackPolys, stackLegend: this.STATES.map((st) => ({ label: st, color: this.COL[st] })),
+      bufArea: this.bufArea, bufLine: this.bufLine, dispLine: this.dispLine, crcLine: this.crcLine,
+      chartTicks: this.chartTicks || [],
+      chartCursorX: this._tRangeMs ? ((s.t.getTime() - this._t0ms) / this._tRangeMs * 1000).toFixed(1) : "-1",
+      chartCursorPct: this._tRangeMs ? ((s.t.getTime() - this._t0ms) / this._tRangeMs * 100).toFixed(2) : "-1",
+      gantt: this.gantt,
+      hist: this.hist, bajasLine: this.bajasLine, estadoDist: this.estadoDist,
+      invRows: this.invRows, cambios: this.cambios,
+      globals: this.globals.map((g) => ({ k: g[0], v: g[0] === "Estrategia de selección" ? ({ "Mayor diámetro": "Mayor diámetro primero", "Menor diámetro": "Menor diámetro primero", "FIFO": "Orden de llegada (FIFO)" }[estr]) : g[1] })), maquinas: this.maquinas, rangos: this.rangos,
+      logLines: this.logLines,
+      mapaLanes: this.mapaLanes, mapaPuntos: this.mapaPuntos, mapaTicks: this.mapaTicks,
+      distBars: this.distBars, distZones: this.distZones, distMin: this.distMin, distMax: this.distMax,
+      ssEvol: this.ssEvol, ssParadaBands: this.ssParadaBands,
+      cfgGlobales: this.cfgGlobales, cfgRangos: this.cfgRangos, cfgMaquinas: this.cfgMaquinas, cfgMaxIter: this.cfgMaxIter,
+      cfgEstrategias: [{ label: "Estrategia de rectificado", val: ({ "Mayor diámetro": "Mayor diámetro primero", "Menor diámetro": "Menor diámetro primero", "FIFO": "Orden de llegada (FIFO)" })[estr] }, { label: "Estrategia de asignación", val: "Menor stock disponible" }],
+      mcParams, mcRunOptions, mcIsCustom, mcCustomVal, mcCustomChange, mcCustomBg, mcCustomBorder, mcCustomColor, mcHasResults, mcNoResults,
+      mcRunning: this.state.mcRunning, mcProgress: this.state.mcProgress,
+      mcRun: () => this._runMC(),
+      mcRunLabel: this.state.mcRunning ? "Simulando\u2026" : "\u25b6\u2002Ejecutar Monte Carlo",
+      mcKpiCards, mcHistograms, mcTableRows, mcRunsLabel,
+    };
+  }
+}
+</script>
+</body>
+</html>
