@@ -27,6 +27,7 @@ class SimulationRequest:
     stock_df: "pd.DataFrame"
     cambios_df: "pd.DataFrame"
     estrategia: str = "mayor_diametro"
+    seed: Optional[int] = None  # seed de fallas (de la generación); None ⇒ sin fallas
 
 
 class SimulationService:
@@ -66,5 +67,5 @@ class SimulationService:
             max_workers=1,
             mp_context=ctx_paralelo(),
             initializer=init_worker_simulacion,
-            initargs=(request.cfg, request.stock_df, request.estrategia),
+            initargs=(request.cfg, request.stock_df, request.estrategia, request.seed),
         )

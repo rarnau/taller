@@ -916,6 +916,11 @@ def build_qss() -> str:
         background-color: #1A20308A;
     }}
 
+    QFrame#MachineCard[mode="falla"] {{
+        border: 1px solid #FF6B6B;
+        background-color: #1A20308A;
+    }}
+
     QLabel#MachineBusy {{
         color: #B08CF5;
         font-weight: 700;
@@ -930,6 +935,12 @@ def build_qss() -> str:
 
     QLabel#MachineOff {{
         color: #E74C3C;
+        font-weight: 700;
+        background-color: transparent;
+    }}
+
+    QLabel#MachineFalla {{
+        color: #FF6B6B;
         font-weight: 700;
         background-color: transparent;
     }}

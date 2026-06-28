@@ -80,6 +80,7 @@ class DashboardPanel(QWidget):
             (tema.TIPO_RECT_COLORS_DASH["produccion"], "Producción"),
             (tema.TIPO_RECT_COLORS_DASH["desbaste"], "Desbaste"),
             (tema.DASH_PARADA, "Parada (turno)"),
+            (tema.DASH_FALLA, "Falla"),
         ])
 
         self.grid.addWidget(self.card_estados, 0, 0)
@@ -106,7 +107,7 @@ class DashboardPanel(QWidget):
         self.chart_util.set_data(data.maquinas, data.util_disponible, data.util_neta)
         self.chart_gantt.set_data(
             data.maquinas, data.gantt, data.paradas_turno,
-            data.t0, data.t1, tema.TIPO_RECT_COLORS_DASH,
+            data.t0, data.t1, tema.TIPO_RECT_COLORS_DASH, data.tramos_falla,
         )
         self.set_cursor(0, len(data.tiempos))
 

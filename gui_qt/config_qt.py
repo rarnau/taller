@@ -38,6 +38,7 @@ from config.persistencia import (
     obtener_max_iteraciones,
     obtener_maquinas,
     obtener_rangos,
+    obtener_tasa_falla,
     obtener_tiempo_enfriado,
     problemas_coherencia,
     set_config_global,
@@ -349,7 +350,7 @@ class ConfigPanel(QWidget):
         note.setObjectName("Muted")
         col.addWidget(note)
 
-        self.tbl_machines = StyledTableWidget(0, 8, self)
+        self.tbl_machines = StyledTableWidget(0, 9, self)
         self.tbl_machines.setObjectName("ConfigTable")
         self.tbl_machines.setHorizontalHeaderLabels(
             [
@@ -360,6 +361,7 @@ class ConfigPanel(QWidget):
                 "Desb min",
                 "Prioridad",
                 "Turnos",
+                "Falla %",
                 "",
             ]
         )
@@ -380,13 +382,15 @@ class ConfigPanel(QWidget):
         hdr.setSectionResizeMode(5, hdr.ResizeMode.Fixed)
         hdr.setSectionResizeMode(6, hdr.ResizeMode.Fixed)
         hdr.setSectionResizeMode(7, hdr.ResizeMode.Fixed)
+        hdr.setSectionResizeMode(8, hdr.ResizeMode.Fixed)
         self.tbl_machines.setColumnWidth(1, 110)
         self.tbl_machines.setColumnWidth(2, 110)
         self.tbl_machines.setColumnWidth(3, 110)
         self.tbl_machines.setColumnWidth(4, 110)
         self.tbl_machines.setColumnWidth(5, 170)
         self.tbl_machines.setColumnWidth(6, 160)
-        self.tbl_machines.setColumnWidth(7, 34)
+        self.tbl_machines.setColumnWidth(7, 90)
+        self.tbl_machines.setColumnWidth(8, 34)
         col.addWidget(self.tbl_machines)
 
         return card
@@ -488,6 +492,13 @@ class ConfigPanel(QWidget):
             turnos = self._machine_turnos_value(row)
             if turnos is not None and not turnos_mod.es_completo(turnos):
                 maq["turnos"] = turnos
+            tasa_pct = self._parse_float_machine(row, 7, "Falla %")
+            if not (0.0 <= tasa_pct <= 100.0):
+                raise ValueError(
+                    f"Fila maquina {row + 1}: 'Falla %' debe estar entre 0 y 100."
+                )
+            if tasa_pct > 0:
+                maq["tasa_falla"] = round(tasa_pct / 100.0, 4)
             new_cfg["maquinas"].append(maq)
 
         new_cfg["rangos"] = []
@@ -576,6 +587,8 @@ class ConfigPanel(QWidget):
             self._set_machine_text_editor(i, 4, str(desb.get("tiempo_min", "")), align_center=True)
             self._set_machine_priority_editor(i, str(m.get("prioridad", "produccion")))
             self._set_machine_turnos_editor(i, m.get("turnos"))
+            tasa_pct = obtener_tasa_falla(self._cfg, str(m.get("nombre", ""))) * 100.0
+            self._set_machine_text_editor(i, 7, f"{tasa_pct:.1f}", align_center=True)
             self._set_machine_remove_button(i)
         self.tbl_machines.blockSignals(False)
         self._adjust_machines_table_height()
@@ -590,6 +603,7 @@ class ConfigPanel(QWidget):
         self._set_machine_text_editor(row, 4, "480", align_center=True)
         self._set_machine_priority_editor(row, "produccion")
         self._set_machine_turnos_editor(row, None)
+        self._set_machine_text_editor(row, 7, "0", align_center=True)
         self._set_machine_remove_button(row)
         self._adjust_machines_table_height()
 
@@ -706,7 +720,7 @@ class ConfigPanel(QWidget):
         btn.setObjectName("ConfigDeleteButton")
         btn.setFixedSize(24, 24)
         btn.clicked.connect(self._remove_machine_from_sender)
-        self.tbl_machines.setCellWidget(row, 7, btn)
+        self.tbl_machines.setCellWidget(row, 8, btn)
 
     def _set_machine_turnos_button(self, row: int) -> None:
         """Inserta boton para editar turnos custom de la fila."""
@@ -723,7 +737,9 @@ class ConfigPanel(QWidget):
         btn.clicked.connect(self._edit_machine_turnos_from_sender)
 
         lay.addWidget(btn)
-        self.tbl_machines.setCellWidget(row, 7, host)
+        # Col 6 = columna de turnos (coincide con el finder de _edit_machine_turnos_from_sender,
+        # que busca el sender en la col 6); antes apuntaba a la 7 y pisaba el botón de borrar.
+        self.tbl_machines.setCellWidget(row, 6, host)
 
     def _edit_machine_turnos_from_sender(self) -> None:
         """Resuelve la fila del boton presionado y abre editor custom."""
@@ -739,7 +755,7 @@ class ConfigPanel(QWidget):
         sender = self.sender()
         if sender is None:
             return
-        row = self._find_widget_row(sender, 7)
+        row = self._find_widget_row(sender, 8)
         if row < 0:
             return
         self.tbl_machines.removeRow(row)

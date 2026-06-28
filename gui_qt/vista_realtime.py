@@ -220,9 +220,28 @@ class MachineCard(QFrame):
         self.state_label.setObjectName("Muted")
         col.addWidget(self.state_label)
 
-    def set_state(self, data: Optional[dict], operativa: bool = True) -> None:
-        """Pinta estado de maquina: ocupada, libre operativa o fuera de turno."""
-        if data:
+    def set_state(self, data: Optional[dict], operativa: bool = True,
+                  en_falla: bool = False) -> None:
+        """Pinta estado de maquina: ocupada, libre operativa, en falla o fuera de turno.
+
+        Precedencia: fuera de turno manda (la máquina no trabaja igual); luego la
+        falla (es 'del tiempo disponible', solo aplica en turno) — si además hay un
+        cilindro montado se muestra "Rectificando · falla" conservando el progreso;
+        luego ocupada (rectificando) y por último libre operativa.
+        """
+        if operativa and en_falla:
+            self.setProperty("mode", "falla")
+            if data:
+                prog = max(0, min(100, int(data.get("progreso", 0))))
+                self.progress.setValue(prog)
+                self.meta_label.setText(f"{data['id']} · {float(data['d']):.1f} mm")
+                self.state_label.setText(f"Rectificando · falla ({prog}%)")
+            else:
+                self.progress.setValue(0)
+                self.meta_label.setText("● En falla")
+                self.state_label.setText("En falla")
+            self.state_label.setObjectName("MachineFalla")
+        elif data:
             self.setProperty("mode", "busy")
             prog = max(0, min(100, int(data.get("progreso", 0))))
             self.progress.setValue(prog)
@@ -508,9 +527,11 @@ class RealTimeView(QWidget):
 
         # 4) Estado puntual de rectificadoras.
         operativas = getattr(snapshot, "detalle_maquinas_operativa", {})
+        fallas = getattr(snapshot, "detalle_maquinas_falla", {})
         details = getattr(snapshot, "detalle_maquinas", {})
         for name, card in self.machine_cards.items():
-            card.set_state(details.get(name), bool(operativas.get(name, True)))
+            card.set_state(details.get(name), bool(operativas.get(name, True)),
+                           bool(fallas.get(name, False)))
 
         conteos = getattr(snapshot, "conteo_por_estado", {})
         total = sum(int(v) for v in conteos.values()) if conteos else 0

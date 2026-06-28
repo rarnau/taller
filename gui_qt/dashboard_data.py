@@ -42,6 +42,32 @@ def tramos_parada_maquina(maquina, t0: datetime, t1: datetime) -> List[Tuple[dat
     return tramos
 
 
+def tramos_falla_maquina(maquina, t0: datetime, t1: datetime) -> List[Tuple[datetime, datetime]]:
+    """Tramos (inicio, fin) en [t0, t1) donde la máquina está EN FALLA dentro de turno.
+
+    Sibling de ``tramos_parada_maquina`` pero la condición es "hora operativa Y en
+    falla" (la falla es del tiempo disponible). Devuelve ``[]`` si la máquina no
+    modela fallas en esta corrida. Por construcción es **disjunto** de los tramos de
+    parada (turno cerrado), así que en el Gantt nunca se pisan.
+    """
+    if not getattr(maquina, "_tiene_fallas", lambda: False)():
+        return []
+    tramos: List[Tuple[datetime, datetime]] = []
+    t = t0.replace(minute=0, second=0, microsecond=0)
+    ini = None
+    while t < t1:
+        if maquina.esta_operativa(t) and maquina.en_falla(t):
+            if ini is None:
+                ini = max(t, t0)
+        elif ini is not None:
+            tramos.append((ini, t))
+            ini = None
+        t += timedelta(hours=1)
+    if ini is not None:
+        tramos.append((ini, t1))
+    return tramos
+
+
 @dataclass
 class DashboardData:
     """Series listas para dibujar las 4 tarjetas del dashboard."""
@@ -58,6 +84,7 @@ class DashboardData:
     util_neta: Dict[str, float]
     gantt: Dict[str, List[Tuple[datetime, datetime, str]]]
     paradas_turno: Dict[str, List[Tuple[datetime, datetime]]] = field(default_factory=dict)
+    tramos_falla: Dict[str, List[Tuple[datetime, datetime]]] = field(default_factory=dict)
 
     @property
     def t0(self) -> datetime:
@@ -98,12 +125,14 @@ def extraer_datos_dashboard(taller) -> DashboardData:
     t0, t1 = tiempos[0], tiempos[-1]
     gantt: Dict[str, List[Tuple[datetime, datetime, str]]] = {}
     paradas_turno: Dict[str, List[Tuple[datetime, datetime]]] = {}
+    tramos_falla: Dict[str, List[Tuple[datetime, datetime]]] = {}
     for nombre, maq in taller.maquinas.items():
         gantt[nombre] = [
             (h["inicio"], h["fin"], h.get("tipo", ""))
             for h in getattr(maq, "historial_trabajo", [])
         ]
         paradas_turno[nombre] = tramos_parada_maquina(maq, t0, t1)
+        tramos_falla[nombre] = tramos_falla_maquina(maq, t0, t1)
 
     return DashboardData(
         tiempos=tiempos,
@@ -118,4 +147,5 @@ def extraer_datos_dashboard(taller) -> DashboardData:
         util_neta=util_neta,
         gantt=gantt,
         paradas_turno=paradas_turno,
+        tramos_falla=tramos_falla,
     )

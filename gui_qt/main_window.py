@@ -78,6 +78,8 @@ class MainWindow(QMainWindow):
         self.estrategia = obtener_estrategia_seleccion(self.user_cfg)
         self.stock_df: "pd.DataFrame | None" = None
         self.cambios_df: "pd.DataFrame | None" = None
+        # Seed de fallas (la de la generación de cambios); None ⇒ sin fallas.
+        self.fallas_seed: int | None = None
         self.taller = None
 
         self.sim_service = SimulationService()
@@ -282,6 +284,8 @@ class MainWindow(QMainWindow):
 
         self.status_main_label.setText(f"Excel cargado: {Path(selected).name}")
         self.top_state.setText("● excel cargado")
+        # Excel cargado (sin generación) ⇒ sin seed de fallas reproducible.
+        self.fallas_seed = None
         # Cargar un nuevo Excel invalida overlays de PARADA previos.
         self.flow_card.set_counts(inventario=len(self.stock_df) if self.stock_df is not None else 0)
         self._set_flow_status(inventario=True)
@@ -310,6 +314,7 @@ class MainWindow(QMainWindow):
             stock_df=self.stock_df,
             cambios_df=self.cambios_df,
             estrategia=estrategia,
+            seed=self.fallas_seed,
         )
         self.sim_future = self.sim_service.submit(request)
         self.status_main_label.setText("Simulando...")
@@ -545,9 +550,14 @@ class MainWindow(QMainWindow):
         self.status_main_label.setText("Configuracion guardada")
         self.top_state.setText("● configuracion guardada")
 
-    def _on_changes_generated(self, cambios_df: pd.DataFrame) -> None:
-        """Recibe Programa_Cambios generado y lo aplica al flujo de simulacion."""
+    def _on_changes_generated(self, cambios_df: pd.DataFrame, seed: int | None = None) -> None:
+        """Recibe Programa_Cambios generado y lo aplica al flujo de simulacion.
+
+        ``seed`` es la semilla concreta con que se generaron los cambios; se reusa
+        como seed de fallas de la simulación (None si los cambios vinieron de Excel).
+        """
         self.cambios_df = cambios_df
+        self.fallas_seed = seed
         self._set_flow_status(inventario=self.stock_df is not None, generacion=True)
         self.flow_card.set_counts(generacion=len(cambios_df))
         self.status_main_label.setText(f"Cambios generados: {len(cambios_df)} filas")

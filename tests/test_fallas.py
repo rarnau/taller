@@ -148,3 +148,26 @@ def test_taller_simulado_con_fallas_picklable():
     t = _simular(0.2, 42)
     t2 = pickle.loads(pickle.dumps(t))
     assert calcular_kpis(t2)["tiempo_falla_pct"] == calcular_kpis(t)["tiempo_falla_pct"]
+
+
+# ── Datos para el Gantt (gui_qt/dashboard_data, sin dependencia de Qt) ───────
+
+def test_tramos_falla_dashboard_data():
+    # dashboard_data sólo importa config.tema + modelos.kpis (no Qt): testeable headless.
+    from gui_qt.dashboard_data import extraer_datos_dashboard, tramos_falla_maquina
+
+    con = _simular(0.3, 42)
+    data = extraer_datos_dashboard(con)
+    # La máquina con falla tiene tramos; las que no, lista vacía.
+    assert data.tramos_falla["F60"], "se esperaban tramos de falla en F60"
+    assert data.tramos_falla["G36"] == []
+    # Disjuntos de las paradas de turno (en 24/7 las paradas son []).
+    f0, f1 = data.tramos_falla["F60"][0]
+    assert f1 > f0
+    # tasa_falla=0 ⇒ ningún tramo en ninguna máquina.
+    base = extraer_datos_dashboard(_simular(0.0, None))
+    assert all(v == [] for v in base.tramos_falla.values())
+    # El helper devuelve [] para una máquina sin fallas configuradas.
+    maq = con.maquinas["G36"]
+    t0, t1 = con.snapshots[0].tiempo, con.snapshots[-1].tiempo
+    assert tramos_falla_maquina(maq, t0, t1) == []

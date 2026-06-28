@@ -79,6 +79,9 @@ DASH_GREEN = GREEN
 DASH_PURPLE = PURPLE
 DASH_PARADA = RED_DARK
 DASH_PARADA_BAND = RED
+# Falla de máquina: rojo MENOS oscuro que la parada de turno (DASH_PARADA = #7F1D1D),
+# usado de forma consistente en el Gantt y en Vista Real para marcar las demoras/fallas.
+DASH_FALLA = "#FF6B6B"
 
 # Tonos propios del dashboard.
 DASH_DISP = "#66BB6A"

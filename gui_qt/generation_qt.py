@@ -40,7 +40,12 @@ from config.persistencia import (
     set_generador_cambios,
 )
 from modelos import turnos as turnos_mod
-from modelos.generador_cambios import GENERADORES_CAMBIOS, ajustar_modelo, generar_cambios
+from modelos.generador_cambios import (
+    GENERADORES_CAMBIOS,
+    ajustar_modelo,
+    generar_cambios,
+    resolver_seed,
+)
 from gui_qt.widgets.generation_timeline_qt import GenerationTimelineChart
 from gui_qt.widgets import LabeledFieldRow, SectionCard
 
@@ -52,7 +57,7 @@ class GenerationPanel(QWidget):
         self,
         cfg: Dict[str, Any],
         on_cfg_saved: Callable[[Dict[str, Any]], None] | None = None,
-        on_cambios_generated: Callable[[pd.DataFrame], None] | None = None,
+        on_cambios_generated: Callable[[pd.DataFrame, int | None], None] | None = None,
         on_go_to_snapshot: Callable[[int], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -70,6 +75,7 @@ class GenerationPanel(QWidget):
             if isinstance(clave_ini, str) and clave_ini:
                 self._modelos_por_clave[clave_ini] = self._modelo
         self._generated_df: pd.DataFrame | None = None
+        self._generated_seed: int | None = None
         self._sim_snapshots: list[Any] = []
 
         # === SCROLL AREA: evita que el contenido se solape ===
@@ -650,11 +656,14 @@ class GenerationPanel(QWidget):
         try:
             inicio = datetime.strptime(self.dt_start.date().toString("yyyy-MM-dd"), "%Y-%m-%d")
             fin = datetime.strptime(self.dt_end.date().toString("yyyy-MM-dd"), "%Y-%m-%d")
+            # Resolver la seed una sola vez (concreta aun si es -1/aleatoria) para
+            # poder reusarla en la realización de fallas de la simulación.
             seed = self.sp_seed.value()
+            self._generated_seed = resolver_seed(None if seed < 0 else int(seed))
             self._generated_df = generar_cambios(
                 self._modelo,
                 self._cfg,
-                seed=None if seed < 0 else int(seed),
+                seed=self._generated_seed,
                 inicio=inicio,
                 fin=fin,
                 horizonte_dias=7,
@@ -669,9 +678,10 @@ class GenerationPanel(QWidget):
 
         self._render_timeline(self._generated_df)
         self._update_param_cards()
-        # Notifica al MainWindow para activar "Generación" en verde
+        # Notifica al MainWindow (activa "Generación" en verde) y pasa la seed
+        # concreta para que la simulación realice las fallas con esa misma seed.
         if self._on_cambios_generated is not None:
-            self._on_cambios_generated(self._generated_df.copy())
+            self._on_cambios_generated(self._generated_df.copy(), self._generated_seed)
 
     def _load_changes_excel(self) -> None:
         """Carga Programa_Cambios desde un archivo Excel."""
@@ -696,9 +706,10 @@ class GenerationPanel(QWidget):
 
         self._render_timeline(self._generated_df)
         self._update_param_cards()
-        # Notifica al MainWindow para activar "Generación" en verde
+        # Cambios cargados de Excel: sin seed de generación ⇒ sin fallas reproducibles.
+        self._generated_seed = None
         if self._on_cambios_generated is not None:
-            self._on_cambios_generated(self._generated_df.copy())
+            self._on_cambios_generated(self._generated_df.copy(), None)
 
     def _update_param_cards(self) -> None:
         """Actualiza los parametros mostrados en las tarjetas (Semilla, Nº cambios, etc)."""
