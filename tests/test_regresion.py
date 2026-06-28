@@ -3,7 +3,7 @@
 Cada escenario se ejecuta y su fingerprint se compara contra el de referencia
 en ``golden_master.json``. Si una refactorización del motor cambia cualquier
 resultado observable (KPIs, snapshots, alertas, estado final de cilindros), el
-test falla — esa es la red de seguridad para refactorizar ``modelos/taller.py``
+test falla — esa es la red de seguridad para refactorizar ``models/workshop.py``
 sin alterar el comportamiento.
 
 Si un cambio de comportamiento es *esperado*, regenerar el golden a propósito::
@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from _escenarios import ESCENARIOS, GOLDEN_PATH, ejecutar_escenario, fingerprint
+from _escenarios import SCENARIOS, GOLDEN_PATH, run_scenario, fingerprint
 
 with open(GOLDEN_PATH, "r", encoding="utf-8") as _f:
     _GOLDEN = json.load(_f)
@@ -25,11 +25,11 @@ def golden():
     return _GOLDEN
 
 
-@pytest.mark.parametrize("nombre", list(ESCENARIOS.keys()))
+@pytest.mark.parametrize("nombre", list(SCENARIOS.keys()))
 def test_fingerprint_coincide_con_golden(nombre, golden):
     """El resultado completo del escenario es idéntico al de referencia."""
     assert nombre in golden, f"Escenario '{nombre}' no está en el golden; regenéralo."
-    actual = fingerprint(ejecutar_escenario(ESCENARIOS[nombre]))
+    actual = fingerprint(run_scenario(SCENARIOS[nombre]))
     esperado = golden[nombre]
 
     # Comparaciones por sección para que el fallo sea legible (no un diff gigante).
@@ -48,4 +48,4 @@ def test_fingerprint_coincide_con_golden(nombre, golden):
 
 def test_golden_cubre_todos_los_escenarios(golden):
     """El golden no quedó desincronizado de la lista de escenarios."""
-    assert set(golden.keys()) == set(ESCENARIOS.keys())
+    assert set(golden.keys()) == set(SCENARIOS.keys())

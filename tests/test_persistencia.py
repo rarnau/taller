@@ -91,7 +91,7 @@ def test_set_generador_cambios_valida():
 
 
 def test_turnos_cambios_24x7_no_persiste():
-    from modelos import turnos as t
+    from models import shifts as t
     cfg = {"turnos_cambios": {"x": 1}}
     p.set_turnos_cambios(cfg, t.PRESETS["24x7"])  # equivalente a 24/7 ⇒ quita la clave
     assert "turnos_cambios" not in cfg
@@ -99,8 +99,8 @@ def test_turnos_cambios_24x7_no_persiste():
 
 
 def test_turnos_cambios_persiste_si_no_es_completo():
-    from modelos import turnos as t
+    from models import shifts as t
     cfg = {}
-    turnos = t.parse_compacto("100 100 100 100 100 000 000")
+    turnos = t.parse_compact("100 100 100 100 100 000 000")
     p.set_turnos_cambios(cfg, turnos)
     assert p.obtener_turnos_cambios(cfg) == turnos

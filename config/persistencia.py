@@ -437,8 +437,8 @@ def set_generador_cambios(cfg: Dict[str, Any], *, generador=None,
 def set_turnos_cambios(cfg: Dict[str, Any],
                        turnos: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Fija el régimen de turnos de los cambios; ``None``/24-7 quita la clave."""
-    from modelos import turnos as turnos_mod  # import local: evita ciclo de carga
-    if turnos is None or turnos_mod.es_completo(turnos):
+    from models import shifts as shifts_mod  # import local: evita ciclo de carga
+    if turnos is None or shifts_mod.is_full(turnos):
         cfg.pop("turnos_cambios", None)
     else:
         cfg["turnos_cambios"] = turnos
