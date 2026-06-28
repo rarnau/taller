@@ -467,6 +467,14 @@ def build_qss() -> str:
         font-weight: 700;
     }}
 
+    QLabel#StockBoardHeader {{
+        color: #35C98A;
+        font-size: {tk_theme.FONT_SIZE_SM}px;
+        letter-spacing: 0.08em;
+        background-color: transparent;
+        font-weight: 700;
+    }}
+
     QLabel#CardTitle {{
         color: #e8a13a;
         font-size: {tk_theme.FONT_SIZE_MD}px;
@@ -478,6 +486,33 @@ def build_qss() -> str:
     QLabel#Muted {{
         background-color: transparent;
         color: #86909B;
+    }}
+
+    QFrame#DashboardCard {{
+        background-color: {tk_theme.DASH_CARD_BG};
+        border: 1px solid {tk_theme.DASH_CARD_BORDER};
+        border-radius: 12px;
+    }}
+
+    QLabel#DashboardCardTitle {{
+        color: {tk_theme.DASH_TITLE};
+        font-size: {tk_theme.FONT_SIZE_LG}px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        background-color: transparent;
+    }}
+
+    QLabel#DashboardLegend {{
+        color: {tk_theme.DASH_LEGEND_TEXT};
+        font-size: {tk_theme.FONT_SIZE_SM}px;
+        background-color: transparent;
+    }}
+
+    QLabel#DashboardBanner {{
+        color: {tk_theme.FG2};
+        font-size: {tk_theme.FONT_SIZE_XL}px;
+        font-weight: 700;
+        background-color: transparent;
     }}
 
     QLabel#CoherenceStatus {{

@@ -10,4 +10,4 @@ build/
 .venv
 
 # Artefacto de adaptación del generador de cambios (modelo aprendido, se regenera)
-config/modelo_generador.json
+config/generator_model.json

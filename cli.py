@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pandas as pd
 
 from config import persistencia as cfgmod
-from config import modelo_generador as modmod
+from config import generator_model as modmod
 from config.persistencia import (cargar_config, guardar_config, obtener_maquinas,
                                   obtener_max_iteraciones, obtener_rangos,
                                   obtener_tiempo_enfriado, obtener_estrategia_asignacion)
@@ -447,7 +447,7 @@ def _cmd_modelo(args) -> int:
     accion = args.accion
 
     if accion == "show":
-        modelo = modmod.cargar_modelo()
+        modelo = modmod.load_active_model()
         if not modelo:
             print("No hay modelo persistido. Ajuste uno con 'modelo ajustar <historia>'.")
             return 0
@@ -455,7 +455,7 @@ def _cmd_modelo(args) -> int:
         return 0
 
     if accion == "reset":
-        modmod.reiniciar_modelo()
+        modmod.reset_models()
         print("Modelo de generador reiniciado (adaptación limpia).")
         return 0
 
@@ -466,7 +466,7 @@ def _cmd_modelo(args) -> int:
         cfg = cargar_config()
         if args.umbral_desbaste is not None:
             cfgmod.set_generador_cambios(cfg, umbral_desbaste=args.umbral_desbaste)
-        previo = None if args.reiniciar else modmod.cargar_modelo()
+        previo = None if args.reiniciar else modmod.load_active_model()
         try:
             historia = _leer_historia(args.historia)
             modelo = gencambios.ajustar_modelo(historia, cfg, clave=args.generador,
@@ -474,7 +474,7 @@ def _cmd_modelo(args) -> int:
         except Exception as e:
             print(f"Error al ajustar el modelo: {e}", file=sys.stderr)
             return 1
-        modmod.guardar_modelo(modelo)
+        modmod.save_model(modelo)
         modo = "desde cero" if (args.reiniciar or previo is None) else "incremental"
         print(f"Modelo ajustado ({modo}):")
         print(_resumen_modelo(modelo))
@@ -493,7 +493,7 @@ def _cmd_generar_cambios(args) -> int:
         if not args.historia or not os.path.isfile(args.historia):
             print("Error: --ajustar requiere una historia válida.", file=sys.stderr)
             return 2
-        previo = modmod.cargar_modelo()
+        previo = modmod.load_active_model()
         try:
             historia = _leer_historia(args.historia)
             modelo = gencambios.ajustar_modelo(historia, cfg, clave=args.generador,
@@ -501,9 +501,9 @@ def _cmd_generar_cambios(args) -> int:
         except Exception as e:
             print(f"Error al ajustar el modelo: {e}", file=sys.stderr)
             return 1
-        modmod.guardar_modelo(modelo)
+        modmod.save_model(modelo)
     else:
-        modelo = modmod.cargar_modelo()
+        modelo = modmod.load_active_model()
         if not modelo:
             print("Error: no hay modelo persistido. Use 'modelo ajustar' o pase una historia.",
                   file=sys.stderr)

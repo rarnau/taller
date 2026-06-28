@@ -70,14 +70,14 @@ def test_markov_conteos_acumulan_en_refit():
 
 
 def test_persistencia_round_trip(tmp_path, monkeypatch):
-    from config import modelo_generador as mg
-    monkeypatch.setattr(mg, "MODELO_PATH", str(tmp_path / "modelo.json"))
-    assert mg.cargar_modelo() is None
+    from config import generator_model as mg
+    monkeypatch.setattr(mg, "MODEL_STORE_PATH", str(tmp_path / "modelo.json"))
+    assert mg.load_active_model() is None
     m = g.ajustar_modelo(_historia(), _cfg(), clave="empirico")
-    mg.guardar_modelo(m)
-    assert mg.cargar_modelo() == m
-    mg.reiniciar_modelo()
-    assert mg.cargar_modelo() is None
+    mg.save_model(m)
+    assert mg.load_active_model() == m
+    mg.reset_models()
+    assert mg.load_active_model() is None
 
 
 # ── Ventana de generación (fecha_inicio / fecha_fin) ─────────────────────────

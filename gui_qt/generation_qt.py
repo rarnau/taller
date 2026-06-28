@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
 )
 
-from config import modelo_generador as model_store
+from config import generator_model as model_store
 from config.tema import JAULA_COLORS
 from config.persistencia import (
     guardar_config,
@@ -66,8 +66,8 @@ class GenerationPanel(QWidget):
         self._on_go_to_snapshot = on_go_to_snapshot
 
         self._history_df: pd.DataFrame | None = None
-        self._modelo = model_store.cargar_modelo()
-        self._modelos_por_clave: Dict[str, Dict[str, Any]] = model_store.cargar_modelos()
+        self._modelo = model_store.load_active_model()
+        self._modelos_por_clave: Dict[str, Dict[str, Any]] = model_store.load_models()
         if self._modelo and isinstance(self._modelo, dict):
             clave_ini = self._modelo.get("clave")
             if isinstance(clave_ini, str) and clave_ini:
@@ -605,7 +605,7 @@ class GenerationPanel(QWidget):
                 modelo_previo=self._modelos_por_clave.get(clave_sel),
             )
             self._modelos_por_clave[clave_sel] = self._modelo
-            model_store.guardar_modelo_por_clave(clave_sel, self._modelo, set_activo=True)
+            model_store.save_model_for_key(clave_sel, self._modelo, set_active=True)
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"No se pudo ajustar modelo: {exc}")
             return
@@ -617,10 +617,10 @@ class GenerationPanel(QWidget):
     def _reset_model(self) -> None:
         clave_sel = self.cb_adapt_model.currentData()
         if isinstance(clave_sel, str) and clave_sel:
-            model_store.reiniciar_modelo(clave_sel)
+            model_store.reset_models(clave_sel)
             self._modelos_por_clave.pop(clave_sel, None)
         else:
-            model_store.reiniciar_modelo()
+            model_store.reset_models()
             self._modelos_por_clave = {}
         self._modelo = self._modelos_por_clave.get(clave_sel) if isinstance(clave_sel, str) else None
         self._generated_df = None

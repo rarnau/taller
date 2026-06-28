@@ -412,6 +412,7 @@ class MainWindow(QMainWindow):
         self.top_clock.setText(now_txt)
         self.status_strategy.setText(f"estrategia: {self.estrategia}")
         self._update_playback_markers()
+        self.dashboard_panel.set_cursor(idx, total)
         self.realtime_view.update_from_snapshot(snap)
 
     def _update_playback_markers(self) -> None:

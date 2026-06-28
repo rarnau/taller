@@ -342,7 +342,7 @@ class RealTimeView(QWidget):
         left.addLayout(self.jaulas_grid)
 
         self.stock_title = QLabel("STOCK DISPONIBLE POR JAULA")
-        self.stock_title.setObjectName("BoardHeader")
+        self.stock_title.setObjectName("StockBoardHeader")
         left.addWidget(self.stock_title)
 
         self.stock_row = QHBoxLayout()
