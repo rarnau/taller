@@ -704,31 +704,31 @@ def build_qss() -> str:
     }}
 
     QFrame#InventoryAccent[state="Trabajando"] {{
-        background: #4E87C9;
+        background: {tk_theme.COLORES_ESTADO_DASH["Trabajando"]};
     }}
 
     QFrame#InventoryAccent[state="CRC"] {{
-        background: #C89346;
+        background: {tk_theme.COLORES_ESTADO_DASH["CRC"]};
     }}
 
     QFrame#InventoryAccent[state="Rectificando"] {{
-        background: #8A6CB5;
+        background: {tk_theme.COLORES_ESTADO_DASH["Rectificando"]};
     }}
 
     QFrame#InventoryAccent[state="A rectificar"] {{
-        background: #B85F70;
+        background: {tk_theme.COLORES_ESTADO_DASH["A rectificar"]};
     }}
 
     QFrame#InventoryAccent[state="Enfriando"] {{
-        background: #53A8B8;
+        background: {tk_theme.COLORES_ESTADO_DASH["Enfriando"]};
     }}
 
     QFrame#InventoryAccent[state="Disponible"] {{
-        background: #449B73;
+        background: {tk_theme.COLORES_ESTADO_DASH["Disponible"]};
     }}
 
     QFrame#InventoryAccent[state="Baja"] {{
-        background: #6D7782;
+        background: {tk_theme.COLORES_ESTADO_DASH["Baja"]};
     }}
 
     QPushButton#InventoryToolbarButton {{
@@ -758,45 +758,45 @@ def build_qss() -> str:
     }}
 
     QLabel#InventoryStateBadge[state="Trabajando"] {{
-        color: #6AB2FF;
+        color: {tk_theme.COLORES_ESTADO_DASH["Trabajando"]};
         background: #0F2946;
-        border: 1px solid #2F6CB4;
+        border: 1px solid {tk_theme.COLORES_ESTADO_DASH["Trabajando"]};
     }}
 
     QLabel#InventoryStateBadge[state="CRC"] {{
-        color: #F0B14A;
+        color: {tk_theme.COLORES_ESTADO_DASH["CRC"]};
         background: #352911;
-        border: 1px solid #9B6A1F;
+        border: 1px solid {tk_theme.COLORES_ESTADO_DASH["CRC"]};
     }}
 
     QLabel#InventoryStateBadge[state="Rectificando"] {{
-        color: #C69BFF;
+        color: {tk_theme.COLORES_ESTADO_DASH["Rectificando"]};
         background: #2D1E44;
-        border: 1px solid #7B56B8;
+        border: 1px solid {tk_theme.COLORES_ESTADO_DASH["Rectificando"]};
     }}
 
     QLabel#InventoryStateBadge[state="A rectificar"] {{
-        color: #FF8E8E;
+        color: {tk_theme.COLORES_ESTADO_DASH["A rectificar"]};
         background: #3A1E26;
-        border: 1px solid #B65267;
+        border: 1px solid {tk_theme.COLORES_ESTADO_DASH["A rectificar"]};
     }}
 
     QLabel#InventoryStateBadge[state="Enfriando"] {{
-        color: #53D9E5;
+        color: {tk_theme.COLORES_ESTADO_DASH["Enfriando"]};
         background: #14343A;
-        border: 1px solid #2798A6;
+        border: 1px solid {tk_theme.COLORES_ESTADO_DASH["Enfriando"]};
     }}
 
     QLabel#InventoryStateBadge[state="Disponible"] {{
-        color: #48D18E;
+        color: {tk_theme.COLORES_ESTADO_DASH["Disponible"]};
         background: #132F25;
-        border: 1px solid #2C8D61;
+        border: 1px solid {tk_theme.COLORES_ESTADO_DASH["Disponible"]};
     }}
 
     QLabel#InventoryStateBadge[state="Baja"] {{
-        color: #96A0AB;
+        color: {tk_theme.COLORES_ESTADO_DASH["Baja"]};
         background: #232A33;
-        border: 1px solid #46515E;
+        border: 1px solid {tk_theme.COLORES_ESTADO_DASH["Baja"]};
     }}
 
     QFrame#LaneBox {{
@@ -823,28 +823,28 @@ def build_qss() -> str:
     }}
 
     QLabel#LaneTitleWork {{
-        color: #4BA5FF;
+        color: {tk_theme.COLORES_ESTADO_DASH["Trabajando"]};
         background-color: transparent;
         font-size: {tk_theme.FONT_SIZE_MD}px;
         font-weight: 700;
     }}
 
     QLabel#LaneTitleCRC {{
-        color: #F5A834;
+        color: {tk_theme.COLORES_ESTADO_DASH["CRC"]};
         background-color: transparent;
         font-size: {tk_theme.FONT_SIZE_MD}px;
         font-weight: 700;
     }}
 
     QLabel#LaneTitleQueue {{
-        color: #FF7373;
+        color: {tk_theme.COLORES_ESTADO_DASH["A rectificar"]};
         background-color: transparent;
         font-size: {tk_theme.FONT_SIZE_MD}px;
         font-weight: 700;
     }}
 
     QLabel#LaneTitleCooling {{
-        color: #34D3E0;
+        color: {tk_theme.COLORES_ESTADO_DASH["Enfriando"]};
         background-color: transparent;
         font-size: {tk_theme.FONT_SIZE_MD}px;
         font-weight: 700;
@@ -862,15 +862,15 @@ def build_qss() -> str:
     }}
 
     QFrame#Chip[role="work"] {{
-        background-color: #4BA5FF;
+        background-color: {tk_theme.COLORES_ESTADO_DASH["Trabajando"]};
     }}
 
     QFrame#Chip[role="crc"] {{
-        background-color: #F5A834;
+        background-color: {tk_theme.COLORES_ESTADO_DASH["CRC"]};
     }}
 
     QFrame#Chip[role="queue"] {{
-        background-color: #FF7373;
+        background-color: {tk_theme.COLORES_ESTADO_DASH["A rectificar"]};
     }}
 
     QFrame#Chip[role="queue_next"] {{
@@ -879,7 +879,7 @@ def build_qss() -> str:
     }}
 
     QFrame#Chip[role="cooling"] {{
-        background-color: #34D3E0;
+        background-color: {tk_theme.COLORES_ESTADO_DASH["Enfriando"]};
     }}
 
     QLabel#ChipTitle {{
