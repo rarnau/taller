@@ -51,6 +51,28 @@ class MaquinaRectificadora:
         self._hitos_t: Optional[List[datetime]] = None
         self._hitos_min: Optional[List[float]] = None
 
+    def reiniciar_estado_corrida(self) -> None:
+        """Resetea el estado acumulado por una corrida (no la configuración).
+
+        Deja la máquina como recién creada en lo que respecta a una simulación
+        (libre, sin trabajo en curso, sin historial ni tiempo ocupado), pero
+        conserva la configuración persistente (``tasas_rectificado``,
+        ``prioridad_defecto`` y ``grilla_operativa``). Permite volver a llamar a
+        ``TallerCilindros.simular()`` sobre la misma instancia sin que el
+        historial y ``tiempo_total_ocupada_min`` se acumulen entre corridas
+        (lo que inflaría la utilización y el Gantt).
+        """
+        self.ocupada = False
+        self.cilindro_actual = None
+        self.tiempo_fin_rectificado = None
+        self.historial_trabajo = []
+        self.tiempo_total_ocupada_min = 0.0
+        self.minutos_trabajo_actual = 0.0
+        self._despertar_programado = False
+        self._inicio_rectificado = None
+        self._hitos_t = None
+        self._hitos_min = None
+
     def configurar_tasa(self, tipo: str, mm_removidos: float, tiempo_minutos: float) -> None:
         """Registra la velocidad de rectificado para un tipo de pase."""
         tasa = mm_removidos / tiempo_minutos if tiempo_minutos > 0 else 0.0

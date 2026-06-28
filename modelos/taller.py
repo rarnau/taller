@@ -1149,6 +1149,13 @@ class TallerCilindros:
         self.alertas.clear()
         self.snapshots.clear()
         self.log_simulacion.clear()
+        # Estado acumulado por corrida de las máquinas: se reinicia para que
+        # volver a llamar simular() sobre la misma instancia no duplique el
+        # historial ni tiempo_total_ocupada_min (lo que inflaría la utilización
+        # y el Gantt). No toca la configuración (tasas, prioridad, turnos).
+        for maq in self.maquinas.values():
+            maq.reiniciar_estado_corrida()
+        self._sin_maquina_alertados.clear()
 
         def _log(msg: str) -> None:
             # Se acumula siempre (la GUI lo vuelca tras una corrida en proceso

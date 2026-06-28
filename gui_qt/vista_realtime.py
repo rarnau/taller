@@ -516,7 +516,8 @@ class RealTimeView(QWidget):
         total = sum(int(v) for v in conteos.values()) if conteos else 0
         self.lbl_total.setText(f"{total} cilindros")
         self.lbl_paradas.setText(f"{len(paradas)} paradas")
-        self.lbl_alertas.setText(f"{self._alertas_criticas} alerta crítica")
+        sufijo = "alerta crítica" if self._alertas_criticas == 1 else "alertas críticas"
+        self.lbl_alertas.setText(f"{self._alertas_criticas} {sufijo}")
         if self._alertas_criticas > 0:
             self.lbl_alertas.setObjectName("StatPillAlert")
         else:

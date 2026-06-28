@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Modo headless: simulación y gestión de configuración desde la línea de comandos.
 
-No importa Tkinter ni nada de ``gui/``, por lo que corre en entornos sin
+No importa PySide6/Qt ni nada de ``gui_qt/``, por lo que corre en entornos sin
 display (servidores, CI, lotes de estadística). La función ``ejecutar_simulacion``
 y el helper ``construir_taller`` son reutilizables de forma programática (p. ej.
 por un futuro generador de cambios o un runner de miles de simulaciones en
@@ -90,7 +90,7 @@ def simular_desde_dataframes(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
 
     Función **a nivel de módulo** y sin GUI: es picklable, así que la GUI la corre
     en un proceso aparte (``ProcessPoolExecutor``) para no congelar el event loop
-    de Tkinter (el GIL no alcanza con un hilo para una simulación CPU-bound). El
+    de Qt (el GIL no alcanza con un hilo para una simulación CPU-bound). El
     taller devuelto (snapshots, cilindros, máquinas, alertas) viaja por pickle.
     """
     taller = construir_taller_desde_dataframes(cfg, stock_df, cambios_df)
