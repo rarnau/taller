@@ -28,11 +28,13 @@ class _LegendSwatch(QFrame):
 def build_legend(items: List[Tuple[str, str]]) -> QWidget:
     """Fila de leyenda a partir de ``[(color_hex, etiqueta), ...]``."""
     row = QWidget()
+    row.setObjectName("DashboardLegendRow")
     lay = QHBoxLayout(row)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(14)
     for color, label in items:
         item = QWidget()
+        item.setObjectName("DashboardLegendItem")
         item_lay = QHBoxLayout(item)
         item_lay.setContentsMargins(0, 0, 0, 0)
         item_lay.setSpacing(5)

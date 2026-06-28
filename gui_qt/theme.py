@@ -475,9 +475,9 @@ def build_qss() -> str:
         font-weight: 700;
     }}
 
-    QLabel#CardTitle {{
-        color: #e8a13a;
-        font-size: {tk_theme.FONT_SIZE_MD}px;
+    QLabel#CardTitle, QLabel#DashboardCardTitle {{
+        color: {tk_theme.DASH_TITLE};
+        font-size: {tk_theme.FONT_SIZE_LG}px;
         font-weight: 700;
         background-color: transparent;
         letter-spacing: 0.04em;
@@ -494,12 +494,8 @@ def build_qss() -> str:
         border-radius: 12px;
     }}
 
-    QLabel#DashboardCardTitle {{
-        color: {tk_theme.DASH_TITLE};
-        font-size: {tk_theme.FONT_SIZE_LG}px;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        background-color: transparent;
+    QWidget#DashboardLegendRow, QWidget#DashboardLegendItem {{
+        background: transparent;
     }}
 
     QLabel#DashboardLegend {{

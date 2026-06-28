@@ -2,15 +2,14 @@
 
 Reemplaza el antiguo dashboard de Matplotlib embebido por un grid 2×2 de
 :class:`DashboardCard` con widgets dibujados con QPainter
-(``gui_qt/widgets/dashboard_charts_qt``). Sigue el patrón de ``tab_kpis_qt``:
-banner sin datos → ``render(taller)`` que limpia y reconstruye → datos desde
-``gui_qt.dashboard_data`` (que a su vez usa ``modelos.kpis.calcular_kpis``).
+(``gui_qt/widgets/dashboard_charts_qt``). Las cards se muestran **siempre**
+(también sin simular: vacías, con su título y leyenda) y ``render(taller)``
+sólo les pasa datos. Las series salen de ``gui_qt.dashboard_data`` (que a su vez
+usa ``modelos.kpis.calcular_kpis``).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QGridLayout, QLabel, QScrollArea, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import QGridLayout, QScrollArea, QVBoxLayout, QWidget
 
 from config import tema
 from gui_qt.dashboard_data import extraer_datos_dashboard
@@ -18,8 +17,6 @@ from gui_qt.widgets.dashboard_card_qt import DashboardCard
 from gui_qt.widgets.dashboard_charts_qt import (BufferChart, GanttChart,
                                                 GroupedBarChart,
                                                 StackedAreaChart)
-
-MSG_SIN_DATOS = "Se mostraran datos una vez corrida la simulacion"
 
 
 class DashboardPanel(QWidget):
@@ -29,11 +26,6 @@ class DashboardPanel(QWidget):
         super().__init__(parent)
         self._root = QVBoxLayout(self)
         self._root.setContentsMargins(0, 0, 0, 0)
-
-        self.banner = QLabel(MSG_SIN_DATOS)
-        self.banner.setObjectName("DashboardBanner")
-        self.banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._root.addWidget(self.banner)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -47,20 +39,17 @@ class DashboardPanel(QWidget):
         self.grid.setHorizontalSpacing(14)
         self.grid.setVerticalSpacing(14)
         host_box.addLayout(self.grid)
-        host_box.addStretch(1)  # cards al tope, el sobrante queda debajo (como el HTML).
         self.scroll.setWidget(self._grid_host)
         self._root.addWidget(self.scroll)
 
         # Gráficos (se crean una vez; render() les pasa datos).
         self.chart_estados = StackedAreaChart()
-        self.chart_estados.setMaximumHeight(300)
         self.chart_buffer = BufferChart()
-        self.chart_buffer.setMaximumHeight(300)
         self.chart_util = GroupedBarChart()
         self.chart_gantt = GanttChart()
 
         self._build_cards()
-        self._show_empty(True)
+        # Arranca vacío: las cards quedan visibles para anticipar qué se mostrará.
 
     # ── Construcción de las tarjetas ────────────────────────────────────────
     def _build_cards(self) -> None:
@@ -96,16 +85,15 @@ class DashboardPanel(QWidget):
         self.grid.addWidget(self.card_gantt, 1, 1)
         self.grid.setColumnStretch(0, 1)
         self.grid.setColumnStretch(1, 1)
-
-    def _show_empty(self, empty: bool) -> None:
-        self.banner.setVisible(empty)
-        self.scroll.setVisible(not empty)
+        # Las dos filas se reparten el alto disponible (cards llenan el espacio).
+        self.grid.setRowStretch(0, 1)
+        self.grid.setRowStretch(1, 1)
 
     # ── API consumida por MainWindow ────────────────────────────────────────
     def render(self, taller) -> None:
-        """Reconstruye el dashboard para el taller actual."""
+        """Reconstruye el dashboard para el taller actual (o lo deja vacío)."""
         if taller is None or not getattr(taller, "snapshots", None):
-            self._show_empty(True)
+            self._set_empty()
             return
 
         data = extraer_datos_dashboard(taller)
@@ -120,8 +108,14 @@ class DashboardPanel(QWidget):
             data.maquinas, data.gantt, data.paradas_turno,
             data.t0, data.t1, tema.TIPO_RECT_COLORS_DASH,
         )
-        self._show_empty(False)
         self.set_cursor(0, len(data.tiempos))
+
+    def _set_empty(self) -> None:
+        """Vacía los gráficos dejando las cards (título + leyenda + área vacía)."""
+        self.chart_estados.set_data([], [], {}, {})
+        self.chart_buffer.set_data([], [], [], [])
+        self.chart_util.set_data([], {}, {})
+        self.chart_gantt.set_data([], {}, {}, None, None, {})
 
     def set_cursor(self, idx: int, total: int) -> None:
         """Marca el snapshot actual con el cursor del replay en los gráficos temporales."""
