@@ -10,7 +10,7 @@ El diseño separa dos pasos (como ``sklearn``):
 - ``ajustar(historia_df, cfg, *, modelo_previo=None) -> dict``: produce un modelo
   serializable. Con ``modelo_previo`` de la misma ``clave`` **acumula** sobre él
   (refit incremental); con ``None`` ajusta **desde cero**. El modelo se persiste
-  con ``config.modelo_generador``.
+  con ``config.generator_model``.
 - ``generar(modelo, cfg, *, seed, ...) -> pandas.DataFrame``: muestrea campañas
   por jaula hasta cubrir el horizonte. Toda la aleatoriedad pasa por un
   ``numpy.random.default_rng(seed)``, así que misma seed ⇒ mismo DataFrame. Sin

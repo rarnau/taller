@@ -1,61 +1,134 @@
-"""Panel Dashboard para la GUI Qt."""
+"""Panel Dashboard para la GUI Qt — nativo (sin Matplotlib), 1 a 1 con html_ref.
 
+Reemplaza el antiguo dashboard de Matplotlib embebido por un grid 2×2 de
+:class:`DashboardCard` con widgets dibujados con QPainter
+(``gui_qt/widgets/dashboard_charts_qt``). Sigue el patrón de ``tab_kpis_qt``:
+banner sin datos → ``render(taller)`` que limpia y reconstruye → datos desde
+``gui_qt.dashboard_data`` (que a su vez usa ``modelos.kpis.calcular_kpis``).
+"""
 from __future__ import annotations
 
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.figure import Figure
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (QGridLayout, QLabel, QScrollArea, QVBoxLayout,
+                               QWidget)
 
-from config import tema as tk_theme
-from gui.dashboard_principal import crear_dashboard_principal
+from config import tema
+from gui_qt.dashboard_data import extraer_datos_dashboard
+from gui_qt.widgets.dashboard_card_qt import DashboardCard
+from gui_qt.widgets.dashboard_charts_qt import (BufferChart, GanttChart,
+                                                GroupedBarChart,
+                                                StackedAreaChart)
+
+MSG_SIN_DATOS = "Se mostraran datos una vez corrida la simulacion"
 
 
 class DashboardPanel(QWidget):
-    """Contenedor Qt para el dashboard principal de Matplotlib."""
+    """Dashboard nativo: evolución de estados, buffer, utilización y Gantt."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._fig: Figure | None = None
-        self._canvas: FigureCanvasQTAgg | None = None
+        self._root = QVBoxLayout(self)
+        self._root.setContentsMargins(0, 0, 0, 0)
 
-        # Evita colisionar con QWidget.layout() y mantiene tipado correcto.
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.banner = QLabel(MSG_SIN_DATOS)
+        self.banner.setObjectName("DashboardBanner")
+        self.banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._root.addWidget(self.banner)
 
-        self.render(None)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._grid_host = QWidget()
+        host_box = QVBoxLayout(self._grid_host)
+        host_box.setContentsMargins(2, 2, 2, 2)
+        host_box.setSpacing(0)
+        self.grid = QGridLayout()
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(14)
+        self.grid.setVerticalSpacing(14)
+        host_box.addLayout(self.grid)
+        host_box.addStretch(1)  # cards al tope, el sobrante queda debajo (como el HTML).
+        self.scroll.setWidget(self._grid_host)
+        self._root.addWidget(self.scroll)
 
+        # Gráficos (se crean una vez; render() les pasa datos).
+        self.chart_estados = StackedAreaChart()
+        self.chart_estados.setMaximumHeight(300)
+        self.chart_buffer = BufferChart()
+        self.chart_buffer.setMaximumHeight(300)
+        self.chart_util = GroupedBarChart()
+        self.chart_gantt = GanttChart()
+
+        self._build_cards()
+        self._show_empty(True)
+
+    # ── Construcción de las tarjetas ────────────────────────────────────────
+    def _build_cards(self) -> None:
+        self.card_estados = DashboardCard("Evolución temporal de estados")
+        self.card_estados.add_content(self.chart_estados)
+
+        self.card_buffer = DashboardCard("Buffer de seguridad global")
+        self.card_buffer.add_content(self.chart_buffer)
+        self.card_buffer.set_legend([
+            (tema.DASH_GREEN, "Disp + CRC"),
+            (tema.DASH_DISP, "Disponible"),
+            (tema.DASH_ORANGE, "CRC"),
+        ])
+
+        self.card_util = DashboardCard("Utilización de máquinas — Disponible vs Neta")
+        self.card_util.add_content(self.chart_util)
+        self.card_util.set_legend([
+            (tema.DASH_GREEN, "Disponible"),
+            (tema.DASH_PURPLE, "Neta"),
+        ])
+
+        self.card_gantt = DashboardCard("Cronograma de rectificado")
+        self.card_gantt.add_content(self.chart_gantt)
+        self.card_gantt.set_legend([
+            (tema.TIPO_RECT_COLORS_DASH["produccion"], "Producción"),
+            (tema.TIPO_RECT_COLORS_DASH["desbaste"], "Desbaste"),
+            (tema.DASH_PARADA, "Parada (turno)"),
+        ])
+
+        self.grid.addWidget(self.card_estados, 0, 0)
+        self.grid.addWidget(self.card_buffer, 0, 1)
+        self.grid.addWidget(self.card_util, 1, 0)
+        self.grid.addWidget(self.card_gantt, 1, 1)
+        self.grid.setColumnStretch(0, 1)
+        self.grid.setColumnStretch(1, 1)
+
+    def _show_empty(self, empty: bool) -> None:
+        self.banner.setVisible(empty)
+        self.scroll.setVisible(not empty)
+
+    # ── API consumida por MainWindow ────────────────────────────────────────
     def render(self, taller) -> None:
-        """Renderiza el dashboard para el taller actual."""
-        self._clear_canvas()
+        """Reconstruye el dashboard para el taller actual."""
+        if taller is None or not getattr(taller, "snapshots", None):
+            self._show_empty(True)
+            return
 
-        if taller is None:
-            # Placeholder consistente mientras no hay simulacion cargada.
-            fig = Figure(figsize=(12, 8), facecolor=tk_theme.BG2)
-            fig.text(
-                0.5,
-                0.5,
-                "Se mostraran datos una vez corrida la simulacion",
-                ha="center",
-                va="center",
-                color=tk_theme.FG2,
-                fontsize=16,
-                fontweight="bold",
-            )
-            self._fig = fig
+        data = extraer_datos_dashboard(taller)
+        self.chart_estados.set_data(
+            data.tiempos, data.estados, data.series_estado, data.colores_estado
+        )
+        self.chart_buffer.set_data(
+            data.tiempos, data.disponibles, data.crc, data.buffer
+        )
+        self.chart_util.set_data(data.maquinas, data.util_disponible, data.util_neta)
+        self.chart_gantt.set_data(
+            data.maquinas, data.gantt, data.paradas_turno,
+            data.t0, data.t1, tema.TIPO_RECT_COLORS_DASH,
+        )
+        self._show_empty(False)
+        self.set_cursor(0, len(data.tiempos))
+
+    def set_cursor(self, idx: int, total: int) -> None:
+        """Marca el snapshot actual con el cursor del replay en los gráficos temporales."""
+        if total <= 1:
+            frac: float | None = 0.0
         else:
-            self._fig = crear_dashboard_principal(taller)
-
-        self._canvas = FigureCanvasQTAgg(self._fig)
-        self.main_layout.addWidget(self._canvas)
-        self._canvas.draw_idle()
-
-    def _clear_canvas(self) -> None:
-        """Elimina canvas/figura previa para evitar fugas entre rerenders."""
-        if self._canvas is not None:
-            self.main_layout.removeWidget(self._canvas)
-            self._canvas.setParent(None)
-            self._canvas.deleteLater()
-            self._canvas = None
-        if self._fig is not None:
-            self._fig.clear()
-            self._fig = None
+            frac = max(0.0, min(1.0, idx / (total - 1)))
+        self.chart_estados.set_cursor_frac(frac)
+        self.chart_buffer.set_cursor_frac(frac)
+        self.chart_gantt.set_cursor_frac(frac)
