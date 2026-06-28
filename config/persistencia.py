@@ -1,11 +1,10 @@
-"""Persistencia de configuración de usuario en JSON.
+"""User configuration persistence in JSON.
 
-A partir de v4.1 el JSON es la fuente de verdad de la configuración estructural
-del taller (parámetros globales + máquinas + rangos por jaula + parámetros de
-simulación). El Excel cargado pasa a contener únicamente los datos variables
-(stock inicial y programa de cambios).
+From v4.1 on, the JSON is the source of truth for the workshop's structural
+configuration (global params + machines + per-stand ranges + simulation params).
+The loaded Excel only holds the variable data (initial stock and change schedule).
 
-Esquema actual::
+Current schema::
 
     {
       "config_global": {"diametro_maximo", "diametro_minimo",
@@ -18,8 +17,11 @@ Esquema actual::
       "max_iteraciones": int
     }
 
-Esquemas viejos (sin ``config_global``/``maquinas`` y con el dict suelto
-``prioridades_maquinas``) se migran al cargar.
+Old schemas (without ``config_global``/``maquinas`` and with the loose
+``prioridades_maquinas`` dict) are migrated on load.
+
+Note: the JSON keys are kept in Spanish on purpose — they are the persisted
+config contract (existing user_config.json files depend on them).
 """
 import json
 import os
@@ -29,9 +31,9 @@ from typing import Any, Dict, List, Optional
 _DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(_DIR, "user_config.json")
 
-# Tasa de rectificado por máquina, una entrada por tipo. Sembrado desde la hoja
-# "Máquinas" del Excel de referencia (datos/simulacion_140cils_1semana.xlsx).
-_TASAS_DEFECTO = {
+# Grinding rate per machine, one entry per type. Seeded from the "Máquinas" sheet
+# of the reference Excel (data/simulacion_140cils_1semana.xlsx).
+_DEFAULT_RATES = {
     "produccion": {"mm": 0.8, "tiempo_min": 60},
     "desbaste": {"mm": 5.0, "tiempo_min": 480},
 }
@@ -45,11 +47,11 @@ DEFAULTS: Dict[str, Any] = {
     },
     "maquinas": [
         {"nombre": "G36", "prioridad": "produccion",
-         "tasas": {k: dict(v) for k, v in _TASAS_DEFECTO.items()}},
+         "tasas": {k: dict(v) for k, v in _DEFAULT_RATES.items()}},
         {"nombre": "F36", "prioridad": "produccion",
-         "tasas": {k: dict(v) for k, v in _TASAS_DEFECTO.items()}},
+         "tasas": {k: dict(v) for k, v in _DEFAULT_RATES.items()}},
         {"nombre": "F60", "prioridad": "desbaste",
-         "tasas": {k: dict(v) for k, v in _TASAS_DEFECTO.items()}},
+         "tasas": {k: dict(v) for k, v in _DEFAULT_RATES.items()}},
     ],
     "rangos": [
         {"jaula": 1, "desde": 533.0, "hasta": 520.0, "perfil": "4"},
@@ -61,27 +63,27 @@ DEFAULTS: Dict[str, Any] = {
     "max_iteraciones": 10000,
     "estrategia_seleccion": "mayor_diametro",
     "estrategia_asignacion": "jaula_mas_necesitada",
-    # Generador sintético del Programa_Cambios a partir de la historia real.
-    # ``turnos_cambios`` (régimen propio del laminador) se omite ⇒ 24/7; sólo se
-    # persiste el dict compacto cuando no es 24/7 (igual que los turnos de máquina).
+    # Synthetic Programa_Cambios generator learned from the real history.
+    # ``turnos_cambios`` (the mill's own regime) is omitted ⇒ 24/7; only the
+    # compact dict is persisted when it is not 24/7 (like the machine shifts).
     "generador_cambios": {
         "generador": "empirico",
         "umbral_desbaste_mm": 1.0,
-        # Ventana de generación (ISO YYYY-MM-DD). None ⇒ se usa una ventana por
-        # defecto (o el legacy ``horizonte_dias``) al generar.
+        # Generation window (ISO YYYY-MM-DD). None ⇒ a default window (or the
+        # legacy ``horizonte_dias``) is used when generating.
         "fecha_inicio": None,
         "fecha_fin": None,
-        "horizonte_dias": 7,  # legacy: fallback si no hay fecha_inicio/fecha_fin
+        "horizonte_dias": 7,  # legacy: fallback if no fecha_inicio/fecha_fin
     },
 }
 
 
-# ── Carga / guardado ─────────────────────────────────────────────────────────
+# ── Load / save ──────────────────────────────────────────────────────────────
 
 def cargar_config() -> Dict[str, Any]:
-    """Carga la configuración de usuario, migrando esquemas viejos.
+    """Load the user configuration, migrating old schemas.
 
-    Devuelve los valores por defecto si el archivo no existe o es inválido.
+    Returns the defaults if the file does not exist or is invalid.
     """
     if os.path.exists(CONFIG_PATH):
         try:
@@ -93,117 +95,117 @@ def cargar_config() -> Dict[str, Any]:
 
 
 def guardar_config(cfg: Dict[str, Any]) -> None:
-    """Guarda la configuración de usuario en disco."""
+    """Save the user configuration to disk."""
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
 
 
 def _copia_defaults() -> Dict[str, Any]:
-    """Copia profunda de los valores por defecto (para no mutar el módulo)."""
+    """Deep copy of the defaults (so the module is not mutated)."""
     return json.loads(json.dumps(DEFAULTS))
 
 
 def migrar(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Completa claves faltantes desde DEFAULTS y migra el esquema viejo.
+    """Fill in missing keys from DEFAULTS and migrate the old schema.
 
-    - Rellena ``config_global``, ``maquinas`` y ``rangos`` si faltan.
-    - Fusiona el dict suelto ``prioridades_maquinas`` (esquema viejo) dentro de
-      cada máquina por nombre.
+    - Fills ``config_global``, ``maquinas`` and ``rangos`` if missing.
+    - Folds the loose ``prioridades_maquinas`` dict (old schema) into each
+      machine by name.
     """
     base = _copia_defaults()
     base.update(cfg)
 
-    # config_global: completar campos sueltos faltantes
+    # config_global: fill in missing loose fields
     cg = dict(DEFAULTS["config_global"])
     cg.update(cfg.get("config_global", {}))
     base["config_global"] = cg
 
-    # maquinas: si no vienen, usar las de DEFAULTS
+    # maquinas: if absent, use the DEFAULTS ones
     if not cfg.get("maquinas"):
         base["maquinas"] = _copia_defaults()["maquinas"]
 
-    # Migrar prioridades del esquema viejo a las máquinas por nombre
-    prio_viejas = cfg.get("prioridades_maquinas") or {}
-    if prio_viejas:
+    # Migrate priorities from the old schema into the machines by name
+    old_priorities = cfg.get("prioridades_maquinas") or {}
+    if old_priorities:
         for maq in base["maquinas"]:
-            if maq["nombre"] in prio_viejas:
-                maq["prioridad"] = prio_viejas[maq["nombre"]]
+            if maq["nombre"] in old_priorities:
+                maq["prioridad"] = old_priorities[maq["nombre"]]
 
-    base.pop("prioridades_maquinas", None)  # clave del esquema viejo, ya migrada
+    base.pop("prioridades_maquinas", None)  # old-schema key, already migrated
     return base
 
 
 # ── Getters ──────────────────────────────────────────────────────────────────
 
 def obtener_config_global(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Devuelve los parámetros globales del taller."""
+    """Return the workshop global parameters."""
     cg = dict(DEFAULTS["config_global"])
     cg.update(cfg.get("config_global", {}))
     return cg
 
 
 def obtener_maquinas(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Devuelve la lista de máquinas con sus tasas y prioridad.
+    """Return the machine list with their rates and priority.
 
-    Si la clave falta, devuelve una **copia** de los defaults (nunca la
-    referencia compartida del módulo, para no mutar ``DEFAULTS``).
+    If the key is missing, returns a **copy** of the defaults (never the module's
+    shared reference, so ``DEFAULTS`` is not mutated).
     """
     maquinas = cfg.get("maquinas")
     return maquinas if maquinas is not None else _copia_defaults()["maquinas"]
 
 
 def obtener_rangos(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Devuelve los rangos de diámetros por jaula desde la configuración.
+    """Return the per-stand diameter ranges from the configuration.
 
-    Si la clave falta, devuelve una **copia** de los defaults (nunca la
-    referencia compartida del módulo, para no mutar ``DEFAULTS``).
+    If the key is missing, returns a **copy** of the defaults (never the module's
+    shared reference, so ``DEFAULTS`` is not mutated).
     """
     rangos = cfg.get("rangos")
     return rangos if rangos is not None else _copia_defaults()["rangos"]
 
 
 def obtener_prioridades(cfg: Dict[str, Any]) -> Dict[str, str]:
-    """Devuelve las prioridades por máquina (derivadas de la lista de máquinas)."""
+    """Return the per-machine priorities (derived from the machine list)."""
     return {m["nombre"]: m.get("prioridad", "produccion") for m in obtener_maquinas(cfg)}
 
 
 def obtener_tiempo_enfriado(cfg: Dict[str, Any]) -> float:
-    """Devuelve el tiempo de enfriado (horas) tras retirar un cilindro de la jaula."""
+    """Return the cooling time (hours) after retiring a cylinder from the stand."""
     return float(cfg.get("tiempo_enfriado_h", DEFAULTS["tiempo_enfriado_h"]))
 
 
 def obtener_max_iteraciones(cfg: Dict[str, Any]) -> int:
-    """Devuelve el máximo de iteraciones del bucle de simulación."""
+    """Return the maximum number of iterations of the simulation loop."""
     return int(cfg.get("max_iteraciones", DEFAULTS["max_iteraciones"]))
 
 
 def obtener_estrategia_asignacion(cfg: Dict[str, Any]) -> str:
-    """Devuelve la clave de la estrategia de asignación de jaula destino."""
+    """Return the key of the target-stand assignment strategy."""
     return str(cfg.get("estrategia_asignacion", DEFAULTS["estrategia_asignacion"]))
 
 
 def obtener_estrategia_seleccion(cfg: Dict[str, Any]) -> str:
-    """Devuelve la clave de la estrategia de selección de la cola de rectificado."""
+    """Return the key of the grinding-queue selection strategy."""
     return str(cfg.get("estrategia_seleccion", DEFAULTS["estrategia_seleccion"]))
 
 
 def obtener_generador_cambios(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Devuelve la config del generador de cambios (merge con los defaults)."""
+    """Return the change-generator config (merged with the defaults)."""
     gc = dict(DEFAULTS["generador_cambios"])
     gc.update(cfg.get("generador_cambios", {}))
     return gc
 
 
 def obtener_turnos_cambios(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Devuelve el régimen de turnos de los cambios (None = 24/7)."""
+    """Return the change shift regime (None = 24/7)."""
     return cfg.get("turnos_cambios")
 
 
-# ── Mutadores (capa única de CRUD usada por el CLI y la GUI) ──────────────────
+# ── Mutators (single CRUD layer used by the CLI and the GUI) ──────────────────
 
 def set_config_global(cfg: Dict[str, Any], *, diametro_maximo=None, diametro_minimo=None,
                       tiempo_traslado_crc_min=None, cantidad_jaulas=None) -> Dict[str, Any]:
-    """Actualiza los campos indicados de ``config_global`` (los None se ignoran)."""
+    """Update the given fields of ``config_global`` (None values are ignored)."""
     cg = obtener_config_global(cfg)
     if diametro_maximo is not None:
         cg["diametro_maximo"] = float(diametro_maximo)
@@ -227,10 +229,10 @@ def _buscar_maquina(cfg: Dict[str, Any], nombre: str) -> Optional[Dict[str, Any]
 def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: float,
                 desb_mm: float, desb_min: float, prioridad: str = "produccion",
                 turnos: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Agrega una máquina nueva. Lanza ValueError si el nombre ya existe.
+    """Add a new machine. Raises ValueError if the name already exists.
 
-    ``turnos`` (esquema de trabajo) es opcional; si se omite, la máquina opera
-    24/7 (no se persiste la clave).
+    ``turnos`` (work schedule) is optional; if omitted, the machine operates 24/7
+    (the key is not persisted).
     """
     nombre = str(nombre).strip()
     if not nombre:
@@ -254,9 +256,9 @@ def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: f
 def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None,
                 desb_mm=None, desb_min=None, prioridad=None,
                 turnos: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Modifica los campos indicados de una máquina existente.
+    """Modify the given fields of an existing machine.
 
-    ``turnos`` reemplaza el esquema de trabajo cuando no es None.
+    ``turnos`` replaces the work schedule when not None.
     """
     maq = _buscar_maquina(cfg, nombre)
     if not maq:
@@ -280,13 +282,13 @@ def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None
 
 
 def obtener_turnos(cfg: Dict[str, Any], nombre: str) -> Optional[Dict[str, Any]]:
-    """Devuelve el esquema de turnos de una máquina (None = 24/7 o inexistente)."""
+    """Return a machine's shift schedule (None = 24/7 or nonexistent)."""
     maq = _buscar_maquina(cfg, nombre)
     return maq.get("turnos") if maq else None
 
 
 def remove_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:
-    """Elimina una máquina por nombre. Lanza ValueError si no existe."""
+    """Remove a machine by name. Raises ValueError if it does not exist."""
     maqs = cfg.setdefault("maquinas", [])
     nuevas = [m for m in maqs if m["nombre"] != nombre]
     if len(nuevas) == len(maqs):
@@ -297,11 +299,11 @@ def remove_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:
 
 def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float,
               perfil: Optional[str] = None) -> Dict[str, Any]:
-    """Crea o actualiza el rango de una jaula. Valida ``desde > hasta``.
+    """Create or update a stand's range. Validates ``desde > hasta``.
 
-    ``perfil`` es el perfil (bombatura) exigido por la jaula. Si es ``None`` se
-    conserva el perfil ya existente (no se borra al editar sólo el rango); para
-    quitarlo pásese cadena vacía ``""``.
+    ``perfil`` is the profile (convexity) required by the stand. If ``None`` the
+    existing profile is kept (not erased when editing only the range); to remove
+    it pass the empty string ``""``.
     """
     jaula = int(jaula)
     desde, hasta = float(desde), float(hasta)
@@ -326,7 +328,7 @@ def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float,
 
 
 def remove_rango(cfg: Dict[str, Any], jaula: int) -> Dict[str, Any]:
-    """Elimina el rango de una jaula por número."""
+    """Remove a stand's range by number."""
     jaula = int(jaula)
     rangos = cfg.setdefault("rangos", [])
     nuevos = [r for r in rangos if int(r["jaula"]) != jaula]
@@ -336,16 +338,16 @@ def remove_rango(cfg: Dict[str, Any], jaula: int) -> Dict[str, Any]:
     return cfg
 
 
-# ── Coherencia jaulas ⇄ rangos (fuente única usada por CLI y GUI) ─────────────
+# ── Stands ⇄ ranges coherence (single source used by CLI and GUI) ─────────────
 
 def problemas_coherencia(cfg: Dict[str, Any]) -> List[str]:
-    """Lista los problemas de coherencia entre ``cantidad_jaulas`` y los rangos.
+    """List the coherence problems between ``cantidad_jaulas`` and the ranges.
 
-    Una config coherente tiene **exactamente un rango por jaula**, con números de
-    jaula ``1..cantidad_jaulas`` (sin faltantes, sobrantes ni duplicados). Para
-    cada tipo de desajuste agrega un mensaje legible. Devuelve ``[]`` si todo
-    está en orden. No muta ``cfg``; es la base tanto del aviso no fatal del CLI
-    como del error de guardado en CLI/GUI.
+    A coherent config has **exactly one range per stand**, numbered
+    ``1..cantidad_jaulas`` (no missing, extra or duplicate). For each kind of
+    mismatch it adds a readable message. Returns ``[]`` if everything is fine.
+    Does not mutate ``cfg``; it is the basis of both the CLI's non-fatal warning
+    and the save error in CLI/GUI.
     """
     cg = obtener_config_global(cfg)
     try:
@@ -376,7 +378,7 @@ def problemas_coherencia(cfg: Dict[str, Any]) -> List[str]:
 
 
 def verificar_coherencia(cfg: Dict[str, Any]) -> None:
-    """Lanza ``ValueError`` si ``cfg`` es incoherente (ver ``problemas_coherencia``)."""
+    """Raise ``ValueError`` if ``cfg`` is incoherent (see ``problemas_coherencia``)."""
     problemas = problemas_coherencia(cfg)
     if problemas:
         raise ValueError(" ".join(problemas))
@@ -384,7 +386,7 @@ def verificar_coherencia(cfg: Dict[str, Any]) -> None:
 
 def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
             estrategia_asignacion=None, estrategia_seleccion=None) -> Dict[str, Any]:
-    """Actualiza los parámetros de simulación indicados."""
+    """Update the given simulation parameters."""
     if tiempo_enfriado is not None:
         t = round(float(tiempo_enfriado), 1)
         if t < 0:
@@ -405,10 +407,10 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
 def set_generador_cambios(cfg: Dict[str, Any], *, generador=None,
                           umbral_desbaste=None, horizonte_dias=None,
                           fecha_inicio=None, fecha_fin=None) -> Dict[str, Any]:
-    """Actualiza los campos indicados de la config del generador de cambios.
+    """Update the given fields of the change-generator config.
 
-    ``fecha_inicio``/``fecha_fin`` son cadenas ISO ``YYYY-MM-DD`` (o ``""`` para
-    limpiar). Si ambas vienen no vacías se valida ``fin > inicio``.
+    ``fecha_inicio``/``fecha_fin`` are ISO strings ``YYYY-MM-DD`` (or ``""`` to
+    clear). If both come non-empty, ``fin > inicio`` is validated.
     """
     gc = obtener_generador_cambios(cfg)
     if generador is not None:
@@ -436,8 +438,8 @@ def set_generador_cambios(cfg: Dict[str, Any], *, generador=None,
 
 def set_turnos_cambios(cfg: Dict[str, Any],
                        turnos: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Fija el régimen de turnos de los cambios; ``None``/24-7 quita la clave."""
-    from models import shifts as shifts_mod  # import local: evita ciclo de carga
+    """Set the change shift regime; ``None``/24-7 removes the key."""
+    from models import shifts as shifts_mod  # local import: avoids a load cycle
     if turnos is None or shifts_mod.is_full(turnos):
         cfg.pop("turnos_cambios", None)
     else:
@@ -445,14 +447,14 @@ def set_turnos_cambios(cfg: Dict[str, Any],
     return cfg
 
 
-# ── Importación desde Excel de 4 hojas (siembra / migración) ──────────────────
+# ── Import from a 4-sheet Excel (seed / migration) ────────────────────────────
 
 def cfg_desde_excel(ruta_excel: str) -> Dict[str, Any]:
-    """Extrae ``config_global`` y ``maquinas`` de un Excel con las hojas viejas.
+    """Extract ``config_global`` and ``maquinas`` from an Excel with the old sheets.
 
-    Lee las hojas ``Configuración`` y ``Máquinas`` de un archivo en formato
-    antiguo (4 hojas) y devuelve un dict de configuración listo para guardar.
-    Conserva ``rangos`` y parámetros de simulación por defecto.
+    Reads the ``Configuración`` and ``Máquinas`` sheets of a file in the old
+    format (4 sheets) and returns a config dict ready to save. Keeps the default
+    ``rangos`` and simulation params.
     """
     import pandas as pd
 

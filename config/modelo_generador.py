@@ -1,16 +1,19 @@
-"""Persistencia del modelo aprendido del generador de cambios.
+"""Persistence of the change generator's learned model.
 
-Espejo de :mod:`config.persistencia` para el **artefacto de adaptación**: el
-modelo que ``modelos.generador_cambios`` ajusta a partir de la historia real se
-guarda en ``config/modelo_generador.json`` para poder:
+Mirror of :mod:`config.persistencia` for the **adaptation artifact**: the model
+that ``models.change_generator`` fits from the real history is saved to
+``config/modelo_generador.json`` so it can be:
 
-- **refinarlo incrementalmente** al subir más historia (``ajustar`` con
-  ``modelo_previo`` = lo guardado), y
-- **reiniciarlo a cero** para una adaptación limpia (``reiniciar_modelo``).
+- **refined incrementally** when more history is uploaded (``fit`` with
+  ``prior_model`` = what was saved), and
+- **reset to zero** for a clean adaptation (``reiniciar_modelo``).
 
-El modelo es un dict JSON-serializable cuya clave ``clave`` registra qué
-generador lo produjo; al cambiar de generador no se mezclan modelos de claves
-distintas (el ``ajustar`` arranca de cero si la clave no coincide).
+The model is a JSON-serializable dict whose ``clave`` key records which generator
+produced it; switching generators does not mix models of different keys (``fit``
+starts from scratch if the key does not match).
+
+Note: the public function names and the persisted dict keys stay in Spanish on
+purpose — they are part of the config persistence layer / saved-file contract.
 """
 import json
 import os
@@ -33,11 +36,11 @@ def _load_raw() -> Optional[Dict[str, Any]]:
 
 
 def _to_store(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Normaliza el payload persistido al formato multi-modelo."""
+    """Normalize the persisted payload to the multi-model format."""
     if not data:
         return {"modelos": {}, "activo": None}
 
-    # Nuevo formato: {"modelos": {clave: modelo}, "activo": "..."}
+    # New format: {"modelos": {key: model}, "activo": "..."}
     if isinstance(data.get("modelos"), dict):
         modelos = {str(k): v for k, v in data["modelos"].items() if isinstance(v, dict)}
         activo = data.get("activo")
@@ -45,7 +48,7 @@ def _to_store(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             activo = next(iter(modelos), None)
         return {"modelos": modelos, "activo": activo}
 
-    # Formato legado: un único modelo dict con clave.
+    # Legacy format: a single model dict with a key.
     clave = str(data.get("clave") or "")
     if clave:
         return {"modelos": {clave: data}, "activo": clave}
@@ -58,20 +61,20 @@ def _save_store(store: Dict[str, Any]) -> None:
 
 
 def cargar_modelos() -> Dict[str, Dict[str, Any]]:
-    """Carga todos los modelos persistidos indexados por clave de generador."""
+    """Load all persisted models indexed by generator key."""
     store = _to_store(_load_raw())
     return dict(store["modelos"])
 
 
 def cargar_modelo_por_clave(clave: str) -> Optional[Dict[str, Any]]:
-    """Carga el modelo de una clave concreta, si existe."""
+    """Load the model for a specific key, if it exists."""
     if not clave:
         return None
     return cargar_modelos().get(str(clave))
 
 
 def cargar_modelo() -> Optional[Dict[str, Any]]:
-    """Carga el modelo persistido, o ``None`` si no existe / es inválido."""
+    """Load the persisted model, or ``None`` if it does not exist / is invalid."""
     store = _to_store(_load_raw())
     modelos = store["modelos"]
     if not modelos:
@@ -83,7 +86,7 @@ def cargar_modelo() -> Optional[Dict[str, Any]]:
 
 
 def guardar_modelo_por_clave(clave: str, modelo: Dict[str, Any], *, set_activo: bool = True) -> None:
-    """Guarda/actualiza un modelo para una clave sin perder los demás."""
+    """Save/update a model for a key without losing the others."""
     if not clave:
         raise ValueError("La clave del modelo no puede ser vacía.")
     store = _to_store(_load_raw())
@@ -94,7 +97,7 @@ def guardar_modelo_por_clave(clave: str, modelo: Dict[str, Any], *, set_activo: 
 
 
 def guardar_modelo(modelo: Dict[str, Any]) -> None:
-    """Guarda el modelo ajustado en disco."""
+    """Save the fitted model to disk."""
     clave = str(modelo.get("clave") or "")
     if not clave:
         raise ValueError("El modelo debe incluir una 'clave' válida.")
@@ -102,10 +105,10 @@ def guardar_modelo(modelo: Dict[str, Any]) -> None:
 
 
 def reiniciar_modelo(clave: Optional[str] = None) -> None:
-    """Reinicia modelos persistidos.
+    """Reset persisted models.
 
-    - ``clave is None``: borra todo (comportamiento legado).
-    - ``clave``: borra solo ese modelo y conserva los demás.
+    - ``clave is None``: deletes everything (legacy behavior).
+    - ``clave``: deletes only that model and keeps the others.
     """
     if clave is None:
         if os.path.exists(MODELO_PATH):
