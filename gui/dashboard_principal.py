@@ -1,4 +1,4 @@
-"""Dashboard principal adaptado."""
+"""Main dashboard (Matplotlib renderer, no Tk)."""
 from datetime import timedelta
 
 import numpy as np
@@ -8,23 +8,23 @@ from matplotlib.dates import DateFormatter, date2num
 from matplotlib.patches import Patch
 from config.tema import (BG, BG2, BG3, FG, FG2, ACCENT, GREEN, ORANGE, RED, RED_DARK,
                           PURPLE, COLORES_ESTADO, SS_COLORS, TIPO_RECT_COLORS)
-from modelos.kpis import calcular_kpis
+from models.kpis import compute_kpis
 
 
 MSG_SIN_DATOS = "Se mostrarán datos una vez corrida la simulación"
 
 
 def banner_sin_datos(fig):
-    """Texto centrado para los dashboards cuando todavía no se simuló."""
+    """Centered text for the dashboards when the simulation has not run yet."""
     fig.text(0.5, 0.5, MSG_SIN_DATOS, ha="center", va="center",
              color=FG2, fontsize=18, fontweight="bold", zorder=10)
 
 
 def rellenar_preview_vacio(fig, celdas, styler):
-    """Preview pre-simulación: ejes vacíos (con título) + banner central.
+    """Pre-simulation preview: empty axes (with title) + central banner.
 
-    ``celdas`` = lista de ``(celda_gridspec, título)``; ``styler`` es el
-    ``_style_ax`` propio de cada dashboard (para conservar su estética).
+    ``celdas`` = list of ``(gridspec_cell, title)``; ``styler`` is each
+    dashboard's own ``_style_ax`` (to keep its look).
     """
     for celda, titulo in celdas:
         ax = fig.add_subplot(celda)
@@ -36,11 +36,11 @@ def rellenar_preview_vacio(fig, celdas, styler):
 
 
 def formatter_tiempo(t0, t1):
-    """DateFormatter para un eje temporal, según la longitud del span.
+    """DateFormatter for a time axis, according to the span length.
 
-    Con ventanas largas las etiquetas ``%d/%m %H:%M`` se solapan; a partir de una
-    semana se muestra sólo el día (``%d/%m``) y, si el span supera el año (p.ej.
-    historias multi-anuales), se agrega el año (``%d/%m/%y``) para no perderlo.
+    With long windows the ``%d/%m %H:%M`` labels overlap; from a week on only the
+    day (``%d/%m``) is shown and, if the span exceeds a year (e.g. multi-year
+    histories), the year is added (``%d/%m/%y``) so it is not lost.
     """
     try:
         dias = (t1 - t0).total_seconds() / 86400.0
@@ -52,17 +52,17 @@ def formatter_tiempo(t0, t1):
 
 
 def _tramos_parada_maquina(m, t0, t1):
-    """Tramos (inicio, fin) en [t0, t1) donde la máquina NO está operativa (turno cerrado).
+    """Spans (start, end) in [t0, t1) where the machine is NOT operative (closed shift).
 
-    Devuelve [] para máquinas 24/7 (``grilla_operativa is None``).
+    Returns [] for 24/7 machines (``operating_grid is None``).
     """
-    if getattr(m, "grilla_operativa", None) is None:
+    if getattr(m, "operating_grid", None) is None:
         return []
     tramos = []
     t = t0.replace(minute=0, second=0, microsecond=0)
     ini = None
     while t < t1:
-        if not m.esta_operativa(t):
+        if not m.is_operative(t):
             if ini is None:
                 ini = max(t, t0)
         elif ini is not None:
@@ -75,7 +75,7 @@ def _tramos_parada_maquina(m, t0, t1):
 
 
 def _marcar_paradas(ax, tiempos, snapshots):
-    """Sombrea en rojo los intervalos en los que hay al menos una jaula PARADA."""
+    """Shade in red the intervals where there is at least one STOPPED stand."""
     flags = [bool(getattr(s, "jaulas_paradas", [])) for s in snapshots]
     en_parada, ini, etiquetado = False, None, False
     for k, f in enumerate(flags):
@@ -101,7 +101,7 @@ def _style_ax(ax, title, bg=BG2, fontsize=13):
         sp.set_linewidth(0.7)
 
 def crear_dashboard_principal(t, substock=None):
-    # Usar fondo un poco más oscuro para que combine con CustomTkinter Dark
+    # Use a slightly darker background to blend with the Dark theme
     fig = Figure(figsize=(18, 12), facecolor="#1A1A1A")
 
     gs = GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.2,
@@ -115,9 +115,9 @@ def crear_dashboard_principal(t, substock=None):
             (gs[1, 0], "Utilización de Máquinas — Disponible vs Neta (%)"),
             (gs[1, 1], "Cronograma de Rectificado")], _style_ax)
 
-    EN = t.ESTADOS_NOMBRES
+    EN = t.STATE_NAMES
 
-    # 1. Evolución Temporal (global o filtrada por SubStock)
+    # 1. Time evolution (global or filtered by SubStock)
     ax = fig.add_subplot(gs[0, 0])
     if substock:
         _style_ax(ax, f"Evolución Temporal de Estados — {substock}")
@@ -131,7 +131,7 @@ def crear_dashboard_principal(t, substock=None):
     ax.legend(loc="upper right", fontsize=7, ncol=3, facecolor="#333", edgecolor="#333", labelcolor=FG)
     ax.xaxis.set_major_formatter(formatter_tiempo(ti[0], ti[-1]))
 
-    # 2. Buffer Global
+    # 2. Global buffer
     ax2 = fig.add_subplot(gs[0, 1])
     _style_ax(ax2, "Buffer de Seguridad Global")
     dv = [s.cantidad_disponibles for s in t.snapshots]
@@ -145,15 +145,15 @@ def crear_dashboard_principal(t, substock=None):
     ax2.legend(fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
     ax2.xaxis.set_major_formatter(formatter_tiempo(ti[0], ti[-1]))
 
-    # 3. Utilización de Máquinas (Bar chart): disponible vs neta por máquina.
-    # Los porcentajes salen de calcular_kpis (fuente única consumida también por
-    # la pestaña KPIs y el CLI), para que coincidan exactamente.
+    # 3. Machine utilization (bar chart): available vs net per machine. The
+    # percentages come from compute_kpis (the single source also consumed by the
+    # KPIs tab and the CLI), so they match exactly.
     ax3 = fig.add_subplot(gs[1, 0])
     _style_ax(ax3, "Utilización de Máquinas — Disponible vs Neta (%)")
-    kpis = calcular_kpis(t)
+    kpis = compute_kpis(t)
     disp_d = kpis["utilizacion_maquinas_pct"]
     neta_d = kpis["utilizacion_neta_pct"]
-    maqs_n = list(t.maquinas.keys())
+    maqs_n = list(t.machines.keys())
     x = np.arange(len(maqs_n))
     ancho = 0.38
     disp = [disp_d.get(m, 0.0) for m in maqs_n]
@@ -170,20 +170,19 @@ def crear_dashboard_principal(t, substock=None):
                      ha='center', color=FG, fontsize=8)
     ax3.legend(loc="upper right", fontsize=7, facecolor="#333", edgecolor="#333", labelcolor=FG)
 
-    # 4. Gantt de máquinas. Eje X en fechas (alineado con la evolución temporal y
-    # el buffer). Las paradas por turno se dibujan como una barra sólida más —del
-    # mismo alto y estilo que la producción— pero en rojo oscuro.
+    # 4. Machine Gantt. X axis in dates (aligned with the time evolution and the
+    # buffer). The shift stoppages are drawn as one more solid bar —same height and
+    # style as the production— but in dark red.
     ax4 = fig.add_subplot(gs[1, 1])
     _style_ax(ax4, "Cronograma de Rectificado")
     hay_parada = False
-    for i, (m_nombre, m) in enumerate(t.maquinas.items()):
-        # La producción va debajo; las paradas se dibujan ENCIMA y opacas para que
-        # "corten" una barra de trabajo a medio hacer (cuyo fin absorbe el hueco
-        # del turno), mostrando la parada en el medio igual que en una máquina
-        # totalmente parada.
-        for h in m.historial_trabajo:
-            ax4.broken_barh([(date2num(h["inicio"]), date2num(h["fin"]) - date2num(h["inicio"]))],
-                            (i - 0.3, 0.6), facecolors=TIPO_RECT_COLORS.get(h["tipo"], "#999"),
+    for i, (m_nombre, m) in enumerate(t.machines.items()):
+        # Production goes below; the stoppages are drawn ON TOP and opaque so they
+        # "cut" a half-done work bar (whose end absorbs the shift gap), showing the
+        # stoppage in the middle just like on a fully stopped machine.
+        for h in m.work_history:
+            ax4.broken_barh([(date2num(h["start"]), date2num(h["end"]) - date2num(h["start"]))],
+                            (i - 0.3, 0.6), facecolors=TIPO_RECT_COLORS.get(h["type"], "#999"),
                             alpha=0.8, edgecolors="white", linewidths=0.2, zorder=1)
         for ini, fin in _tramos_parada_maquina(m, ti[0], ti[-1]):
             ax4.broken_barh([(date2num(ini), date2num(fin) - date2num(ini))],

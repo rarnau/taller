@@ -6,9 +6,9 @@ mueve ninguno (quedan Disponible y la reactivación de la jaula los toma directo
 del stock). Lo mismo al arrancar: una jaula con un solo cilindro en su rango no
 deja ese suelto en el CRC, sino Disponible reservado a la jaula.
 
-Estos tests fijan esa regla a nivel unitario (`reponer_buffer_crc` y el arranque)
-y como invariante sobre todos los escenarios (ningún snapshot muestra un CRC
-impar).
+Estos tests fijan esa regla a nivel unitario (`replenish_crc_buffer` y el
+arranque) y como invariante sobre todos los escenarios (ningún snapshot muestra
+un CRC impar).
 """
 from datetime import datetime
 
@@ -16,11 +16,11 @@ import pandas as pd
 import pytest
 
 from config.persistencia import cargar_config
-from modelos.taller import TallerCilindros, _BUFFER_CRC_SIZE
-from modelos.jaula import Jaula
-from modelos.cilindro import Cilindro
-from modelos.enums import EstadoCilindro
-from _escenarios import ESCENARIOS, ejecutar_escenario
+from models.workshop import CylinderWorkshop, _BUFFER_CRC_SIZE
+from models.stand import Stand
+from models.cylinder import Cylinder
+from models.enums import CylinderState
+from _escenarios import SCENARIOS, run_scenario
 
 T0 = datetime(2026, 6, 1, 8, 0)
 _MAQ = [{"nombre": "G", "prioridad": "produccion",
@@ -28,37 +28,37 @@ _MAQ = [{"nombre": "G", "prioridad": "produccion",
                    "desbaste": {"mm": 1.0, "tiempo_min": 10.0}}}]
 
 
-def _taller_una_jaula():
-    t = TallerCilindros()
-    t.configurar(cargar_config())
-    t.jaulas = {1: Jaula(1)}
-    ss = t.obtener_substock_por_jaula(1)
-    return t, (ss.hasta + ss.desde) / 2  # un diámetro dentro del rango de J1
+def _workshop_one_stand():
+    t = CylinderWorkshop()
+    t.configure(cargar_config())
+    t.stands = {1: Stand(1)}
+    ss = t.get_substock_by_stand(1)
+    return t, (ss.lower + ss.upper) / 2  # a diameter within the range of S1
 
 
 def test_reponer_no_coloca_cilindro_suelto():
     """Un único disponible no entra al CRC: queda Disponible (pareja incompleta)."""
-    t, diam = _taller_una_jaula()
-    c1 = Cilindro("C1", diam, EstadoCilindro.DISPONIBLE)
-    t.cilindros = {"C1": c1}
-    assert t.reponer_buffer_crc(1, T0) is False
-    assert t.jaulas[1].cilindros_crc == []
-    assert c1.estado == EstadoCilindro.DISPONIBLE
+    t, diam = _workshop_one_stand()
+    c1 = Cylinder("C1", diam, CylinderState.AVAILABLE)
+    t.cylinders = {"C1": c1}
+    assert t.replenish_crc_buffer(1, T0) is False
+    assert t.stands[1].crc_cylinders == []
+    assert c1.state == CylinderState.AVAILABLE
 
 
 def test_reponer_coloca_pareja_completa():
     """Con dos disponibles se mueve la pareja completa al CRC."""
-    t, diam = _taller_una_jaula()
-    t.cilindros = {f"C{i}": Cilindro(f"C{i}", diam, EstadoCilindro.DISPONIBLE)
+    t, diam = _workshop_one_stand()
+    t.cylinders = {f"C{i}": Cylinder(f"C{i}", diam, CylinderState.AVAILABLE)
                    for i in range(2)}
-    assert t.reponer_buffer_crc(1, T0) is True
-    assert len(t.jaulas[1].cilindros_crc) == _BUFFER_CRC_SIZE
+    assert t.replenish_crc_buffer(1, T0) is True
+    assert len(t.stands[1].crc_cylinders) == _BUFFER_CRC_SIZE
 
 
 def test_arranque_un_solo_cilindro_no_va_al_crc():
     """Al cargar, una jaula con un solo cilindro arranca PARADA y el CRC vacío."""
-    t = TallerCilindros()
-    t.configurar({
+    t = CylinderWorkshop()
+    t.configure({
         "config_global": {"diametro_maximo": 575.0, "diametro_minimo": 520.0,
                           "tiempo_traslado_crc_min": 10.0, "cantidad_jaulas": 1},
         "rangos": [{"jaula": 1, "desde": 575.0, "hasta": 520.0}],
@@ -70,18 +70,18 @@ def test_arranque_un_solo_cilindro_no_va_al_crc():
     ])
     cambios = pd.DataFrame([], columns=["ID_Cambio", "Fecha_Hora", "Jaula",
                                         "Tipo_Rectificado", "mm_a_Rectificar", "Observación"])
-    t.cargar_datos_desde_dataframes(stock, cambios)
-    jaula = t.jaulas[1]
-    assert jaula.parada is True
-    assert jaula.cilindros_crc == []                       # nunca un suelto en el CRC
-    assert t.cilindros["A"].estado == EstadoCilindro.DISPONIBLE
-    assert t.cilindros["A"].jaula_destino == 1             # reservado a su jaula
+    t.load_data_from_dataframes(stock, cambios)
+    stand = t.stands[1]
+    assert stand.stopped is True
+    assert stand.crc_cylinders == []                       # nunca un suelto en el CRC
+    assert t.cylinders["A"].state == CylinderState.AVAILABLE
+    assert t.cylinders["A"].target_stand == 1              # reservado a su jaula
 
 
-@pytest.mark.parametrize("nombre", list(ESCENARIOS))
+@pytest.mark.parametrize("nombre", list(SCENARIOS))
 def test_crc_nunca_impar_en_snapshots(nombre):
     """En ningún snapshot de ningún escenario el CRC de una jaula es impar."""
-    t = ejecutar_escenario(ESCENARIOS[nombre])
+    t = run_scenario(SCENARIOS[nombre])
     for s in t.snapshots:
         for jaula_id, n in s.crc_por_jaula.items():
             assert n % _BUFFER_CRC_SIZE == 0, (

@@ -7,7 +7,7 @@ from typing import Dict
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout, QWidget
 
 from config import tema as tk_theme
-from modelos.kpis import calcular_kpis
+from models.kpis import compute_kpis
 
 
 def _mix(c1: str, c2: str, t: float) -> str:
@@ -92,7 +92,7 @@ class KpisPanel(QWidget):
             return
         self.banner.setVisible(False)
 
-        k = calcular_kpis(taller)
+        k = compute_kpis(taller)
 
         # Bloque de KPIs globales (estado de inventario y horizonte).
         rows = [

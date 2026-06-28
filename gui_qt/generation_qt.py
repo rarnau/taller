@@ -43,8 +43,8 @@ from config.persistencia import (
     obtener_turnos_cambios,
     set_generador_cambios,
 )
-from modelos import turnos as turnos_mod
-from modelos.generador_cambios import GENERADORES_CAMBIOS, ajustar_modelo, generar_cambios
+from models import shifts as turnos_mod
+from models.change_generator import CHANGE_GENERATORS, fit_model, generate_changes
 from gui_qt.widgets import LabeledFieldRow, SectionCard
 
 
@@ -217,8 +217,8 @@ class GenerationPanel(QWidget):
 
         form = QFormLayout()
         self.cb_generator = QComboBox()
-        for key, gen in GENERADORES_CAMBIOS.items():
-            self.cb_generator.addItem(gen.etiqueta, key)
+        for key, gen in CHANGE_GENERATORS.items():
+            self.cb_generator.addItem(gen.label, key)
 
         self.sp_umbral = QDoubleSpinBox()
         self.sp_umbral.setRange(0.0, 100.0)
@@ -287,8 +287,8 @@ class GenerationPanel(QWidget):
 
         # Selector de modelo + botones en la misma fila
         self.cb_adapt_model = QComboBox()
-        for key, gen in GENERADORES_CAMBIOS.items():
-            self.cb_adapt_model.addItem(gen.etiqueta, key)
+        for key, gen in CHANGE_GENERATORS.items():
+            self.cb_adapt_model.addItem(gen.label, key)
         self.cb_adapt_model.currentIndexChanged.connect(self._update_adapt_preview)
         model_row = LabeledFieldRow("Modelo:", self.cb_adapt_model, self, stretch_field=True)
         col.addWidget(model_row)
@@ -409,7 +409,7 @@ class GenerationPanel(QWidget):
             self._turnos_dlg = TurnosDialog(self._turnos_custom, parent=None)
         else:
             # Re-cargar el estado actual en el diálogo existente
-            actual = turnos_mod.normalizar(self._turnos_custom)
+            actual = turnos_mod.normalize(self._turnos_custom)
             self._turnos_dlg._set_grid(actual)
             self._turnos_dlg._sync_preset_combo(actual)
             self._turnos_dlg._accepted = False
@@ -525,7 +525,7 @@ class GenerationPanel(QWidget):
             return
 
         # Descripción del algoritmo seleccionado
-        gen = GENERADORES_CAMBIOS.get(clave)
+        gen = CHANGE_GENERATORS.get(clave)
         self.lbl_model_desc.setText(getattr(gen, "descripcion", "") if gen else "")
 
         # Al cambiar de algoritmo, mostrar su modelo guardado sin perder el otro.
@@ -540,8 +540,8 @@ class GenerationPanel(QWidget):
         params_nuevo: dict[str, str] = {}
         if self._history_df is not None and not self._history_df.empty:
             try:
-                nuevo_modelo = ajustar_modelo(
-                    self._history_df, self._cfg, clave=clave, modelo_previo=None,
+                nuevo_modelo = fit_model(
+                    self._history_df, self._cfg, key=clave, prior_model=None,
                 )
                 params_nuevo = dict(self._parametros_modelo(nuevo_modelo, clave))
             except Exception as exc:
@@ -598,11 +598,11 @@ class GenerationPanel(QWidget):
             clave_sel = self.cb_adapt_model.currentData()
             if not isinstance(clave_sel, str) or not clave_sel:
                 raise ValueError("Debe seleccionar un algoritmo válido.")
-            self._modelo = ajustar_modelo(
+            self._modelo = fit_model(
                 self._history_df,
                 self._cfg,
-                clave=clave_sel,
-                modelo_previo=self._modelos_por_clave.get(clave_sel),
+                key=clave_sel,
+                prior_model=self._modelos_por_clave.get(clave_sel),
             )
             self._modelos_por_clave[clave_sel] = self._modelo
             model_store.guardar_modelo_por_clave(clave_sel, self._modelo, set_activo=True)
@@ -651,13 +651,13 @@ class GenerationPanel(QWidget):
             inicio = datetime.strptime(self.dt_start.date().toString("yyyy-MM-dd"), "%Y-%m-%d")
             fin = datetime.strptime(self.dt_end.date().toString("yyyy-MM-dd"), "%Y-%m-%d")
             seed = self.sp_seed.value()
-            self._generated_df = generar_cambios(
+            self._generated_df = generate_changes(
                 self._modelo,
                 self._cfg,
                 seed=None if seed < 0 else int(seed),
-                inicio=inicio,
-                fin=fin,
-                horizonte_dias=7,
+                start=inicio,
+                end=fin,
+                horizon_days=7,
             )
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"No se pudieron generar cambios: {exc}")
@@ -883,7 +883,7 @@ class GenerationPanel(QWidget):
         if turnos is None:
             return []
 
-        grilla = turnos_mod.expandir(turnos)
+        grilla = turnos_mod.expand(turnos)
         tramos: list[tuple[datetime, datetime]] = []
         t = t0.replace(minute=0, second=0, microsecond=0)
         ini: datetime | None = None
@@ -975,7 +975,7 @@ class TurnosDialog(QWidget):
 
         header_row = QHBoxLayout()
         header_row.addWidget(QLabel(""))  # placeholder columna de días
-        for lbl in turnos_mod.TURNO_LABELS:
+        for lbl in turnos_mod.SHIFT_LABELS:
             h = QLabel(lbl)
             h.setAlignment(Qt.AlignmentFlag.AlignCenter)
             header_row.addWidget(h)
@@ -983,13 +983,13 @@ class TurnosDialog(QWidget):
 
         # Filas de checkboxes por día
         self._checks: dict[str, list[QCB]] = {}
-        for dia, nombre in zip(turnos_mod.DIAS, turnos_mod.DIAS_NOMBRES):
+        for dia, nombre in zip(turnos_mod.DAYS, turnos_mod.DAY_NAMES):
             row = QHBoxLayout()
             lbl = QLabel(nombre)
             lbl.setMinimumWidth(80)
             row.addWidget(lbl)
             checks = []
-            for t in range(turnos_mod.NUM_TURNOS):
+            for t in range(turnos_mod.NUM_SHIFTS):
                 cb = QCB()
                 cb.stateChanged.connect(self._on_manual_change)
                 row.addWidget(cb, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1000,7 +1000,7 @@ class TurnosDialog(QWidget):
         root.addWidget(grid)
 
         # Cargar valores actuales
-        actual = turnos_mod.normalizar(turnos_actual)
+        actual = turnos_mod.normalize(turnos_actual)
         self._set_grid(actual)
         self._sync_preset_combo(actual)
 
@@ -1029,7 +1029,7 @@ class TurnosDialog(QWidget):
         key = self.cb_preset.currentData()
         if key == "__custom__":
             return
-        preset = turnos_mod.normalizar(turnos_mod.PRESETS.get(key))
+        preset = turnos_mod.normalize(turnos_mod.PRESETS.get(key))
         self._set_grid(preset)
 
     def _on_manual_change(self) -> None:
@@ -1061,7 +1061,7 @@ class TurnosDialog(QWidget):
         result = {dia: [cb.isChecked() for cb in checks]
                   for dia, checks in self._checks.items()}
         # Si equivale a 24/7 → None (motor interpreta None como siempre operativo)
-        self._result_turnos = None if turnos_mod.normalizar(result) == turnos_mod.PRESETS["24x7"] else result
+        self._result_turnos = None if turnos_mod.normalize(result) == turnos_mod.PRESETS["24x7"] else result
         self._accepted = True
         self.hide()
 

@@ -1,14 +1,17 @@
-"""Definición de escenarios de regresión y cálculo de su *fingerprint*.
+"""Regression scenario definitions and computation of their *fingerprint*.
 
-Este módulo es la fuente de verdad compartida entre:
-  - ``_generar_golden.py`` (regenera el JSON de referencia a propósito), y
-  - ``test_regresion.py`` (compara la corrida actual contra ese JSON).
+This module is the shared source of truth between:
+  - ``_generar_golden.py`` (regenerates the reference JSON on purpose), and
+  - ``test_regresion.py`` (compares the current run against that JSON).
 
-Un *fingerprint* es un dict 100% serializable y determinista que resume el
-resultado de una simulación (KPIs, nº de snapshots, alertas, estado final de
-cada cilindro y un hash del contenido completo de todos los snapshots). Si una
-refactorización del motor preserva el comportamiento, todos los fingerprints
-deben quedar idénticos.
+A *fingerprint* is a 100% serializable, deterministic dict summarizing a
+simulation result (KPIs, number of snapshots, alerts, final state of each
+cylinder and a hash of the full content of all snapshots). If an engine
+refactor preserves behavior, all fingerprints must stay identical.
+
+Note: the scenario names, the fingerprint output dict keys, the enum string
+values and the alert message text stay in Spanish on purpose — they are the
+golden-master contract.
 """
 import hashlib
 import json
@@ -19,41 +22,41 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.persistencia import cargar_config
-from modelos.kpis import calcular_kpis
-from modelos.taller import TallerCilindros
+from models.kpis import compute_kpis
+from models.workshop import CylinderWorkshop
 
-_DIR_DATOS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "datos")
+_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_master.json")
 
-# Cada escenario: nombre -> {excel, estrategia, tiempo_enfriado}
-ESCENARIOS = {
+# Each scenario: name -> {excel, strategy, cooling}
+SCENARIOS = {
     "parada_mayor_diametro": {
-        "excel": "simulacion_caso_parada.xlsx", "estrategia": "mayor_diametro", "tiempo_enfriado": 0.0,
+        "excel": "simulacion_caso_parada.xlsx", "strategy": "mayor_diametro", "cooling": 0.0,
     },
     "parada_fifo": {
-        "excel": "simulacion_caso_parada.xlsx", "estrategia": "fifo", "tiempo_enfriado": 0.0,
+        "excel": "simulacion_caso_parada.xlsx", "strategy": "fifo", "cooling": 0.0,
     },
     "parada_enfriado_8h": {
-        "excel": "simulacion_caso_parada.xlsx", "estrategia": "mayor_diametro", "tiempo_enfriado": 8.0,
+        "excel": "simulacion_caso_parada.xlsx", "strategy": "mayor_diametro", "cooling": 8.0,
     },
     "cils140_mayor_diametro": {
-        "excel": "simulacion_140cils_1semana.xlsx", "estrategia": "mayor_diametro", "tiempo_enfriado": 0.0,
+        "excel": "simulacion_140cils_1semana.xlsx", "strategy": "mayor_diametro", "cooling": 0.0,
     },
     "cils140_menor_mm_desb": {
-        "excel": "simulacion_140cils_1semana.xlsx", "estrategia": "menor_mm_desb_fifo_prod", "tiempo_enfriado": 0.0,
+        "excel": "simulacion_140cils_1semana.xlsx", "strategy": "menor_mm_desb_fifo_prod", "cooling": 0.0,
     },
-    # Bandas solapadas + perfiles: jaulas 2 y 3 comparten perfil "2" con rangos
-    # que se solapan, así que la estrategia de asignación elige entre candidatas.
-    # Trae su propia config (independiente de user_config.json) vía "cfg".
+    # Overlapping bands + profiles: stands 2 and 3 share profile "2" with ranges
+    # that overlap, so the assignment strategy chooses among candidates. Brings
+    # its own config (independent of user_config.json) via "cfg".
     "perfiles_jaula_mas_necesitada": {
-        "excel": "simulacion_caso_perfiles.xlsx", "estrategia": "mayor_diametro",
-        "tiempo_enfriado": 0.0, "cfg": "perfiles",
+        "excel": "simulacion_caso_perfiles.xlsx", "strategy": "mayor_diametro",
+        "cooling": 0.0, "cfg": "perfiles",
     },
 }
 
 
-def _cfg_perfiles() -> dict:
-    """Config autocontenida con bandas solapadas + perfiles (ver generar_caso_perfiles.py)."""
+def _profiles_cfg() -> dict:
+    """Self-contained config with overlapping bands + profiles (see generate_profiles_case.py)."""
     cfg = cargar_config()
     cfg["config_global"] = {
         "diametro_maximo": 575.0, "diametro_minimo": 520.0,
@@ -69,47 +72,47 @@ def _cfg_perfiles() -> dict:
     return cfg
 
 
-def ejecutar_escenario(esc: dict) -> TallerCilindros:
-    """Construye y simula un taller para un escenario dado (sin GUI ni I/O extra)."""
-    cfg = _cfg_perfiles() if esc.get("cfg") == "perfiles" else cargar_config()
-    cfg["tiempo_enfriado_h"] = esc["tiempo_enfriado"]
-    taller = TallerCilindros()
-    taller.configurar(cfg)
-    taller.cargar_datos(os.path.join(_DIR_DATOS, esc["excel"]))
-    taller.simular(estrategia=esc["estrategia"], callback_log=None)
-    return taller
+def run_scenario(esc: dict) -> CylinderWorkshop:
+    """Build and simulate a workshop for a given scenario (no GUI, no extra I/O)."""
+    cfg = _profiles_cfg() if esc.get("cfg") == "perfiles" else cargar_config()
+    cfg["tiempo_enfriado_h"] = esc["cooling"]
+    workshop = CylinderWorkshop()
+    workshop.configure(cfg)
+    workshop.load_data(os.path.join(_DATA_DIR, esc["excel"]))
+    workshop.simulate(strategy=esc["strategy"], callback_log=None)
+    return workshop
 
 
-def serializar_snapshots(taller: TallerCilindros) -> list:
-    """Serialización canónica y completa de TODOS los snapshots de la corrida.
+def serialize_snapshots(workshop: CylinderWorkshop) -> list:
+    """Canonical, full serialization of ALL the run's snapshots.
 
-    Vuelca *todos* los campos de cada ``Snapshot`` —exactamente los datos que la
-    GUI consume para el playback: conteos por estado y por SubStock, detalle de
-    jaulas, CRC, máquinas, cola de rectificado y enfriando—. Usa ``__dict__``
-    para que cualquier campo nuevo del Snapshot quede cubierto automáticamente.
+    Dumps *all* fields of each ``Snapshot`` —exactly the data the GUI consumes
+    for playback: counts by state and by SubStock, stand, CRC, machine,
+    grinding-queue and cooling detail—. Uses ``__dict__`` so any new Snapshot
+    field is covered automatically.
     """
     out = []
-    for sn in taller.snapshots:
+    for sn in workshop.snapshots:
         out.append({k: (v.isoformat() if isinstance(v, datetime) else v)
                     for k, v in sn.__dict__.items()})
     return out
 
 
-def digest_snapshots(taller: TallerCilindros) -> str:
-    """Hash sha256 de la serialización canónica de los snapshots.
+def digest_snapshots(workshop: CylinderWorkshop) -> str:
+    """sha256 hash of the canonical serialization of the snapshots.
 
-    Es la red de seguridad de los datos que ve la GUI: cualquier cambio en
-    cualquier campo de cualquier snapshot (orden incluido en las listas de
-    detalle) mueve el hash. ``sort_keys`` normaliza el orden de claves de los
-    dicts (la GUI accede por clave); el orden de las listas sí se preserva.
+    It is the safety net for the data the GUI sees: any change in any field of
+    any snapshot (order included in the detail lists) moves the hash.
+    ``sort_keys`` normalizes the dict key order (the GUI accesses by key); the
+    list order is preserved.
     """
-    data = json.dumps(serializar_snapshots(taller), sort_keys=True, default=str)
+    data = json.dumps(serialize_snapshots(workshop), sort_keys=True, default=str)
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
-def fingerprint(taller: TallerCilindros) -> dict:
-    """Resumen determinista y serializable del resultado de una simulación."""
-    k = calcular_kpis(taller)
+def fingerprint(workshop: CylinderWorkshop) -> dict:
+    """Deterministic, serializable summary of a simulation result."""
+    k = compute_kpis(workshop)
     return {
         "kpis": {
             "cilindros_totales": k["cilindros_totales"],
@@ -125,20 +128,20 @@ def fingerprint(taller: TallerCilindros) -> dict:
                 m: round(v, 4) for m, v in k["utilizacion_maquinas_pct"].items()
             },
         },
-        "n_snapshots": len(taller.snapshots),
-        "n_alertas": len(taller.alertas),
+        "n_snapshots": len(workshop.snapshots),
+        "n_alertas": len(workshop.alerts),
         "alertas": [
-            {"tiempo": a.tiempo.isoformat(), "tipo": a.tipo, "mensaje": a.mensaje, "jaula": a.jaula}
-            for a in taller.alertas
+            {"tiempo": a.time.isoformat(), "tipo": a.type, "mensaje": a.message, "jaula": a.stand}
+            for a in workshop.alerts
         ],
         "cilindros": sorted(
-            [c.id, c.estado.value, round(c.diametro, 2)] for c in taller.cilindros.values()
+            [c.id, c.state.value, round(c.diameter, 2)] for c in workshop.cylinders.values()
         ),
-        # Hash del contenido completo de todos los snapshots (datos de la GUI).
-        "snapshots_sha256": digest_snapshots(taller),
+        # Hash of the full content of all snapshots (the GUI data).
+        "snapshots_sha256": digest_snapshots(workshop),
     }
 
 
-def fingerprint_de_todos() -> dict:
-    """Ejecuta todos los escenarios y devuelve {nombre: fingerprint}."""
-    return {nombre: fingerprint(ejecutar_escenario(esc)) for nombre, esc in ESCENARIOS.items()}
+def fingerprint_all() -> dict:
+    """Run all scenarios and return {name: fingerprint}."""
+    return {name: fingerprint(run_scenario(esc)) for name, esc in SCENARIOS.items()}
