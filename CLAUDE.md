@@ -108,7 +108,7 @@ SubStock ranges: `hasta < diámetro <= desde` (hasta is the lower exclusive boun
 - `rangos` — SubStock diameter ranges per jaula
 - `tiempo_enfriado_h` — cooling hours between Trabajando and rectification (float, default `0.0`)
 - `max_iteraciones` — cap on the simulation loop (int, default `10000`)
-- `estrategia_seleccion` / `estrategia_asignacion` / `estrategia_reposicion` — `clave` of the chosen queue-selection / cage-assignment / **cylinder-replenishment** strategy (defaults `mayor_diametro` / `jaula_mas_necesitada` / **`ninguna`**)
+- `estrategia_seleccion` / `estrategia_asignacion` / `estrategia_reposicion` — `clave` of the chosen queue-selection / cage-assignment / **cylinder-replenishment** strategy (defaults `mayor_diametro` / `jaula_mas_necesitada` / **`ninguna`**). These three keys are described **once** by the declarative `FAMILIAS_ESTRATEGIA` table in `modelos/estrategias.py` (each row: `clave_cfg`, `flag_cli`, `etiqueta_ui`, `registro`, `defecto`), which `cli.py` (the `config sim` flags), `gui_qt/config_qt.py` (the combos) and `TallerCilindros.configurar` (reading the config) all iterate — so adding a 4th family is registering the strategy + one table row. `set_sim` takes the strategy values as generic `**estrategias` kwargs (no per-family enumeration).
 
 `DEFAULTS` is seeded from the reference Excel `datos/simulacion_140cils_1semana.xlsx` (machines G36/F36/F60). `cargar_config()` **migrates** old configs: it fills missing keys from defaults and folds the old loose `prioridades_maquinas` dict into each machine's `prioridad`.
 
@@ -123,7 +123,7 @@ At startup, `MainWindow.__init__` (`gui_qt/main_window.py`) calls `taller.config
 - `config show | export <json> | import <json> | import-excel <excel>`
 - `config global [--diametro-max --diametro-min --crc-min --jaulas]`
 - `config maquina list|add|remove|set` (set/add accept `--turnos "<compacto>"` or `--turnos-preset {24x7,off,lv3,3escuadras}`) and `config jaula list|set|remove`
-- `config sim [--tiempo-enfriado --max-iteraciones]`
+- `config sim [--tiempo-enfriado --max-iteraciones --estrategia-seleccion --estrategia-asignacion --estrategia-reposicion]` (the three strategy flags are auto-derived from `FAMILIAS_ESTRATEGIA`)
 - `config generador [--generador --umbral-desbaste --fecha-inicio --fecha-fin --horizonte-dias]` and `config turnos-cambios [--turnos | --turnos-preset]` — synthetic-change generator config (`generador_cambios` block: `generador`, `umbral_desbaste_mm`, `fecha_inicio`/`fecha_fin` ISO window — `horizonte_dias` kept as legacy fallback — and the optional `turnos_cambios` laminador regime)
 - `modelo ajustar <historia>|show|reset` and `generar-cambios [<historia>] [--seed --inicio --fin --horizonte-dias --umbral-desbaste --salida --ajustar]` — fit/inspect the persisted learned model and emit a reproducible `Programa_Cambios`
 

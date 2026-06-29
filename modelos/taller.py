@@ -18,7 +18,7 @@ from .estrategias import (
     ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO,
     ESTRATEGIAS_ASIGNACION, ESTRATEGIA_ASIGNACION_DEFECTO,
     ESTRATEGIAS_REPOSICION, ESTRATEGIA_REPOSICION_DEFECTO, PedidoReposicion,
-    resolver as _resolver_estrategia,
+    FAMILIAS_ESTRATEGIA, resolver as _resolver_estrategia,
 )
 from . import turnos as turnos_mod
 
@@ -246,12 +246,9 @@ class TallerCilindros:
             self.tiempo_enfriado_h = float(cfg["tiempo_enfriado_h"])
         if "max_iteraciones" in cfg:
             self.max_iteraciones = int(cfg["max_iteraciones"])
-        if "estrategia_seleccion" in cfg:
-            self.estrategia_seleccion = str(cfg["estrategia_seleccion"])
-        if "estrategia_asignacion" in cfg:
-            self.estrategia_asignacion = str(cfg["estrategia_asignacion"])
-        if "estrategia_reposicion" in cfg:
-            self.estrategia_reposicion = str(cfg["estrategia_reposicion"])
+        for fam in FAMILIAS_ESTRATEGIA:
+            if fam.clave_cfg in cfg:
+                setattr(self, fam.clave_cfg, str(cfg[fam.clave_cfg]))
         # Régimen de turnos de la línea (laminador). Ausente/None ⇒ 24/7 (la
         # reprogramación de cambios tras PARADA será de reloj, idéntica al histórico).
         tc = cfg.get("turnos_cambios")

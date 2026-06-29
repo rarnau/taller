@@ -420,10 +420,13 @@ def verificar_coherencia(cfg: Dict[str, Any]) -> None:
 
 def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado: Optional[float] = None,
             max_iteraciones: Optional[int] = None,
-            estrategia_asignacion: Optional[str] = None,
-            estrategia_seleccion: Optional[str] = None,
-            estrategia_reposicion: Optional[str] = None) -> Dict[str, Any]:
-    """Actualiza los parámetros de simulación indicados."""
+            **estrategias: Optional[str]) -> Dict[str, Any]:
+    """Actualiza los parámetros de simulación indicados.
+
+    Las estrategias se pasan como kwargs ``estrategia_*`` (clave_cfg de cada
+    familia, ver ``FAMILIAS_ESTRATEGIA``): se escribe en ``cfg`` cada una no None.
+    Esto evita enumerar cada familia aquí — agregar una nueva no toca ``set_sim``.
+    """
     if tiempo_enfriado is not None:
         t = round(float(tiempo_enfriado), 1)
         if t < 0:
@@ -434,12 +437,9 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado: Optional[float] = None,
         if n <= 0:
             raise ValueError("El máximo de iteraciones debe ser mayor que 0.")
         cfg["max_iteraciones"] = n
-    if estrategia_asignacion is not None:
-        cfg["estrategia_asignacion"] = str(estrategia_asignacion)
-    if estrategia_seleccion is not None:
-        cfg["estrategia_seleccion"] = str(estrategia_seleccion)
-    if estrategia_reposicion is not None:
-        cfg["estrategia_reposicion"] = str(estrategia_reposicion)
+    for clave, valor in estrategias.items():
+        if valor is not None:
+            cfg[clave] = str(valor)
     return cfg
 
 

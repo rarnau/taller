@@ -32,12 +32,10 @@ from config import persistencia as cfgmod
 from config import generator_model as modmod
 from config.persistencia import (cargar_config, guardar_config, obtener_maquinas,
                                   obtener_max_iteraciones, obtener_rangos,
-                                  obtener_tiempo_enfriado, obtener_estrategia_asignacion,
-                                  obtener_estrategia_reposicion)
+                                  obtener_tiempo_enfriado)
 from modelos.enums import TipoRectificado
 from modelos.kpis import calcular_kpis
-from modelos.estrategias import (ESTRATEGIAS_SELECCION, ESTRATEGIAS_ASIGNACION,
-                                 ESTRATEGIAS_REPOSICION)
+from modelos.estrategias import ESTRATEGIAS_SELECCION, FAMILIAS_ESTRATEGIA
 from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
 from modelos import turnos as turnos_mod
@@ -361,15 +359,16 @@ def _cmd_config(args: argparse.Namespace) -> int:
             return 0
 
         if sub == "sim":
+            estr_kwargs = {fam.clave_cfg: getattr(args, fam.dest_cli)
+                           for fam in FAMILIAS_ESTRATEGIA}
             cfgmod.set_sim(cfg, tiempo_enfriado=args.tiempo_enfriado,
-                           max_iteraciones=args.max_iteraciones,
-                           estrategia_asignacion=args.estrategia_asignacion,
-                           estrategia_reposicion=args.estrategia_reposicion)
+                           max_iteraciones=args.max_iteraciones, **estr_kwargs)
             guardar_config(cfg)
+            estr_txt = ", ".join(f"{fam.clave_cfg}={cfg.get(fam.clave_cfg, fam.defecto)}"
+                                 for fam in FAMILIAS_ESTRATEGIA)
             print(f"Parámetros de simulación: tiempo_enfriado_h="
                   f"{obtener_tiempo_enfriado(cfg)}, max_iteraciones={obtener_max_iteraciones(cfg)}, "
-                  f"estrategia_asignacion={obtener_estrategia_asignacion(cfg)}, "
-                  f"estrategia_reposicion={obtener_estrategia_reposicion(cfg)}")
+                  f"{estr_txt}")
             return 0
 
         if sub == "maquina":
@@ -650,10 +649,12 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_simcfg = csub.add_parser("sim", help="Edita los parámetros de simulación.")
     p_simcfg.add_argument("--tiempo-enfriado", type=float)
     p_simcfg.add_argument("--max-iteraciones", type=int)
-    p_simcfg.add_argument("--estrategia-asignacion", choices=list(ESTRATEGIAS_ASIGNACION.keys()),
-                          help="Estrategia de asignación de jaula destino al rectificar.")
-    p_simcfg.add_argument("--estrategia-reposicion", choices=list(ESTRATEGIAS_REPOSICION.keys()),
-                          help="Estrategia de reposición de cilindros nuevos ante las BAJAs.")
+    # Un flag por familia de estrategia, derivado de la tabla (agregar una
+    # familia nueva no requiere tocar el CLI).
+    for fam in FAMILIAS_ESTRATEGIA:
+        p_simcfg.add_argument(fam.flag_cli, dest=fam.dest_cli,
+                              choices=list(fam.registro.keys()),
+                              help=f"{fam.etiqueta_ui} (clave en user_config.json).")
 
     p_maq = csub.add_parser("maquina", help="Gestiona máquinas (list/add/remove/set).")
     p_maq.add_argument("accion", choices=["list", "add", "remove", "set"])

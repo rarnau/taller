@@ -222,3 +222,36 @@ ESTRATEGIAS_REPOSICION: Dict[str, EstrategiaReposicion] = {
     )
 }
 ESTRATEGIA_REPOSICION_DEFECTO = "ninguna"
+
+
+# ── Tabla de familias de estrategia ──────────────────────────────────────────
+#
+# Las tres familias (selección / asignación / reposición) se cablean igual en
+# varios consumidores (clave en user_config.json + atributo del taller, flag del
+# CLI, combo de la GUI, registro y defecto). Esta tabla declarativa es la fuente
+# única que recorren `cli.py` (flags de `config sim`), `gui_qt/config_qt.py`
+# (combos) y `TallerCilindros.configurar` (lectura de config), para que agregar
+# una familia nueva sea registrar la estrategia + añadir UNA fila aquí.
+
+
+@dataclass(frozen=True)
+class FamiliaEstrategia:
+    clave_cfg: str        # clave en user_config.json y atributo del taller
+    flag_cli: str         # flag de `cli.py config sim` (p. ej. "--estrategia-seleccion")
+    dest_cli: str         # argparse dest del flag (p. ej. "estrategia_seleccion")
+    etiqueta_ui: str      # etiqueta de la fila en la GUI
+    registro: Dict[str, object]
+    defecto: str
+
+
+FAMILIAS_ESTRATEGIA = (
+    FamiliaEstrategia("estrategia_seleccion", "--estrategia-seleccion",
+                      "estrategia_seleccion", "Estrategia de seleccion",
+                      ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO),
+    FamiliaEstrategia("estrategia_asignacion", "--estrategia-asignacion",
+                      "estrategia_asignacion", "Estrategia de asignacion",
+                      ESTRATEGIAS_ASIGNACION, ESTRATEGIA_ASIGNACION_DEFECTO),
+    FamiliaEstrategia("estrategia_reposicion", "--estrategia-reposicion",
+                      "estrategia_reposicion", "Estrategia de reposicion",
+                      ESTRATEGIAS_REPOSICION, ESTRATEGIA_REPOSICION_DEFECTO),
+)
