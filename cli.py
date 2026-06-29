@@ -268,8 +268,11 @@ def _formatear_resumen(kpis: Dict[str, Any]) -> str:
         f"  Horizonte simulación   : {kpis['horizonte_simulacion_h']:.1f} h",
         f"  Diámetro promedio      : {kpis['diametro_promedio_mm']:.1f} mm",
         f"  Desgaste medio         : {kpis['desgaste_medio_mm']:.2f} mm",
-        "  Utilización de máquinas (disponible / neta):",
     ]
+    if kpis.get("reposicion_entregados") or kpis.get("reposicion_pendientes"):
+        lineas.append(f"  Repuestos (entregados) : {kpis['reposicion_entregados']}")
+        lineas.append(f"  Reposición pendiente   : {kpis['reposicion_pendientes']}")
+    lineas.append("  Utilización de máquinas (disponible / neta):")
     for nombre, pct in kpis["utilizacion_maquinas_pct"].items():
         neta = kpis["utilizacion_neta_pct"].get(nombre, 0.0)
         lineas.append(f"    - {nombre:<18}: {pct:.0f}% / {neta:.0f}%")

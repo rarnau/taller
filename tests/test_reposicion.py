@@ -182,6 +182,20 @@ def test_registry_expone_ambas_estrategias():
     assert set(ESTRATEGIAS_REPOSICION) == {"ninguna", "lote_4_mensual"}
 
 
+def test_kpis_exponen_reposicion():
+    """calcular_kpis expone entregados/pendientes como métricas escalares."""
+    from modelos.kpis import calcular_kpis
+
+    k_in = calcular_kpis(_taller_con_bajas("lote_4_mensual", cambio_tardio=True))
+    assert k_in["reposicion_entregados"] == 4
+    assert k_in["reposicion_pendientes"] == 0
+    assert "reposicion_pendientes" in k_in["metric_order"]
+
+    k_out = calcular_kpis(_taller_con_bajas("lote_4_mensual", cambio_tardio=False))
+    assert k_out["reposicion_entregados"] == 0
+    assert k_out["reposicion_pendientes"] == 4
+
+
 # ── 4. Ejecución en paralelo (batch_simular) ─────────────────────────────────
 
 def test_batch_simular_con_reposicion_es_determinista_y_paralelizable():
