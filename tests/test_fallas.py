@@ -76,6 +76,33 @@ def test_tasa_1_nunca_trabajable():
     assert m.proxima_apertura(_LUN) is None
 
 
+def test_proxima_apertura_robusta_a_horizontes_largos():
+    """No corta a la semana: con turno ralo + falla densa igual encuentra apertura.
+
+    Antes ``proxima_apertura`` buscaba solo 8 días (ciclo semanal de turnos); con
+    fallas el hueco puede estirarse más allá, así que se extendió el horizonte y se
+    detectan estructuralmente los casos 'nunca trabajable'.
+    """
+    from modelos import turnos as T
+
+    # Sólo lunes T1 operativo + 50% de falla: arrancando un martes, la próxima hora
+    # trabajable es un lunes futuro (no None pese a saltar fuera del ciclo semanal).
+    solo_lun = {d: ([True, False, False] if i == 0 else [False, False, False])
+                for i, d in enumerate(T.DIAS)}
+    m = MaquinaRectificadora("Z")
+    m.grilla_operativa = T.expandir(solo_lun)
+    m.tasa_falla, m._seed_fallas = 0.5, 7
+    martes = datetime(2024, 1, 2, 10, 0)
+    nxt = m.proxima_apertura(martes)
+    assert nxt is not None and nxt.weekday() == 0  # un lunes operativo
+
+    # 'Nunca trabajable' devuelve None de inmediato: grilla apagada o tasa_falla 1.
+    m_off = MaquinaRectificadora("Off")
+    m_off.grilla_operativa = T.expandir(T.PRESETS["off"])
+    assert m_off.proxima_apertura(martes) is None
+    assert _maquina(1.0, 5).proxima_apertura(martes) is None
+
+
 # ── Integración con el motor ─────────────────────────────────────────────────
 
 def _simular(tasa_falla, seed, maquina="F60"):

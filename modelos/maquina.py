@@ -272,17 +272,40 @@ class MaquinaRectificadora:
             consumido += (tiempo - base).total_seconds() / 60.0
         return min(consumido, self._hitos_min[-1])
 
+    def _nunca_trabajable(self) -> bool:
+        """True si la máquina no puede estar trabajable en NINGÚN instante.
+
+        Dos causas estructurales: (a) ningún turno operativo en la grilla semanal,
+        o (b) tasa de falla 1.0 (toda hora cae en falla). En cualquiera de los dos
+        casos no tiene sentido buscar la próxima apertura: nunca llega.
+        """
+        if self.grilla_operativa is not None and not any(
+                any(fila) for fila in self.grilla_operativa):
+            return True
+        return self._tiene_fallas() and self.tasa_falla >= 1.0
+
     def proxima_apertura(self, desde: datetime) -> Optional[datetime]:
         """Próximo instante **trabajable** desde ``desde`` (turno y sin falla).
 
-        None si nunca vuelve a estar trabajable dentro de la cota. Sin turnos ni
-        fallas devuelve ``desde`` (siempre trabajable). Cubre tanto la reapertura
-        de turno como el fin de una falla.
+        None si nunca vuelve a estar trabajable. Sin turnos ni fallas devuelve
+        ``desde`` (siempre trabajable). Cubre tanto la reapertura de turno como el
+        fin de una falla.
+
+        Los casos "nunca trabajable" (grilla sin turnos o ``tasa_falla == 1``) se
+        detectan de forma **estructural** y devuelven ``None`` de inmediato; en el
+        caso normal se busca hora por hora hasta un horizonte amplio (366 días, no
+        una semana) para no perder la reapertura en barridos largos donde una falla
+        densa puede estirar el hueco más allá del ciclo semanal de turnos.
         """
         if self.disponible_para_trabajo(desde):
             return desde
+        if self._nunca_trabajable():
+            return None
         t = desde.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-        limite = desde + timedelta(days=8)  # una semana basta para cubrir el ciclo
+        # Cota de seguridad amplia: ya descartamos el caso "nunca trabajable", así
+        # que el corte solo actúa ante combinaciones degeneradas (turnos muy ralos
+        # + tasa_falla casi 1) que no se dan en un barrido realista.
+        limite = desde + timedelta(days=366)
         while t < limite:
             if self.disponible_para_trabajo(t):
                 return t
