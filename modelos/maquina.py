@@ -8,6 +8,23 @@ from typing import Callable, Optional, List, Dict, Any, Tuple
 from .enums import EstadoCilindro, TipoRectificado
 from .cilindro import Cilindro
 
+# ── Sorteo determinista barato para la tasa de falla ─────────────────────────
+# splitmix64: mezcla entera de 64 bits (avalancha) usada para derivar un número
+# pseudo-aleatorio por hora sin construir/hashear un string cada vez (el sha256
+# por hora era el camino más caliente en barridos largos). El sha256 se usa una
+# sola vez por (máquina, seed) para la semilla base (ver _base_fallas).
+_MASK64 = (1 << 64) - 1
+_DOS64 = float(1 << 64)
+_EPOCH_FALLAS = datetime(1970, 1, 1)
+
+
+def _splitmix64(x: int) -> int:
+    """Mezcla splitmix64 (entera, 64 bits). Determinista y portable entre procesos."""
+    x = (x + 0x9E3779B97F4A7C15) & _MASK64
+    x = ((x ^ (x >> 30)) * 0xBF58476D1CE4E5B9) & _MASK64
+    x = ((x ^ (x >> 27)) * 0x94D049BB133111EB) & _MASK64
+    return x ^ (x >> 31)
+
 
 class MaquinaRectificadora:
     """
@@ -62,6 +79,9 @@ class MaquinaRectificadora:
         # de turno (se hornean en calcular_fin_operativo vía _hora_trabajable).
         self.tasa_falla: float = 0.0
         self._seed_fallas: Optional[int] = None
+        # Caché de la semilla base (seed, nombre) → entero; evita rehashear por
+        # hora. Tupla (seed, base) o None; se revalida si cambia _seed_fallas.
+        self._base_fallas_cache: Optional[Tuple[Optional[int], int]] = None
 
     def reiniciar_estado_corrida(self) -> None:
         """Resetea el estado acumulado por una corrida (no la configuración).
@@ -159,24 +179,39 @@ class MaquinaRectificadora:
         """True si esta corrida modela fallas (tasa > 0 y seed fijada)."""
         return self.tasa_falla > 0 and self._seed_fallas is not None
 
+    def _base_fallas(self) -> int:
+        """Semilla base entera derivada de ``(seed, nombre)`` (sha256, cacheada).
+
+        Se calcula una sola vez por máquina/seed (no por hora): el sha256 de la
+        cadena estable ``"{seed}|{nombre}"`` da un entero reproducible entre
+        procesos (no usa ``hash()``, que está salteado por proceso).
+        """
+        cache = self._base_fallas_cache
+        if cache is None or cache[0] != self._seed_fallas:
+            h = hashlib.sha256(f"{self._seed_fallas}|{self.nombre}".encode("utf-8")).digest()
+            base = int.from_bytes(h[:8], "big")
+            self._base_fallas_cache = (self._seed_fallas, base)
+            return base
+        return cache[1]
+
     def en_falla(self, dt: datetime) -> bool:
         """True si la máquina está caída por falla en la hora de ``dt``.
 
-        Realización **determinista y stateless**: cada hora absoluta se sortea
-        por un hash de ``(seed, nombre, hora)`` mapeado a ``[0,1)`` y comparado
-        contra ``tasa_falla``. Así ~``tasa_falla`` de las horas quedan en falla,
-        de forma reproducible (misma seed ⇒ mismo patrón), sin estado ni orden de
-        consulta, e independiente de los desplazamientos por PARADA (la falla es
-        un proceso de reloj exógeno, como los turnos). Con ``tasa_falla == 0`` o
-        sin seed devuelve ``False`` siempre (comportamiento histórico).
+        Realización **determinista y stateless**: cada hora absoluta se sortea a
+        ``[0,1)`` y se compara contra ``tasa_falla``. Así ~``tasa_falla`` de las
+        horas quedan en falla, de forma reproducible (misma seed ⇒ mismo patrón),
+        sin estado ni orden de consulta, e independiente de los desplazamientos
+        por PARADA (la falla es un proceso de reloj exógeno, como los turnos). El
+        sorteo es barato: una mezcla ``splitmix64`` del índice horario absoluto
+        combinada con la semilla base (sha256 una vez por máquina/seed, no por
+        hora). Con ``tasa_falla == 0`` o sin seed devuelve ``False`` siempre.
         """
         if not self._tiene_fallas():
             return False
-        clave = (f"{self._seed_fallas}|{self.nombre}|"
-                 f"{dt.year:04d}{dt.month:02d}{dt.day:02d}{dt.hour:02d}")
-        h = hashlib.sha256(clave.encode("utf-8")).digest()
-        val = int.from_bytes(h[:8], "big") / float(1 << 64)  # uniforme en [0,1)
-        return val < self.tasa_falla
+        td = dt - _EPOCH_FALLAS
+        hora_abs = td.days * 24 + td.seconds // 3600
+        mezcla = _splitmix64(self._base_fallas() ^ _splitmix64(hora_abs & _MASK64))
+        return (mezcla / _DOS64) < self.tasa_falla
 
     def disponible_para_trabajo(self, dt: datetime) -> bool:
         """True si la máquina puede rectificar en ``dt``: en turno **y** sin falla.
