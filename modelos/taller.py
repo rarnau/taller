@@ -127,6 +127,11 @@ class TallerCilindros:
         self.estrategia_seleccion: str = "mayor_diametro"
         self.estrategia_asignacion: str = ESTRATEGIA_ASIGNACION_DEFECTO
 
+        # Régimen de turnos de la LÍNEA (laminador). None ⇒ 24/7. Solo se usa para
+        # reprogramar los cambios tras una PARADA en tiempo laborable (ver
+        # _reanudar_linea); con None el desplazamiento es de reloj (histórico).
+        self.grilla_cambios: Optional[List[List[bool]]] = None
+
         # Tiempo de enfriado (horas) entre Trabajando y A rectificar. 0.0 = sin
         # estado de enfriado (comportamiento histórico). Máximo de iteraciones
         # del bucle de simulación (tope de seguridad configurable).
@@ -221,6 +226,10 @@ class TallerCilindros:
             self.estrategia_seleccion = str(cfg["estrategia_seleccion"])
         if "estrategia_asignacion" in cfg:
             self.estrategia_asignacion = str(cfg["estrategia_asignacion"])
+        # Régimen de turnos de la línea (laminador). Ausente/None ⇒ 24/7 (la
+        # reprogramación de cambios tras PARADA será de reloj, idéntica al histórico).
+        tc = cfg.get("turnos_cambios")
+        self.grilla_cambios = turnos_mod.expandir(tc) if tc else None
 
     def configurar_maquinas(self, maquinas_config: List[Dict[str, Any]]) -> None:
         """Reconstruye el parque de máquinas desde la configuración persistente.
@@ -612,27 +621,46 @@ class TallerCilindros:
 
     def _reanudar_linea(self, tiempo: datetime, log, cola: List[_ItemCola]) -> None:
         """
-        Reanuda la línea tras una parada: desplaza por la duración total de la
-        parada todos los CAMBIO pendientes (los diferidos y los que siguen en la
-        cola con tiempo posterior al inicio de la parada). Reintegra los diferidos.
+        Reanuda la línea tras una parada: reprograma todos los CAMBIO pendientes
+        (los diferidos y los que siguen en la cola con tiempo posterior al inicio
+        de la parada). Reintegra los diferidos.
+
+        El atraso aplicado a cada cambio es el **tiempo laborable de la línea**
+        perdido durante la parada (no de reloj) cuando hay un régimen de turnos de
+        línea configurado (``grilla_cambios``): se avanza cada cambio sobre el
+        calendario laboral saltando los huecos no operativos, de modo que (a) una
+        parada que cae en horas no laborables casi no atrasa el programa y (b)
+        ningún cambio queda agendado fuera de turno. Con ``grilla_cambios is None``
+        (24/7, default) el atraso es de reloj y el comportamiento es idéntico al
+        histórico (mismo desplazamiento y mismo mensaje).
         """
         inicio = self._linea_parada_desde
-        dur = (tiempo - inicio).total_seconds() / 60 if inicio else 0.0
-        retraso = timedelta(minutes=dur)
+        dur = (tiempo - inicio).total_seconds() / 60 if inicio else 0.0  # reloj (parada)
+
+        # Atraso del PROGRAMA: laborable si hay régimen de línea, de reloj si no.
+        if self.grilla_cambios is None:
+            retraso = timedelta(minutes=dur)
+            nuevo_tiempo = lambda t: t + retraso                      # noqa: E731
+            dur_prog = dur
+        else:
+            dur_prog = (turnos_mod.minutos_operativos(self.grilla_cambios, inicio, tiempo)
+                        if inicio else 0.0)
+            nuevo_tiempo = lambda t: turnos_mod.avanzar_operativo(   # noqa: E731
+                self.grilla_cambios, t, dur_prog)
 
         # Partir del orden canónico de la cola (= orden de extracción del heap,
         # idéntico a la lista ordenada del esquema anterior) antes de desplazar.
         eventos = [ev for _, _, ev in sorted(cola)]
 
-        # Desplazar in situ los CAMBIO que aún están en la cola (posteriores al
+        # Reprogramar in situ los CAMBIO que aún están en la cola (posteriores al
         # inicio), conservando su posición relativa como hacía el sort anterior.
         for i, ev_s in enumerate(eventos):
             if ev_s.tipo == "CAMBIO" and ev_s.tiempo > inicio:
-                eventos[i] = _EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos)
+                eventos[i] = _EventoSim(ev_s.tipo, nuevo_tiempo(ev_s.tiempo), ev_s.datos)
 
-        # Reintegrar los cambios diferidos durante la parada, ya desplazados.
+        # Reintegrar los cambios diferidos durante la parada, ya reprogramados.
         for ev_s in self._cambios_diferidos:
-            eventos.append(_EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos))
+            eventos.append(_EventoSim(ev_s.tipo, nuevo_tiempo(ev_s.tiempo), ev_s.datos))
         n_dif = len(self._cambios_diferidos)
         self._cambios_diferidos = []
 
@@ -647,9 +675,9 @@ class TallerCilindros:
         self.alertas.append(Alerta(
             tiempo, "INFO",
             f"LÍNEA REANUDADA tras {_fmt_duracion(dur)}; programa de cambios desplazado "
-            f"{_fmt_duracion(dur)} ({n_dif} cambio(s) diferido(s) reprogramado(s))"
+            f"{_fmt_duracion(dur_prog)} ({n_dif} cambio(s) diferido(s) reprogramado(s))"
         ))
-        log(f"  >>> LÍNEA REANUDADA tras {_fmt_duracion(dur)} | programa desplazado {_fmt_duracion(dur)} "
+        log(f"  >>> LÍNEA REANUDADA tras {_fmt_duracion(dur)} | programa desplazado {_fmt_duracion(dur_prog)} "
             f"| {n_dif} cambio(s) diferido(s) <<<")
 
     # ── Consultas de estado ─────────────────────────────────────────────────
