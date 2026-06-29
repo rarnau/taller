@@ -4,7 +4,7 @@ Modelo de una máquina rectificadora de cilindros.
 import hashlib
 from bisect import bisect_right
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Callable, Optional, List, Dict, Any, Tuple
 from .enums import EstadoCilindro, TipoRectificado
 from .cilindro import Cilindro
 
@@ -123,6 +123,24 @@ class MaquinaRectificadora:
             return True
         return self.grilla_operativa[dt.weekday()][dt.hour]
 
+    def _minutos_si(self, t0: datetime, t1: datetime,
+                    cond: "Callable[[datetime], bool]") -> float:
+        """Minutos en ``[t0, t1)`` cuyas horas cumplen ``cond(t)`` (resolución horaria).
+
+        Recorre por fronteras horarias acumulando la fracción de cada hora que
+        cae en el intervalo. Base compartida por ``minutos_operativos_entre`` y
+        ``minutos_falla_entre`` (solo cambia el predicado por hora).
+        """
+        total = 0.0
+        t = t0
+        while t < t1:
+            fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            tramo_fin = min(fin_hora, t1)
+            if cond(t):
+                total += (tramo_fin - t).total_seconds() / 60.0
+            t = tramo_fin
+        return total
+
     def minutos_operativos_entre(self, t0: datetime, t1: datetime) -> float:
         """Minutos de tiempo operativo acumulados en el intervalo [t0, t1).
 
@@ -133,16 +151,7 @@ class MaquinaRectificadora:
             return 0.0
         if self.grilla_operativa is None:
             return (t1 - t0).total_seconds() / 60.0
-
-        total = 0.0
-        t = t0
-        while t < t1:
-            fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-            tramo_fin = min(fin_hora, t1)
-            if self.grilla_operativa[t.weekday()][t.hour]:
-                total += (tramo_fin - t).total_seconds() / 60.0
-            t = tramo_fin
-        return total
+        return self._minutos_si(t0, t1, lambda t: self.grilla_operativa[t.weekday()][t.hour])
 
     # ── Tasa de falla (capa de disponibilidad sobre los turnos) ──────────────
 
@@ -188,15 +197,7 @@ class MaquinaRectificadora:
         """
         if t1 <= t0 or not self._tiene_fallas():
             return 0.0
-        total = 0.0
-        t = t0
-        while t < t1:
-            fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-            tramo_fin = min(fin_hora, t1)
-            if self.esta_operativa(t) and self.en_falla(t):
-                total += (tramo_fin - t).total_seconds() / 60.0
-            t = tramo_fin
-        return total
+        return self._minutos_si(t0, t1, lambda t: self.esta_operativa(t) and self.en_falla(t))
 
     def _construir_hitos_progreso(
         self, inicio: datetime, total_min: float
