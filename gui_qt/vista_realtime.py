@@ -222,14 +222,21 @@ class MachineCard(QFrame):
 
     def set_state(self, data: Optional[dict], operativa: bool = True,
                   en_falla: bool = False) -> None:
-        """Pinta estado de maquina: ocupada, libre operativa, en falla o fuera de turno.
+        """Pinta estado de maquina: fuera de turno, en falla, ocupada o libre operativa.
 
-        Precedencia: fuera de turno manda (la máquina no trabaja igual); luego la
-        falla (es 'del tiempo disponible', solo aplica en turno) — si además hay un
-        cilindro montado se muestra "Rectificando · falla" conservando el progreso;
-        luego ocupada (rectificando) y por último libre operativa.
+        Precedencia ``off → falla → busy → idle``: **fuera de turno manda** (la
+        máquina no trabaja aunque tenga un cilindro montado/pausado); luego la falla
+        (es 'del tiempo disponible', solo aplica en turno) — si además hay un cilindro
+        montado se muestra "Rectificando · falla" conservando el progreso, si no "En
+        falla"; luego ocupada (rectificando) y por último libre operativa.
         """
-        if operativa and en_falla:
+        if not operativa:
+            self.setProperty("mode", "off")
+            self.progress.setValue(0)
+            self.meta_label.setText("● Fuera de turno")
+            self.state_label.setText("Fuera de turno")
+            self.state_label.setObjectName("MachineOff")
+        elif en_falla:
             self.setProperty("mode", "falla")
             if data:
                 prog = max(0, min(100, int(data.get("progreso", 0))))
@@ -248,18 +255,12 @@ class MachineCard(QFrame):
             self.meta_label.setText(f"{data['id']} · {float(data['d']):.1f} mm")
             self.state_label.setText(f"Rectificando · {prog}%")
             self.state_label.setObjectName("MachineBusy")
-        elif operativa:
+        else:
             self.setProperty("mode", "idle")
             self.progress.setValue(0)
             self.meta_label.setText("● Libre · operativa")
             self.state_label.setText("Libre · operativa")
             self.state_label.setObjectName("MachineGood")
-        else:
-            self.setProperty("mode", "off")
-            self.progress.setValue(0)
-            self.meta_label.setText("● Fuera de turno")
-            self.state_label.setText("Fuera de turno")
-            self.state_label.setObjectName("MachineOff")
 
         self.style().unpolish(self)
         self.style().polish(self)
