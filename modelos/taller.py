@@ -1149,9 +1149,25 @@ class TallerCilindros:
         que un mm 0 se eleva al pase mínimo), les estampa el perfil y decide la
         jaula destino; luego quedan Disponibles para reponer CRC / reactivar
         jaulas.
+
+        Fuera de la ventana [A, B]: si al procesar la entrega ya no queda ningún
+        cambio sin ejecutar (``_cambios_pendientes == 0``), la llegada cae después
+        del último cambio (B, ya desplazado por las PARADAs). En ese caso NO se
+        entrega — registrar la llegada extendería la simulación hacia un futuro
+        ocioso y diluiría los KPIs (utilización neta). Se anota como pedido
+        pendiente (alerta) y no se crean cilindros ni snapshots.
         """
         pedido: PedidoReposicion = ev_sim.datos
         tiempo = ev_sim.tiempo
+        if self._cambios_pendientes <= 0:
+            self._repo_pendientes_fuera += pedido.cantidad
+            log(f"  {tiempo.strftime('%m-%d %H:%M')} | Reposición | Pedido pendiente "
+                f"de {pedido.cantidad} cilindros (fuera del horizonte simulado)")
+            self.alertas.append(Alerta(
+                tiempo, "INFO",
+                f"Pedido de reposición pendiente para {tiempo.strftime('%Y-%m-%d')}: "
+                f"{pedido.cantidad} cilindros (fuera del horizonte simulado)"))
+            return
         for _ in range(pedido.cantidad):
             self._repo_contador_id += 1
             cil = Cilindro(f"NUEVO-{self._repo_contador_id:03d}", pedido.diametro,
@@ -1184,6 +1200,7 @@ class TallerCilindros:
             return
 
         self._eventos_procesados.add(ev.id)
+        self._cambios_pendientes -= 1  # un cambio menos sin ejecutar (define la ventana)
         jaula = self.jaulas[ev.jaula]
 
         # ev_sim.tiempo es el tiempo real de procesamiento (puede estar desplazado
@@ -1284,6 +1301,12 @@ class TallerCilindros:
         self._repo_bajas_pendientes = 0
         self._repo_ultima_llegada: Optional[datetime] = None
         self._repo_contador_id = 0
+        self._repo_pendientes_fuera = 0
+        # Cambios aún sin ejecutar (en cola o diferidos por PARADA). Define la
+        # ventana [A, B] de la simulación: una entrega de reposición que se
+        # procesa cuando ya no quedan cambios pendientes cae fuera de B (el
+        # último cambio, ya desplazado por las PARADAs) y no se entrega.
+        self._cambios_pendientes = len(self.eventos_programados)
         self.generar_snapshot(t_actual)
 
         # Cola de prioridad (heap) por (tiempo, secuencia): push/pop en O(log n)
