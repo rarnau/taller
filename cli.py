@@ -32,10 +32,12 @@ from config import persistencia as cfgmod
 from config import generator_model as modmod
 from config.persistencia import (cargar_config, guardar_config, obtener_maquinas,
                                   obtener_max_iteraciones, obtener_rangos,
-                                  obtener_tiempo_enfriado, obtener_estrategia_asignacion)
+                                  obtener_tiempo_enfriado, obtener_estrategia_asignacion,
+                                  obtener_estrategia_reposicion)
 from modelos.enums import TipoRectificado
 from modelos.kpis import calcular_kpis
-from modelos.estrategias import ESTRATEGIAS_SELECCION, ESTRATEGIAS_ASIGNACION
+from modelos.estrategias import (ESTRATEGIAS_SELECCION, ESTRATEGIAS_ASIGNACION,
+                                 ESTRATEGIAS_REPOSICION)
 from modelos import generador_cambios as gencambios
 from modelos.taller import TallerCilindros
 from modelos import turnos as turnos_mod
@@ -358,11 +360,13 @@ def _cmd_config(args) -> int:
         if sub == "sim":
             cfgmod.set_sim(cfg, tiempo_enfriado=args.tiempo_enfriado,
                            max_iteraciones=args.max_iteraciones,
-                           estrategia_asignacion=args.estrategia_asignacion)
+                           estrategia_asignacion=args.estrategia_asignacion,
+                           estrategia_reposicion=args.estrategia_reposicion)
             guardar_config(cfg)
             print(f"Parámetros de simulación: tiempo_enfriado_h="
                   f"{obtener_tiempo_enfriado(cfg)}, max_iteraciones={obtener_max_iteraciones(cfg)}, "
-                  f"estrategia_asignacion={obtener_estrategia_asignacion(cfg)}")
+                  f"estrategia_asignacion={obtener_estrategia_asignacion(cfg)}, "
+                  f"estrategia_reposicion={obtener_estrategia_reposicion(cfg)}")
             return 0
 
         if sub == "maquina":
@@ -645,6 +649,8 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_simcfg.add_argument("--max-iteraciones", type=int)
     p_simcfg.add_argument("--estrategia-asignacion", choices=list(ESTRATEGIAS_ASIGNACION.keys()),
                           help="Estrategia de asignación de jaula destino al rectificar.")
+    p_simcfg.add_argument("--estrategia-reposicion", choices=list(ESTRATEGIAS_REPOSICION.keys()),
+                          help="Estrategia de reposición de cilindros nuevos ante las BAJAs.")
 
     p_maq = csub.add_parser("maquina", help="Gestiona máquinas (list/add/remove/set).")
     p_maq.add_argument("accion", choices=["list", "add", "remove", "set"])

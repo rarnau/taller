@@ -17,6 +17,7 @@ from .eventos import EventoCambio, Alerta, Snapshot
 from .estrategias import (
     ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO,
     ESTRATEGIAS_ASIGNACION, ESTRATEGIA_ASIGNACION_DEFECTO,
+    ESTRATEGIAS_REPOSICION, ESTRATEGIA_REPOSICION_DEFECTO, PedidoReposicion,
 )
 from . import turnos as turnos_mod
 
@@ -75,9 +76,9 @@ def _fmt_duracion(minutos: float) -> str:
 
 class _EventoSim(NamedTuple):
     """Evento interno tipado para la cola de simulación."""
-    tipo: str       # "CAMBIO" | "FIN_RECT" | "REPONER_CRC" | "FIN_ENFRIADO"
+    tipo: str       # "CAMBIO" | "FIN_RECT" | "REPONER_CRC" | "FIN_ENFRIADO" | "REANUDAR_MAQUINA" | "REPOSICION"
     tiempo: datetime
-    datos: Any      # EventoCambio (CAMBIO) | str máquina (FIN_RECT) | int jaula (REPONER_CRC) | str id cilindro (FIN_ENFRIADO)
+    datos: Any      # EventoCambio (CAMBIO) | str máquina (FIN_RECT/REANUDAR_MAQUINA) | int jaula (REPONER_CRC) | str id cilindro (FIN_ENFRIADO) | PedidoReposicion (REPOSICION)
 
 
 # Item de la cola de prioridad (heap): (tiempo, secuencia, evento). El contador
@@ -126,6 +127,7 @@ class TallerCilindros:
         self.cantidad_jaulas: int = 4
         self.estrategia_seleccion: str = "mayor_diametro"
         self.estrategia_asignacion: str = ESTRATEGIA_ASIGNACION_DEFECTO
+        self.estrategia_reposicion: str = ESTRATEGIA_REPOSICION_DEFECTO
 
         # Régimen de turnos de la LÍNEA (laminador). None ⇒ 24/7. Solo se usa para
         # reprogramar los cambios tras una PARADA en tiempo laborable (ver
@@ -226,6 +228,8 @@ class TallerCilindros:
             self.estrategia_seleccion = str(cfg["estrategia_seleccion"])
         if "estrategia_asignacion" in cfg:
             self.estrategia_asignacion = str(cfg["estrategia_asignacion"])
+        if "estrategia_reposicion" in cfg:
+            self.estrategia_reposicion = str(cfg["estrategia_reposicion"])
         # Régimen de turnos de la línea (laminador). Ausente/None ⇒ 24/7 (la
         # reprogramación de cambios tras PARADA será de reloj, idéntica al histórico).
         tc = cfg.get("turnos_cambios")
@@ -1012,6 +1016,23 @@ class TallerCilindros:
 
     # ── Manejadores de eventos de simulación ────────────────────────────────
 
+    def _planificar_reposicion(self, tiempo: datetime, cola: List[_ItemCola]) -> None:
+        """Tras una BAJA de runtime, consulta la estrategia de reposición y agenda
+        los lotes de cilindros nuevos que correspondan.
+
+        Solo se invoca desde ``_finalizar_y_continuar`` (único punto de BAJA en
+        runtime); las bajas de carga inicial no reponen. La estrategia es
+        stateless: el estado de la corrida vive en ``self._repo_*``.
+        """
+        self._repo_bajas_pendientes += 1
+        estrategia = ESTRATEGIAS_REPOSICION.get(
+            self.estrategia_reposicion, ESTRATEGIAS_REPOSICION[ESTRATEGIA_REPOSICION_DEFECTO]
+        )
+        for pedido in estrategia.planificar(self, tiempo):
+            self._repo_bajas_pendientes -= pedido.cantidad
+            self._repo_ultima_llegada = pedido.tiempo_llegada
+            self._push_evento(cola, _EventoSim("REPOSICION", pedido.tiempo_llegada, pedido))
+
     def _finalizar_y_continuar(self, maquina: MaquinaRectificadora, tiempo: datetime,
                                cola: List[_ItemCola], log: Callable[[str], None]) -> None:
         """Cierra un rectificado y reactiva el flujo dependiente.
@@ -1031,6 +1052,7 @@ class TallerCilindros:
                 f"Diámetro {cil_terminado.diametro:.2f} < {self.diametro_minimo}")
             self.alertas.append(Alerta(
                 tiempo, "INFO", f"Cilindro {cil_terminado.id} dado de BAJA"))
+            self._planificar_reposicion(tiempo, cola)
             cil_terminado = None  # no tratarlo como Disponible recién llegado
         if (cil_terminado and not self._es_colocable(cil_terminado)
                 and cil_terminado.diametro > self.diametro_minimo):
@@ -1114,6 +1136,37 @@ class TallerCilindros:
         for ev in self.asignar_trabajo_maquinas(ev_sim.tiempo):
             self._push_evento(cola, ev)
         self.generar_snapshot(ev_sim.tiempo)
+
+    def _handle_reposicion(self, ev_sim: "_EventoSim", cola: List[_ItemCola],
+                           log: Callable[[str], None]) -> None:
+        """REPOSICION: llega un lote de cilindros nuevos para reemplazar BAJAs.
+
+        Es una llegada de reloj (logística): siempre se ejecuta, también durante
+        una PARADA (trae stock que puede reanudar la línea), y _reanudar_linea no
+        la desplaza (igual que FIN_RECT/FIN_ENFRIADO). Los nuevos entran como
+        A_RECTIFICAR (pase de producción): rutean por iniciar_rectificado, que
+        les talla un primer pase de preparación (_MM_RECTIFICAR_DEFECTO mm, ya
+        que un mm 0 se eleva al pase mínimo), les estampa el perfil y decide la
+        jaula destino; luego quedan Disponibles para reponer CRC / reactivar
+        jaulas.
+        """
+        pedido: PedidoReposicion = ev_sim.datos
+        tiempo = ev_sim.tiempo
+        for _ in range(pedido.cantidad):
+            self._repo_contador_id += 1
+            cil = Cilindro(f"NUEVO-{self._repo_contador_id:03d}", pedido.diametro,
+                           EstadoCilindro.A_RECTIFICAR)
+            cil.tipo_rectificado_actual = TipoRectificado.PRODUCCION
+            cil.mm_a_rectificar = 0.0
+            cil.registrar_evento(tiempo, "Cilindro nuevo (reposición)")
+            self.cilindros[cil.id] = cil
+        log(f"  {tiempo.strftime('%m-%d %H:%M')} | Reposición | Llegan "
+            f"{pedido.cantidad} cilindros nuevos (Ø {pedido.diametro:.1f})")
+        self.alertas.append(Alerta(
+            tiempo, "INFO", f"Llegan {pedido.cantidad} cilindros nuevos por reposición"))
+        for ev in self.asignar_trabajo_maquinas(tiempo):
+            self._push_evento(cola, ev)
+        self.generar_snapshot(tiempo)
 
     def _handle_cambio(self, ev_sim: "_EventoSim", cola: List[_ItemCola],
                        log: Callable[[str], None]) -> None:
@@ -1226,6 +1279,11 @@ class TallerCilindros:
         self._cambios_diferidos = []
         self._eventos_procesados: set = set()
         self._seq_cola = itertools.count()
+        # Estado de corrida de la reposición de cilindros (se reinicia para que
+        # re-correr sobre la misma instancia no acumule bajas ni lotes).
+        self._repo_bajas_pendientes = 0
+        self._repo_ultima_llegada: Optional[datetime] = None
+        self._repo_contador_id = 0
         self.generar_snapshot(t_actual)
 
         # Cola de prioridad (heap) por (tiempo, secuencia): push/pop en O(log n)
@@ -1246,6 +1304,7 @@ class TallerCilindros:
             "REPONER_CRC": self._handle_reponer_crc,
             "FIN_ENFRIADO": self._handle_fin_enfriado,
             "REANUDAR_MAQUINA": self._handle_reanudar_maquina,
+            "REPOSICION": self._handle_reposicion,
             "CAMBIO": self._handle_cambio,
         }
 

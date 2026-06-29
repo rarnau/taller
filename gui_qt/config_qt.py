@@ -33,6 +33,7 @@ from config.persistencia import (
     guardar_config,
     obtener_config_global,
     obtener_estrategia_asignacion,
+    obtener_estrategia_reposicion,
     obtener_estrategia_seleccion,
     obtener_max_iteraciones,
     obtener_maquinas,
@@ -45,7 +46,11 @@ from config.persistencia import (
     set_sim,
 )
 from modelos import turnos as turnos_mod
-from modelos.estrategias import ESTRATEGIAS_ASIGNACION, ESTRATEGIAS_SELECCION
+from modelos.estrategias import (
+    ESTRATEGIAS_ASIGNACION,
+    ESTRATEGIAS_REPOSICION,
+    ESTRATEGIAS_SELECCION,
+)
 from gui_qt.widgets import StyledTableWidget, make_config_cell_input, make_priority_combo
 
 
@@ -253,6 +258,11 @@ class ConfigPanel(QWidget):
             self.cb_strategy_assign.addItem(strat.etiqueta, key)
         self.cb_strategy_assign.setMinimumWidth(220)
 
+        self.cb_strategy_reposicion = QComboBox()
+        for key, strat in ESTRATEGIAS_REPOSICION.items():
+            self.cb_strategy_reposicion.addItem(strat.etiqueta, key)
+        self.cb_strategy_reposicion.setMinimumWidth(220)
+
         form.addRow("Diametro maximo (mm)", self.sp_diam_max)
         form.addRow("Diametro minimo (mm)", self.sp_diam_min)
         form.addRow("Traslado CRC por pareja (min)", self.sp_crc_min)
@@ -260,6 +270,7 @@ class ConfigPanel(QWidget):
         form.addRow("Tiempo enfriado (h)", self.sp_cooling)
         form.addRow("Estrategia de seleccion", self.cb_strategy_select)
         form.addRow("Estrategia de asignacion", self.cb_strategy_assign)
+        form.addRow("Estrategia de reposicion", self.cb_strategy_reposicion)
 
         col.addLayout(form)
         return card
@@ -420,6 +431,10 @@ class ConfigPanel(QWidget):
             self.cb_strategy_assign,
             obtener_estrategia_asignacion(self._cfg),
         )
+        self._set_combo_by_data(
+            self.cb_strategy_reposicion,
+            obtener_estrategia_reposicion(self._cfg),
+        )
 
         self._populate_ranges_table()
         self._populate_machines_table()
@@ -462,6 +477,7 @@ class ConfigPanel(QWidget):
             max_iteraciones=self.sp_iter.value(),
             estrategia_seleccion=self.cb_strategy_select.currentData(),
             estrategia_asignacion=self.cb_strategy_assign.currentData(),
+            estrategia_reposicion=self.cb_strategy_reposicion.currentData(),
         )
 
         new_cfg["maquinas"] = []
@@ -529,6 +545,7 @@ class ConfigPanel(QWidget):
         self.sp_iter.valueChanged.connect(self._refresh_coherence_status)
         self.cb_strategy_select.currentIndexChanged.connect(self._refresh_coherence_status)
         self.cb_strategy_assign.currentIndexChanged.connect(self._refresh_coherence_status)
+        self.cb_strategy_reposicion.currentIndexChanged.connect(self._refresh_coherence_status)
         self.tbl_ranges.itemChanged.connect(self._refresh_coherence_status)
         self.tbl_machines.itemChanged.connect(self._refresh_coherence_status)
 

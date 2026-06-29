@@ -6,8 +6,11 @@ YA filtrada por prioridad de la máquina y devuelve el cilindro a rectificar.
 Para agregar una estrategia nueva: subclasar EstrategiaSeleccion y registrarla
 en ESTRATEGIAS_SELECCION; la GUI y el CLI la toman de ahí.
 """
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, List, Optional
 
+from . import turnos
 from .cilindro import Cilindro
 from .enums import EstadoCilindro, TipoRectificado
 from .maquina import MaquinaRectificadora
@@ -128,3 +131,76 @@ ESTRATEGIAS_ASIGNACION: Dict[str, EstrategiaAsignacion] = {
     )
 }
 ESTRATEGIA_ASIGNACION_DEFECTO = "jaula_mas_necesitada"
+
+
+# ── Estrategias de reposición de cilindros ───────────────────────────────────
+#
+# Cuando un cilindro cae por debajo del diámetro mínimo se da de BAJA. La
+# estrategia de reposición decide si (y cuándo) llegan cilindros nuevos para
+# reemplazarlo. Se invoca tras cada BAJA de runtime (ver TallerCilindros.
+# _planificar_reposicion); es STATELESS (singleton compartido entre procesos):
+# todo el estado mutable de la corrida vive en el taller (_repo_bajas_pendientes,
+# _repo_ultima_llegada). Para agregar una estrategia nueva: subclasar
+# EstrategiaReposicion y registrarla en ESTRATEGIAS_REPOSICION; la GUI y el CLI
+# la toman de ahí.
+
+
+@dataclass
+class PedidoReposicion:
+    """Un lote de cilindros nuevos a agendar: cuándo llegan, cuántos y a qué diámetro."""
+    tiempo_llegada: datetime
+    cantidad: int
+    diametro: float
+
+
+class EstrategiaReposicion:
+    """Estrategia de reposición de cilindros nuevos ante las BAJAs."""
+
+    clave: str = ""
+    etiqueta: str = ""
+
+    def planificar(self, taller, tiempo_baja: datetime) -> List[PedidoReposicion]:
+        """Tras una BAJA en ``tiempo_baja``, devuelve los lotes a agendar (puede ser [])."""
+        raise NotImplementedError
+
+
+class _SinReposicion(EstrategiaReposicion):
+    """Por defecto: el taller nunca repone (comportamiento histórico)."""
+
+    clave, etiqueta = "ninguna", "Sin reposición"
+
+    def planificar(self, taller, tiempo_baja):
+        return []
+
+
+class _LoteMensual(EstrategiaReposicion):
+    """Cada ``TAMANO_LOTE`` bajas ⇒ un lote de cilindros nuevos al diámetro máximo.
+
+    El lote llega el primer día operativo (régimen de la línea, ``grilla_cambios``)
+    del mes siguiente. Si se acumula más de un lote, se escalonan uno por mes
+    (8 bajas ⇒ 4 el mes siguiente y 4 el mes posterior), encadenando desde
+    ``taller._repo_ultima_llegada``.
+    """
+
+    clave, etiqueta = "lote_4_mensual", "Lote de 4 al mes siguiente"
+    TAMANO_LOTE = 4
+
+    def planificar(self, taller, tiempo_baja):
+        pedidos: List[PedidoReposicion] = []
+        ref = taller._repo_ultima_llegada or tiempo_baja
+        pend = taller._repo_bajas_pendientes
+        while pend >= self.TAMANO_LOTE:
+            llegada = turnos.primer_dia_operativo_mes_siguiente(taller.grilla_cambios, ref)
+            pedidos.append(PedidoReposicion(llegada, self.TAMANO_LOTE, taller.diametro_maximo))
+            pend -= self.TAMANO_LOTE
+            ref = llegada  # el próximo lote llega el mes siguiente a éste
+        return pedidos
+
+
+ESTRATEGIAS_REPOSICION: Dict[str, EstrategiaReposicion] = {
+    e.clave: e for e in (
+        _SinReposicion(),
+        _LoteMensual(),
+    )
+}
+ESTRATEGIA_REPOSICION_DEFECTO = "ninguna"
