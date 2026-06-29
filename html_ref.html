@@ -210,9 +210,14 @@
 
         <!-- ============ DASHBOARD ============ -->
         <sc-if value="{{ isDashboard }}">
-        <div data-screen-label="Dashboard" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div data-screen-label="Dashboard" style="display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; align-items:center; gap:7px;">
+            <span style="font-family:'Space Grotesk'; font-size:10.5px; font-weight:700; color:#59616b; letter-spacing:.07em; margin-right:2px;">JAULA</span>
+            <sc-for list="{{ dashJaulaChips }}" as="chip" hint-placeholder-count="5"><button onClick="{{ chip.onClick }}" style="background:{{ chip.bg }}; border:1px solid {{ chip.border }}; color:{{ chip.color }}; border-radius:20px; padding:4px 13px; font-size:11.5px; font-family:'Space Grotesk'; font-weight:600; cursor:pointer; letter-spacing:.02em; line-height:1.4;">{{ chip.label }}</button></sc-for>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
           <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
-            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:10px;">Evolución temporal de estados</div>
+            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:10px;">{{ dashStackTitle }}</div>
             <svg viewBox="0 0 1000 300" preserveAspectRatio="none" style="width:100%; height:210px; display:block;">
               <sc-for list="{{ stackPolys }}" as="p" hint-placeholder-count="7"><polygon points="{{ p.points }}" fill="{{ p.color }}" opacity="0.88"></polygon></sc-for>
               <line x1="0" x2="1000" y1="281" y2="281" stroke="#2b333d" stroke-width="1.5"></line>
@@ -224,10 +229,10 @@
             </div>
           </div>
           <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
-            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:10px;">Buffer de seguridad global</div>
+            <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#e8a13a; margin-bottom:10px;">{{ dashBufTitle }}</div>
             <svg viewBox="0 0 1000 300" preserveAspectRatio="none" style="width:100%; height:210px; display:block;">
-              <path d="{{ bufArea }}" fill="#35c98a" opacity="0.14"></path>
-              <path d="{{ bufLine }}" fill="none" stroke="#35c98a" stroke-width="3"></path>
+              <path d="{{ bufArea }}" fill="{{ dashLineColor }}" opacity="0.14"></path>
+              <path d="{{ bufLine }}" fill="none" stroke="{{ dashLineColor }}" stroke-width="3"></path>
               <path d="{{ dispLine }}" fill="none" stroke="#66BB6A" stroke-width="2" stroke-dasharray="7 6"></path>
               <path d="{{ crcLine }}" fill="none" stroke="#f0a32e" stroke-width="2" stroke-dasharray="7 6"></path>
               <line x1="0" x2="1000" y1="281" y2="281" stroke="#2b333d" stroke-width="1.5"></line>
@@ -235,7 +240,7 @@
               <line x1="{{ chartCursorX }}" x2="{{ chartCursorX }}" y1="0" y2="280" stroke="#e8a13a" stroke-width="2" opacity="0.8"></line>
             </svg>
             <div style="margin-top:10px; display:flex; gap:16px; font-size:10.5px; color:#cfd5dc;">
-              <span style="display:flex; align-items:center; gap:5px;"><span style="width:14px;height:3px;background:#35c98a;"></span>Disp + CRC</span>
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:14px;height:3px;background:{{ dashLineColor }};"></span>Disp + CRC</span>
               <span style="display:flex; align-items:center; gap:5px;"><span style="width:14px;height:3px;background:#66BB6A;"></span>Disponible</span>
               <span style="display:flex; align-items:center; gap:5px;"><span style="width:14px;height:3px;background:#f0a32e;"></span>CRC</span>
             </div>
@@ -267,6 +272,7 @@
                   <div style="flex:1; position:relative; height:24px; background:#11151a; border-radius:5px; overflow:hidden;">
                     <sc-for list="{{ g.segs }}" as="seg" hint-placeholder-count="6"><div style="position:absolute; top:3px; bottom:3px; left:{{ seg.x }}%; width:{{ seg.w }}%; background:{{ seg.color }};"></div></sc-for>
                     <sc-for list="{{ g.par }}" as="p" hint-placeholder-count="1"><div style="position:absolute; top:0; bottom:0; left:{{ p.x }}%; width:{{ p.w }}%; background:#7f1d1d;"></div></sc-for>
+                    <sc-for list="{{ g.cagePar }}" as="cp" hint-placeholder-count="1"><div style="position:absolute; top:0; bottom:0; left:{{ cp.x }}%; width:{{ cp.w }}%; background:{{ dashLineColor }}; opacity:0.30; border-left:2px solid {{ dashLineColor }};"></div></sc-for>
                     <sc-for list="{{ chartTicks }}" as="tk" hint-placeholder-count="6"><div style="position:absolute; top:0; bottom:0; left:{{ tk.xPct }}%; width:1px; background:#ffffff; opacity:0.15;"></div></sc-for>
                     <div style="position:absolute; top:0; bottom:0; left:{{ chartCursorPct }}%; width:2px; background:#e8a13a; opacity:0.9;"></div>
                   </div>
@@ -285,6 +291,7 @@
               <span style="display:flex; align-items:center; gap:5px;"><span style="width:10px;height:10px;border-radius:2px;background:#7f1d1d;"></span>Parada (turno)</span>
             </div>
           </div>
+        </div>
         </div>
         </sc-if>
 
@@ -643,7 +650,7 @@ class Component extends DCLogic {
     super(props);
     const SPD = { "1×": 1, "2×": 2, "5×": 5, "10×": 10 };
     this.state = {
-      tab: "vista", snapIdx: 64, playing: false,
+      tab: "vista", snapIdx: 64, playing: false, dashJaula: "Todas",
       speed: SPD[props.velocidadInicial] || 2,
       apiMode: false, loading: false, apiError: null,
       apiStatus: "mock", simId: null,
@@ -1261,6 +1268,84 @@ class Component extends DCLogic {
       ];
       mcRunsLabel = String(mcRes.length);
     }
+    // ── Dashboard cage filter ─────────────────────────────────────────────
+    const dashJaula = this.state.dashJaula || "Todas";
+    const _JC4 = ["#5AA9FF","#f0a32e","#35c98a","#F472B6"];
+    const _jOpts = ["Todas","J1","J2","J3","J4"];
+    const dashJaulaChips = _jOpts.map((j,i) => ({
+      label: j,
+      color: dashJaula===j ? (i===0?"#e8a13a":_JC4[i-1]) : "#8b939d",
+      bg: dashJaula===j ? (i===0?"#e8a13a22":_JC4[i-1]+"22") : "transparent",
+      border: dashJaula===j ? (i===0?"#e8a13a":_JC4[i-1]) : "#313a45",
+      onClick: () => this.setState({ dashJaula: j }),
+    }));
+    const _sA = this.snaps, _WF = 1000, _HF = 280;
+    const _t0 = this._t0ms||0, _tr = this._tRangeMs||1;
+    const _xtF = (i) => ((_sA[i].t.getTime()-_t0)/_tr*_WF).toFixed(1);
+    let _dispF, _crcF;
+    if (dashJaula==="Todas") {
+      _dispF = _sA.map(sv => sv.disp.reduce((a,b)=>a+b,0));
+      _crcF  = _sA.map(sv => sv.jaulas.reduce((a,j)=>a+j.crc.length,0));
+    } else {
+      const _jx = parseInt(dashJaula[1])-1;
+      _dispF = _sA.map(sv => sv.disp[_jx]||0);
+      _crcF  = _sA.map(sv => { const _jj=sv.jaulas.find(j=>j.n===_jx+1); return _jj?_jj.crc.length:0; });
+    }
+    const _bufF  = _dispF.map((d,i)=>d+_crcF[i]);
+    const _maxBF = Math.max.apply(null, _bufF.concat([1]));
+    const _xyF   = (arr) => arr.map((v,i)=>_xtF(i)+","+(_HF-v/_maxBF*_HF).toFixed(1));
+    const _lnF   = (arr) => "M"+_xyF(arr).join(" L");
+    const bufAreaFilt = "M0,"+_HF+" L"+_xyF(_bufF).join(" L")+" L"+_WF+","+_HF+" Z";
+    const bufLineFilt = _lnF(_bufF), dispLineFilt = _lnF(_dispF), crcLineFilt = _lnF(_crcF);
+    const dashBufTitle = dashJaula==="Todas" ? "Buffer de seguridad global" : "Buffer · "+dashJaula;
+    const dashLineColor = dashJaula==="Todas" ? "#35c98a" : _JC4[parseInt(dashJaula[1])-1];
+    // ── Evolución temporal per-jaula ──────────────────────────────────────
+    let stackPolysF, stackLegendF;
+    if (dashJaula === "Todas") {
+      stackPolysF = this.stackPolys;
+      stackLegendF = this.STATES.map(st => ({ label: st, color: this.COL[st] }));
+    } else {
+      const jx3 = parseInt(dashJaula[1]) - 1;
+      const _W3 = 1000, _H3 = 280;
+      const xt3 = (i) => ((_sA[i].t.getTime() - _t0) / _tr * _W3).toFixed(1);
+      const states3 = ["Disponible", "CRC", "Trabajando"];
+      const getCageV = (sv, st) => {
+        const jj = sv.jaulas.find(j => j.n === jx3 + 1);
+        if (st === "Trabajando") return jj ? jj.trab.length : 0;
+        if (st === "CRC") return jj ? jj.crc.length : 0;
+        return sv.disp[jx3] || 0;
+      };
+      const maxTot3 = Math.max.apply(null, _sA.map(sv => states3.reduce((a, st) => a + getCageV(sv, st), 0)).concat([1]));
+      let lower3 = new Array(_sA.length).fill(0);
+      const polys3 = [];
+      for (const st3 of states3) {
+        const upper3 = _sA.map((sv, i) => lower3[i] + getCageV(sv, st3));
+        const pts3 = [];
+        for (let i = 0; i < _sA.length; i++) pts3.push(xt3(i) + "," + (_H3 - upper3[i] / maxTot3 * _H3).toFixed(1));
+        for (let i = _sA.length - 1; i >= 0; i--) pts3.push(xt3(i) + "," + (_H3 - lower3[i] / maxTot3 * _H3).toFixed(1));
+        polys3.push({ points: pts3.join(" "), color: this.COL[st3] });
+        lower3 = upper3;
+      }
+      stackPolysF = polys3;
+      stackLegendF = states3.map(st => ({ label: st, color: this.COL[st] }));
+    }
+    const dashStackTitle = dashJaula === "Todas" ? "Evolución temporal de estados" : "Evolución de estados · " + dashJaula;
+    // ── Paradas de jaula para overlay en Gantt ────────────────────────────
+    let ganttCagePar = [];
+    if (dashJaula !== "Todas") {
+      const jxg = parseInt(dashJaula[1]) - 1;
+      let bsg = null;
+      for (let i = 0; i < _sA.length; i++) {
+        const jj = _sA[i].jaulas.find(j => j.n === jxg + 1);
+        const stopped = jj ? jj.parada : false;
+        if (stopped && bsg === null) bsg = i;
+        else if (!stopped && bsg !== null) {
+          ganttCagePar.push({ x: ((_sA[bsg].t.getTime() - _t0) / _tr * 100).toFixed(2), w: ((_sA[i].t.getTime() - _sA[bsg].t.getTime()) / _tr * 100).toFixed(2) });
+          bsg = null;
+        }
+      }
+      if (bsg !== null) ganttCagePar.push({ x: ((_sA[bsg].t.getTime() - _t0) / _tr * 100).toFixed(2), w: ((_sA[_sA.length-1].t.getTime() - _sA[bsg].t.getTime()) / _tr * 100).toFixed(2) });
+    }
     return {
       tabs,
       isVista: tab === "vista", isDashboard: tab === "dashboard", isAnalisis: tab === "analisis",
@@ -1295,12 +1380,13 @@ class Component extends DCLogic {
       utilNeta: this.state.apiMode && this.utilNetaApi ? this.utilNetaApi : [{ name: "RECT-01", pct: 64 }, { name: "RECT-02", pct: 58 }, { name: "DESB-01", pct: 22 }].map((u) => ({ name: u.name, pct: u.pct, fillpct: u.pct, color: this._utilColor(u.pct) })),
       utilPairs: [["RECT-01", 82, 64], ["RECT-02", 76, 58], ["DESB-01", 64, 22]].map((u) => ({ name: u[0], disp: u[1], neta: u[2], dispColor: this._utilColor(u[1]), netaColor: "#b08cf5" })),
       genParams: [{ k: "Semilla", v: "7" }, { k: "Nº de cambios", v: "48" }, { k: "Horizonte", v: "60 h" }, { k: "Distribución", v: "Poisson" }, { k: "Cambios / día", v: "~16" }, { k: "Ventana", v: "10–12 Mar" }],
-      stackPolys: this.stackPolys, stackLegend: this.STATES.map((st) => ({ label: st, color: this.COL[st] })),
-      bufArea: this.bufArea, bufLine: this.bufLine, dispLine: this.dispLine, crcLine: this.crcLine,
+      stackPolys: stackPolysF, stackLegend: stackLegendF, dashStackTitle,
+      bufArea: bufAreaFilt, bufLine: bufLineFilt, dispLine: dispLineFilt, crcLine: crcLineFilt,
+      dashJaulaChips, dashBufTitle, dashLineColor,
       chartTicks: this.chartTicks || [],
       chartCursorX: this._tRangeMs ? ((s.t.getTime() - this._t0ms) / this._tRangeMs * 1000).toFixed(1) : "-1",
       chartCursorPct: this._tRangeMs ? ((s.t.getTime() - this._t0ms) / this._tRangeMs * 100).toFixed(2) : "-1",
-      gantt: this.gantt,
+      gantt: this.gantt.map(g => Object.assign({}, g, { cagePar: ganttCagePar })),
       hist: this.hist, bajasLine: this.bajasLine, estadoDist: this.estadoDist,
       invRows: this.invRows, cambios: this.cambios,
       globals: this.globals.map((g) => ({ k: g[0], v: g[0] === "Estrategia de selección" ? ({ "Mayor diámetro": "Mayor diámetro primero", "Menor diámetro": "Menor diámetro primero", "FIFO": "Orden de llegada (FIFO)" }[estr]) : g[1] })), maquinas: this.maquinas, rangos: this.rangos,
