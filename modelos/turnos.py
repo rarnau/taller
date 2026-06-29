@@ -179,6 +179,59 @@ def proximo_inicio_operativo(grilla: Optional[Grilla], dt: datetime) -> Optional
     return None
 
 
+def minutos_operativos(grilla: Optional[Grilla], t0: datetime, t1: datetime) -> float:
+    """Minutos operativos (en turno) acumulados en ``[t0, t1)`` según la grilla.
+
+    Función **pura** sobre la grilla (sin estado de máquina), para medir el tiempo
+    laborable de la línea. ``grilla is None`` ⇒ 24/7 (minutos de reloj). Recorre por
+    fronteras horarias sumando la fracción de cada hora operativa que cae dentro.
+    """
+    if t1 <= t0:
+        return 0.0
+    if grilla is None:
+        return (t1 - t0).total_seconds() / 60.0
+    total = 0.0
+    t = t0
+    while t < t1:
+        fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        tramo_fin = min(fin_hora, t1)
+        if grilla[t.weekday()][t.hour]:
+            total += (tramo_fin - t).total_seconds() / 60.0
+        t = tramo_fin
+    return total
+
+
+def avanzar_operativo(grilla: Optional[Grilla], desde: datetime, minutos_op: float) -> datetime:
+    """Instante de reloj tras consumir ``minutos_op`` minutos **operativos** desde ``desde``.
+
+    Salta los huecos no operativos (avanza solo sobre tiempo laborable). Política
+    *snap-then-advance*: si ``desde`` cae fuera de turno, primero salta al próximo
+    inicio operativo y desde ahí consume los minutos. ``grilla is None`` ⇒ 24/7
+    (``desde + minutos_op``). Si la grilla nunca es operativa, degrada a reloj.
+    """
+    if grilla is None:
+        return desde + timedelta(minutes=max(0.0, minutos_op))
+    t = desde
+    if not grilla[t.weekday()][t.hour]:
+        ini = proximo_inicio_operativo(grilla, t)
+        if ini is None:                       # régimen nunca operativo: degradación
+            return desde + timedelta(minutes=max(0.0, minutos_op))
+        t = ini
+    if minutos_op <= 0:
+        return t                              # snap sin consumo
+    restante = minutos_op
+    limite = t + timedelta(days=366)          # cota de seguridad anti-bucle
+    while restante > 0 and t < limite:
+        fin_hora = t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        if grilla[t.weekday()][t.hour]:
+            disp = (fin_hora - t).total_seconds() / 60.0
+            if disp >= restante:
+                return t + timedelta(minutes=restante)
+            restante -= disp
+        t = fin_hora
+    return t
+
+
 def resumen(turnos: Optional[Turnos]) -> str:
     """Etiqueta corta legible del esquema de turnos (para GUI/CLI)."""
     if turnos is None or es_completo(turnos):

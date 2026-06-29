@@ -127,6 +127,11 @@ class TallerCilindros:
         self.estrategia_seleccion: str = "mayor_diametro"
         self.estrategia_asignacion: str = ESTRATEGIA_ASIGNACION_DEFECTO
 
+        # Régimen de turnos de la LÍNEA (laminador). None ⇒ 24/7. Solo se usa para
+        # reprogramar los cambios tras una PARADA en tiempo laborable (ver
+        # _reanudar_linea); con None el desplazamiento es de reloj (histórico).
+        self.grilla_cambios: Optional[List[List[bool]]] = None
+
         # Tiempo de enfriado (horas) entre Trabajando y A rectificar. 0.0 = sin
         # estado de enfriado (comportamiento histórico). Máximo de iteraciones
         # del bucle de simulación (tope de seguridad configurable).
@@ -221,6 +226,10 @@ class TallerCilindros:
             self.estrategia_seleccion = str(cfg["estrategia_seleccion"])
         if "estrategia_asignacion" in cfg:
             self.estrategia_asignacion = str(cfg["estrategia_asignacion"])
+        # Régimen de turnos de la línea (laminador). Ausente/None ⇒ 24/7 (la
+        # reprogramación de cambios tras PARADA será de reloj, idéntica al histórico).
+        tc = cfg.get("turnos_cambios")
+        self.grilla_cambios = turnos_mod.expandir(tc) if tc else None
 
     def configurar_maquinas(self, maquinas_config: List[Dict[str, Any]]) -> None:
         """Reconstruye el parque de máquinas desde la configuración persistente.
@@ -248,6 +257,9 @@ class TallerCilindros:
             # grilla horaria 7×24; si no, queda None (siempre operativa, 24/7).
             esquema = m.get("turnos")
             maq.grilla_operativa = turnos_mod.expandir(esquema) if esquema else None
+            # Tasa de falla por máquina (fracción del tiempo operativo). Ausente o
+            # 0 ⇒ sin fallas. La seed (run-level) la fija simular(); ver maquina.en_falla.
+            maq.tasa_falla = float(m.get("tasa_falla", 0.0) or 0.0)
             self.maquinas[nombre] = maq
 
     # ── Carga de datos desde Excel ──────────────────────────────────────────
@@ -609,27 +621,46 @@ class TallerCilindros:
 
     def _reanudar_linea(self, tiempo: datetime, log, cola: List[_ItemCola]) -> None:
         """
-        Reanuda la línea tras una parada: desplaza por la duración total de la
-        parada todos los CAMBIO pendientes (los diferidos y los que siguen en la
-        cola con tiempo posterior al inicio de la parada). Reintegra los diferidos.
+        Reanuda la línea tras una parada: reprograma todos los CAMBIO pendientes
+        (los diferidos y los que siguen en la cola con tiempo posterior al inicio
+        de la parada). Reintegra los diferidos.
+
+        El atraso aplicado a cada cambio es el **tiempo laborable de la línea**
+        perdido durante la parada (no de reloj) cuando hay un régimen de turnos de
+        línea configurado (``grilla_cambios``): se avanza cada cambio sobre el
+        calendario laboral saltando los huecos no operativos, de modo que (a) una
+        parada que cae en horas no laborables casi no atrasa el programa y (b)
+        ningún cambio queda agendado fuera de turno. Con ``grilla_cambios is None``
+        (24/7, default) el atraso es de reloj y el comportamiento es idéntico al
+        histórico (mismo desplazamiento y mismo mensaje).
         """
         inicio = self._linea_parada_desde
-        dur = (tiempo - inicio).total_seconds() / 60 if inicio else 0.0
-        retraso = timedelta(minutes=dur)
+        dur = (tiempo - inicio).total_seconds() / 60 if inicio else 0.0  # reloj (parada)
+
+        # Atraso del PROGRAMA: laborable si hay régimen de línea, de reloj si no.
+        if self.grilla_cambios is None:
+            retraso = timedelta(minutes=dur)
+            nuevo_tiempo = lambda t: t + retraso                      # noqa: E731
+            dur_prog = dur
+        else:
+            dur_prog = (turnos_mod.minutos_operativos(self.grilla_cambios, inicio, tiempo)
+                        if inicio else 0.0)
+            nuevo_tiempo = lambda t: turnos_mod.avanzar_operativo(   # noqa: E731
+                self.grilla_cambios, t, dur_prog)
 
         # Partir del orden canónico de la cola (= orden de extracción del heap,
         # idéntico a la lista ordenada del esquema anterior) antes de desplazar.
         eventos = [ev for _, _, ev in sorted(cola)]
 
-        # Desplazar in situ los CAMBIO que aún están en la cola (posteriores al
+        # Reprogramar in situ los CAMBIO que aún están en la cola (posteriores al
         # inicio), conservando su posición relativa como hacía el sort anterior.
         for i, ev_s in enumerate(eventos):
             if ev_s.tipo == "CAMBIO" and ev_s.tiempo > inicio:
-                eventos[i] = _EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos)
+                eventos[i] = _EventoSim(ev_s.tipo, nuevo_tiempo(ev_s.tiempo), ev_s.datos)
 
-        # Reintegrar los cambios diferidos durante la parada, ya desplazados.
+        # Reintegrar los cambios diferidos durante la parada, ya reprogramados.
         for ev_s in self._cambios_diferidos:
-            eventos.append(_EventoSim(ev_s.tipo, ev_s.tiempo + retraso, ev_s.datos))
+            eventos.append(_EventoSim(ev_s.tipo, nuevo_tiempo(ev_s.tiempo), ev_s.datos))
         n_dif = len(self._cambios_diferidos)
         self._cambios_diferidos = []
 
@@ -644,9 +675,9 @@ class TallerCilindros:
         self.alertas.append(Alerta(
             tiempo, "INFO",
             f"LÍNEA REANUDADA tras {_fmt_duracion(dur)}; programa de cambios desplazado "
-            f"{_fmt_duracion(dur)} ({n_dif} cambio(s) diferido(s) reprogramado(s))"
+            f"{_fmt_duracion(dur_prog)} ({n_dif} cambio(s) diferido(s) reprogramado(s))"
         ))
-        log(f"  >>> LÍNEA REANUDADA tras {_fmt_duracion(dur)} | programa desplazado {_fmt_duracion(dur)} "
+        log(f"  >>> LÍNEA REANUDADA tras {_fmt_duracion(dur)} | programa desplazado {_fmt_duracion(dur_prog)} "
             f"| {n_dif} cambio(s) diferido(s) <<<")
 
     # ── Consultas de estado ─────────────────────────────────────────────────
@@ -803,6 +834,9 @@ class TallerCilindros:
 
         for m_nombre, maq in self.maquinas.items():
             sn.detalle_maquinas_operativa[m_nombre] = maq.esta_operativa(tiempo)
+            # Estado de falla en este instante (para que la GUI marque demoras por
+            # falla en Vista Real y el Gantt). False siempre con tasa_falla=0.
+            sn.detalle_maquinas_falla[m_nombre] = maq.en_falla(tiempo)
             if maq.ocupada and maq.cilindro_actual:
                 c = maq.cilindro_actual
                 progreso = 0.0
@@ -837,9 +871,11 @@ class TallerCilindros:
         for nombre, maq in self.maquinas.items():
             if maq.ocupada:
                 continue
-            # Fuera de turno: no rectifica. Si hay cola, programar un despertar
-            # en la próxima apertura (sin duplicar) y seguir con otras máquinas.
-            if not maq.esta_operativa(tiempo):
+            # No disponible (fuera de turno o caída por falla): no rectifica. Si
+            # hay cola, programar un despertar en la próxima hora trabajable (sin
+            # duplicar) y seguir con otras máquinas. proxima_apertura cubre tanto
+            # la reapertura de turno como el fin de la falla.
+            if not maq.disponible_para_trabajo(tiempo):
                 if cola and not maq._despertar_programado:
                     apertura = maq.proxima_apertura(tiempo)
                     if apertura is not None:
@@ -1143,12 +1179,31 @@ class TallerCilindros:
 
     # ── Simulación ──────────────────────────────────────────────────────────
 
-    def simular(self, estrategia: str = "mayor_diametro", callback_log: Optional[Callable[[str], None]] = None) -> None:
-        """Ejecuta la simulación completa basada en los eventos programados."""
+    def simular(self, estrategia: str = "mayor_diametro",
+                callback_log: Optional[Callable[[str], None]] = None,
+                seed: Optional[int] = None) -> None:
+        """Ejecuta la simulación completa basada en los eventos programados.
+
+        ``seed`` es la semilla (run-level) que determina la realización de las
+        fallas de máquina (cuándo y cuánto cae cada una para alcanzar su
+        ``tasa_falla``). ``None`` ⇒ sin fallas reproducibles (cada máquina sin
+        seed no falla, ver ``MaquinaRectificadora.en_falla``); para Monte Carlo se
+        barre esta seed (típicamente la misma de la generación de cambios). No se
+        persiste. Con todas las ``tasa_falla == 0`` la seed no tiene efecto.
+        """
         self.estrategia_seleccion = estrategia
         self.alertas.clear()
         self.snapshots.clear()
         self.log_simulacion.clear()
+        # Estado acumulado por corrida de las máquinas: se reinicia para que
+        # volver a llamar simular() sobre la misma instancia no duplique el
+        # historial ni tiempo_total_ocupada_min (lo que inflaría la utilización
+        # y el Gantt). No toca la configuración (tasas, prioridad, turnos,
+        # tasa_falla). La seed de fallas (run-level) se fija acá en cada máquina.
+        for maq in self.maquinas.values():
+            maq.reiniciar_estado_corrida()
+            maq._seed_fallas = seed
+        self._sin_maquina_alertados.clear()
 
         def _log(msg: str) -> None:
             # Se acumula siempre (la GUI lo vuelca tras una corrida en proceso

@@ -26,10 +26,11 @@ class DashboardPanel(QWidget):
         super().__init__(parent)
         self._root = QVBoxLayout(self)
         self._root.setContentsMargins(0, 0, 0, 0)
+        self._cursor_tiempos = []
 
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
         self._grid_host = QWidget()
         host_box = QVBoxLayout(self._grid_host)
         host_box.setContentsMargins(2, 2, 2, 2)
@@ -40,8 +41,8 @@ class DashboardPanel(QWidget):
         self.grid.setVerticalSpacing(14)
         host_box.addLayout(self.grid)
         host_box.addStretch(1)  # cards al tope, el sobrante queda debajo (como el HTML).
-        self.scroll.setWidget(self._grid_host)
-        self._root.addWidget(self.scroll)
+        self.scroll_area.setWidget(self._grid_host)
+        self._root.addWidget(self.scroll_area)
 
         # Gráficos (se crean una vez; render() les pasa datos).
         self.chart_estados = StackedAreaChart()
@@ -80,6 +81,7 @@ class DashboardPanel(QWidget):
             (tema.TIPO_RECT_COLORS_DASH["produccion"], "Producción"),
             (tema.TIPO_RECT_COLORS_DASH["desbaste"], "Desbaste"),
             (tema.DASH_PARADA, "Parada (turno)"),
+            (tema.DASH_FALLA, "Falla"),
         ])
 
         self.grid.addWidget(self.card_estados, 0, 0)
@@ -97,6 +99,7 @@ class DashboardPanel(QWidget):
             return
 
         data = extraer_datos_dashboard(taller)
+        self._cursor_tiempos = list(data.tiempos)
         self.chart_estados.set_data(
             data.tiempos, data.estados, data.series_estado, data.colores_estado
         )
@@ -106,12 +109,13 @@ class DashboardPanel(QWidget):
         self.chart_util.set_data(data.maquinas, data.util_disponible, data.util_neta)
         self.chart_gantt.set_data(
             data.maquinas, data.gantt, data.paradas_turno,
-            data.t0, data.t1, tema.TIPO_RECT_COLORS_DASH,
+            data.t0, data.t1, tema.TIPO_RECT_COLORS_DASH, data.tramos_falla,
         )
         self.set_cursor(0, len(data.tiempos))
 
     def _set_empty(self) -> None:
         """Vacía los gráficos dejando las cards (título + leyenda + área vacía)."""
+        self._cursor_tiempos = []
         self.chart_estados.set_data([], [], {}, {})
         self.chart_buffer.set_data([], [], [], [])
         self.chart_util.set_data([], {}, {})
@@ -119,10 +123,17 @@ class DashboardPanel(QWidget):
 
     def set_cursor(self, idx: int, total: int) -> None:
         """Marca el snapshot actual con el cursor del replay en los gráficos temporales."""
-        if total <= 1:
+        if not self._cursor_tiempos:
+            frac: float | None = 0.0 if total <= 1 else max(0.0, min(1.0, idx / (total - 1)))
+        elif len(self._cursor_tiempos) <= 1:
             frac: float | None = 0.0
         else:
-            frac = max(0.0, min(1.0, idx / (total - 1)))
+            i = max(0, min(int(idx), len(self._cursor_tiempos) - 1))
+            t0 = self._cursor_tiempos[0]
+            t1 = self._cursor_tiempos[-1]
+            t = self._cursor_tiempos[i]
+            span = (t1 - t0).total_seconds()
+            frac = 0.0 if span <= 0 else max(0.0, min(1.0, (t - t0).total_seconds() / span))
         self.chart_estados.set_cursor_frac(frac)
         self.chart_buffer.set_cursor_frac(frac)
         self.chart_gantt.set_cursor_frac(frac)

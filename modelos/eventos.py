@@ -67,5 +67,6 @@ class Snapshot:
         self.detalle_crc: Dict[int, List[Dict[str, Any]]] = {}          # {jaula_id: [{"id", "d"}]}
         self.detalle_maquinas: Dict[str, Optional[Dict[str, Any]]] = {} # {maq_id: {"id","d","progreso"} | None}
         self.detalle_maquinas_operativa: Dict[str, bool] = {}           # {maq_id: dentro de turno operativo}
+        self.detalle_maquinas_falla: Dict[str, bool] = {}               # {maq_id: caída por falla en este instante}
         self.detalle_cola_rectificado: List[Dict[str, Any]] = []        # [{"id", "d"}]
         self.detalle_enfriando: List[Dict[str, Any]] = []               # [{"id", "d"}]

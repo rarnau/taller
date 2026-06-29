@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from config import tema as tk_theme
+from gui_qt.format_utils import formato_horizonte
 from gui_qt.widgets import SummaryCard, UtilCard
 from modelos.kpis import calcular_kpis
 
@@ -44,7 +45,7 @@ def _format_value(key: str, value: Any) -> str:
         if key == "desgaste_medio_mm":
             return f"{value:.2f} mm"
         if key == "horizonte_simulacion_h":
-            return f"{value:.1f}"
+            return formato_horizonte(value)
         return f"{value:.2f}"
     return str(value)
 

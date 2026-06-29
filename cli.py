@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Modo headless: simulación y gestión de configuración desde la línea de comandos.
 
-No importa Tkinter ni nada de ``gui/``, por lo que corre en entornos sin
+No importa PySide6/Qt ni nada de ``gui_qt/``, por lo que corre en entornos sin
 display (servidores, CI, lotes de estadística). La función ``ejecutar_simulacion``
 y el helper ``construir_taller`` son reutilizables de forma programática (p. ej.
 por un futuro generador de cambios o un runner de miles de simulaciones en
@@ -85,16 +85,20 @@ def construir_taller_desde_dataframes(cfg: Dict[str, Any], stock_df: "pd.DataFra
 
 def simular_desde_dataframes(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
                              cambios_df: "pd.DataFrame",
-                             estrategia: str = "mayor_diametro") -> TallerCilindros:
+                             estrategia: str = "mayor_diametro",
+                             seed: Optional[int] = None) -> TallerCilindros:
     """Construye el taller desde DataFrames, simula y devuelve el taller resultante.
 
     Función **a nivel de módulo** y sin GUI: es picklable, así que la GUI la corre
     en un proceso aparte (``ProcessPoolExecutor``) para no congelar el event loop
-    de Tkinter (el GIL no alcanza con un hilo para una simulación CPU-bound). El
+    de Qt (el GIL no alcanza con un hilo para una simulación CPU-bound). El
     taller devuelto (snapshots, cilindros, máquinas, alertas) viaja por pickle.
+    ``seed`` determina la realización de fallas de máquina (ver
+    ``TallerCilindros.simular``); en Monte Carlo suele ser la misma seed que generó
+    el ``cambios_df``.
     """
     taller = construir_taller_desde_dataframes(cfg, stock_df, cambios_df)
-    taller.simular(estrategia=estrategia, callback_log=None)
+    taller.simular(estrategia=estrategia, callback_log=None, seed=seed)
     return taller
 
 
@@ -126,45 +130,66 @@ def ctx_paralelo() -> "multiprocessing.context.BaseContext":
 
 
 def init_worker_simulacion(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
-                           estrategia: str = "mayor_diametro") -> None:
-    """*Initializer* del pool: fija el stock+config+estrategia compartidos del worker.
+                           estrategia: str = "mayor_diametro",
+                           seed: Optional[int] = None) -> None:
+    """*Initializer* del pool: fija el stock+config+estrategia(+seed) compartidos del worker.
 
     Se ejecuta una vez por proceso del pool; luego cada tarea
     (``simular_cambios_worker``) reusa estos valores sin volver a serializarlos.
+    ``seed`` es la seed de fallas **compartida** por defecto; ``simular_cambios_worker``
+    con una tarea ``(cambios_df, seed)`` la sobreescribe por corrida (Monte Carlo).
     """
     _WORKER_STATE["cfg"] = cfg
     _WORKER_STATE["stock_df"] = stock_df
     _WORKER_STATE["estrategia"] = estrategia
+    _WORKER_STATE["seed"] = seed
 
 
-def simular_cambios_worker(cambios_df: "pd.DataFrame") -> TallerCilindros:
-    """Tarea del pool: simula con el stock/config/estrategia del worker + ``cambios_df``.
+def simular_cambios_worker(tarea: Any) -> TallerCilindros:
+    """Tarea del pool: simula con el stock/config/estrategia del worker + la tarea.
 
-    Requiere que ``init_worker_simulacion`` haya corrido en este proceso (lo hace
-    el ``initializer`` del ``ProcessPoolExecutor``). Devuelve el taller resultante.
+    ``tarea`` puede ser el ``cambios_df`` solo (usa la seed compartida del
+    initializer, p. ej. la GUI con seed=None) o una tupla ``(cambios_df, seed)``
+    para barridos de Monte Carlo donde cada corrida lleva su propia seed de fallas
+    (típicamente la misma que generó ese ``cambios_df``). Requiere que
+    ``init_worker_simulacion`` haya corrido en este proceso. Devuelve el taller.
     """
+    if isinstance(tarea, tuple):
+        cambios_df, seed = tarea
+    else:
+        cambios_df, seed = tarea, _WORKER_STATE.get("seed")
     return simular_desde_dataframes(
         _WORKER_STATE["cfg"], _WORKER_STATE["stock_df"], cambios_df,
-        _WORKER_STATE["estrategia"])
+        _WORKER_STATE["estrategia"], seed=seed)
 
 
 def batch_simular(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
                   lista_cambios: List["pd.DataFrame"],
                   estrategia: str = "mayor_diametro",
-                  max_workers: Optional[int] = None) -> List[TallerCilindros]:
+                  max_workers: Optional[int] = None,
+                  seeds: Optional[List[Optional[int]]] = None) -> List[TallerCilindros]:
     """Corre N simulaciones en paralelo: mismo stock+config+estrategia, distintos cambios.
 
     El stock/config/estrategia se cargan **una vez por worker** (initializer) y cada
     tarea solo manda su ``cambios_df``. Devuelve la lista de tallers en el **mismo
     orden** que ``lista_cambios``. Pensado para barridos de seeds del generador
     (combinar con ``gencambios.generar_cambios`` para producir cada ``cambios_df``).
+
+    ``seeds`` (opcional, alineada con ``lista_cambios``) fija la seed de **fallas**
+    por corrida — la base de Monte Carlo: cada simulación realiza sus fallas con la
+    misma seed que generó su ``cambios_df``. Si se omite, todas comparten ``None``
+    (sin fallas reproducibles).
     """
     if not lista_cambios:
         return []
+    if seeds is not None and len(seeds) != len(lista_cambios):
+        raise ValueError("seeds debe tener el mismo largo que lista_cambios.")
+    tareas: List[Any] = (list(zip(lista_cambios, seeds)) if seeds is not None
+                         else list(lista_cambios))
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx_paralelo(),
                              initializer=init_worker_simulacion,
                              initargs=(cfg, stock_df, estrategia)) as ex:
-        return list(ex.map(simular_cambios_worker, lista_cambios))
+        return list(ex.map(simular_cambios_worker, tareas))
 
 
 def generar_y_construir(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
@@ -184,11 +209,14 @@ def ejecutar_simulacion(ruta_excel: str, estrategia: str = "mayor_diametro",
                         config_path: Optional[str] = None,
                         callback_log: Optional[Callable[[str], None]] = print,
                         tiempo_enfriado: Optional[float] = None,
-                        max_iteraciones: Optional[int] = None) -> TallerCilindros:
+                        max_iteraciones: Optional[int] = None,
+                        seed: Optional[int] = None) -> TallerCilindros:
     """Carga datos + configuración, ejecuta la simulación y devuelve el taller.
 
     Replica la orquestación de ``App._simular()`` pero sin GUI. ``tiempo_enfriado``
     y ``max_iteraciones``, si se indican, tienen prioridad sobre el valor del JSON.
+    ``seed`` determina la realización de las fallas de máquina (ver
+    ``TallerCilindros.simular``); ``None`` ⇒ sin fallas reproducibles.
     """
     cfg = _cargar_config(config_path)
     if tiempo_enfriado is not None:
@@ -202,7 +230,7 @@ def ejecutar_simulacion(ruta_excel: str, estrategia: str = "mayor_diametro",
         for aviso in taller.avisos_carga:
             callback_log(aviso)
 
-    taller.simular(estrategia=estrategia, callback_log=callback_log)
+    taller.simular(estrategia=estrategia, callback_log=callback_log, seed=seed)
     return taller
 
 
@@ -259,7 +287,8 @@ def _cmd_simular(args) -> int:
         taller = ejecutar_simulacion(args.excel, estrategia=args.estrategia,
                                      config_path=args.config, callback_log=callback,
                                      tiempo_enfriado=args.tiempo_enfriado,
-                                     max_iteraciones=args.max_iteraciones)
+                                     max_iteraciones=args.max_iteraciones,
+                                     seed=args.seed_fallas)
     except Exception as e:
         print(f"Error al ejecutar la simulación: {e}", file=sys.stderr)
         return 1
@@ -362,23 +391,25 @@ def _cmd_config_maquina(args, cfg) -> int:
         for m in obtener_maquinas(cfg):
             t = m.get("tasas", {})
             prod, desb = t.get("produccion", {}), t.get("desbaste", {})
+            falla = float(m.get("tasa_falla", 0.0) or 0.0)
+            falla_txt = f"  falla={falla*100:.0f}%" if falla > 0 else ""
             print(f"  {m['nombre']:<10} prioridad={m.get('prioridad','-'):<11} "
                   f"prod={prod.get('mm','?')}mm/{prod.get('tiempo_min','?')}min  "
                   f"desb={desb.get('mm','?')}mm/{desb.get('tiempo_min','?')}min  "
-                  f"turnos={turnos_mod.resumen(m.get('turnos'))}")
+                  f"turnos={turnos_mod.resumen(m.get('turnos'))}{falla_txt}")
         return 0
     if accion == "add":
         cfgmod.add_maquina(cfg, args.nombre, prod_mm=args.prod_mm, prod_min=args.prod_min,
                            desb_mm=args.desb_mm, desb_min=args.desb_min,
                            prioridad=args.prioridad or "produccion",
-                           turnos=_resolver_turnos(args))
+                           turnos=_resolver_turnos(args), tasa_falla=args.tasa_falla)
         guardar_config(cfg)
         print(f"Máquina '{args.nombre}' agregada.")
         return 0
     if accion == "set":
         cfgmod.set_maquina(cfg, args.nombre, prod_mm=args.prod_mm, prod_min=args.prod_min,
                            desb_mm=args.desb_mm, desb_min=args.desb_min, prioridad=args.prioridad,
-                           turnos=_resolver_turnos(args))
+                           turnos=_resolver_turnos(args), tasa_falla=args.tasa_falla)
         guardar_config(cfg)
         print(f"Máquina '{args.nombre}' actualizada.")
         return 0
@@ -581,6 +612,9 @@ def _construir_parser() -> argparse.ArgumentParser:
                        help="Horas de enfriado (pisa la config).")
     p_sim.add_argument("--max-iteraciones", type=int, metavar="N",
                        help="Tope de iteraciones del bucle (pisa la config).")
+    p_sim.add_argument("--seed-fallas", type=int, metavar="SEED",
+                       help="Seed que realiza las fallas de máquina (tasa_falla). "
+                            "Reproducible; sin esto no hay fallas. Base de Monte Carlo.")
     p_sim.set_defaults(func=_cmd_simular)
 
     # config
@@ -624,6 +658,9 @@ def _construir_parser() -> argparse.ArgumentParser:
                        help="Esquema de trabajo: 7 grupos lun..dom de 3 bits T1T2T3, "
                             "p. ej. '111 111 111 111 111 110 000'.")
     p_maq.add_argument("--turnos-preset", choices=list(turnos_mod.PRESETS))
+    p_maq.add_argument("--tasa-falla", type=float, metavar="FRAC",
+                       help="Tasa de falla: fracción [0,1] del tiempo disponible perdido "
+                            "por fallas (0 la quita). Se realiza con la --seed-fallas de simular.")
 
     p_jau = csub.add_parser("jaula", help="Gestiona rangos por jaula (list/set/remove).")
     p_jau.add_argument("accion", choices=["list", "set", "remove"])

@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
-    QSizePolicy,
 )
 
 from config.persistencia import (
@@ -38,6 +37,7 @@ from config.persistencia import (
     obtener_max_iteraciones,
     obtener_maquinas,
     obtener_rangos,
+    obtener_tasa_falla,
     obtener_tiempo_enfriado,
     problemas_coherencia,
     set_config_global,
@@ -349,7 +349,7 @@ class ConfigPanel(QWidget):
         note.setObjectName("Muted")
         col.addWidget(note)
 
-        self.tbl_machines = StyledTableWidget(0, 8, self)
+        self.tbl_machines = StyledTableWidget(0, 9, self)
         self.tbl_machines.setObjectName("ConfigTable")
         self.tbl_machines.setHorizontalHeaderLabels(
             [
@@ -360,6 +360,7 @@ class ConfigPanel(QWidget):
                 "Desb min",
                 "Prioridad",
                 "Turnos",
+                "Falla %",
                 "",
             ]
         )
@@ -380,13 +381,15 @@ class ConfigPanel(QWidget):
         hdr.setSectionResizeMode(5, hdr.ResizeMode.Fixed)
         hdr.setSectionResizeMode(6, hdr.ResizeMode.Fixed)
         hdr.setSectionResizeMode(7, hdr.ResizeMode.Fixed)
+        hdr.setSectionResizeMode(8, hdr.ResizeMode.Fixed)
         self.tbl_machines.setColumnWidth(1, 110)
         self.tbl_machines.setColumnWidth(2, 110)
         self.tbl_machines.setColumnWidth(3, 110)
         self.tbl_machines.setColumnWidth(4, 110)
         self.tbl_machines.setColumnWidth(5, 170)
         self.tbl_machines.setColumnWidth(6, 160)
-        self.tbl_machines.setColumnWidth(7, 34)
+        self.tbl_machines.setColumnWidth(7, 90)
+        self.tbl_machines.setColumnWidth(8, 34)
         col.addWidget(self.tbl_machines)
 
         return card
@@ -467,10 +470,10 @@ class ConfigPanel(QWidget):
             if not nombre:
                 raise ValueError(f"Fila maquina {row + 1}: 'Nombre' no puede estar vacio.")
 
-            prod_mm = self._parse_float_machine(row, 1, "Prod mm")
-            prod_min = self._parse_float_machine(row, 2, "Prod min")
-            desb_mm = self._parse_float_machine(row, 3, "Desb mm")
-            desb_min = self._parse_float_machine(row, 4, "Desb min")
+            prod_mm = self._parse_float(self.tbl_machines, row, 1, "Prod mm")
+            prod_min = self._parse_float(self.tbl_machines, row, 2, "Prod min")
+            desb_mm = self._parse_float(self.tbl_machines, row, 3, "Desb mm")
+            desb_min = self._parse_float(self.tbl_machines, row, 4, "Desb min")
             prioridad = self._machine_priority_value(row)
             if prioridad not in {"produccion", "desbaste"}:
                 raise ValueError(
@@ -488,13 +491,20 @@ class ConfigPanel(QWidget):
             turnos = self._machine_turnos_value(row)
             if turnos is not None and not turnos_mod.es_completo(turnos):
                 maq["turnos"] = turnos
+            tasa_pct = self._parse_float(self.tbl_machines, row, 7, "Falla %")
+            if not (0.0 <= tasa_pct <= 100.0):
+                raise ValueError(
+                    f"Fila maquina {row + 1}: 'Falla %' debe estar entre 0 y 100."
+                )
+            if tasa_pct > 0:
+                maq["tasa_falla"] = round(tasa_pct / 100.0, 4)
             new_cfg["maquinas"].append(maq)
 
         new_cfg["rangos"] = []
         for row in range(self.tbl_ranges.rowCount()):
             jaula = int(self.tbl_ranges.item(row, 0).text())
-            desde = self._parse_float_cell(row, 1, "Desde")
-            hasta = self._parse_float_cell(row, 2, "Hasta")
+            desde = self._parse_float(self.tbl_ranges, row, 1, "Desde")
+            hasta = self._parse_float(self.tbl_ranges, row, 2, "Hasta")
             perfil_txt = self.tbl_ranges.item(row, 3).text().strip()
             set_rango(
                 new_cfg,
@@ -576,6 +586,8 @@ class ConfigPanel(QWidget):
             self._set_machine_text_editor(i, 4, str(desb.get("tiempo_min", "")), align_center=True)
             self._set_machine_priority_editor(i, str(m.get("prioridad", "produccion")))
             self._set_machine_turnos_editor(i, m.get("turnos"))
+            tasa_pct = obtener_tasa_falla(self._cfg, str(m.get("nombre", ""))) * 100.0
+            self._set_machine_text_editor(i, 7, f"{tasa_pct:.1f}", align_center=True)
             self._set_machine_remove_button(i)
         self.tbl_machines.blockSignals(False)
         self._adjust_machines_table_height()
@@ -590,6 +602,7 @@ class ConfigPanel(QWidget):
         self._set_machine_text_editor(row, 4, "480", align_center=True)
         self._set_machine_priority_editor(row, "produccion")
         self._set_machine_turnos_editor(row, None)
+        self._set_machine_text_editor(row, 7, "0", align_center=True)
         self._set_machine_remove_button(row)
         self._adjust_machines_table_height()
 
@@ -626,26 +639,18 @@ class ConfigPanel(QWidget):
             self.tbl_ranges.setItem(i, 2, QTableWidgetItem(data["hasta"]))
             self.tbl_ranges.setItem(i, 3, QTableWidgetItem(data["perfil"]))
 
-    def _parse_float_cell(self, row: int, col: int, title: str) -> float:
-        item = self.tbl_ranges.item(row, col)
-        raw = item.text().strip() if item is not None else ""
+    def _parse_float(self, table: QTableWidget, row: int, col: int, title: str) -> float:
+        """Lee y valida un float de una celda (maneja QLineEdit o item via _cell_text).
+
+        Fuente única usada por la tabla de máquinas y la de rangos.
+        """
+        raw = self._cell_text(table, row, col)
         if not raw:
             raise ValueError(f"Fila {row + 1}: '{title}' no puede estar vacio.")
         try:
             return float(raw)
         except ValueError as exc:
             raise ValueError(f"Fila {row + 1}: '{title}' invalido ('{raw}').") from exc
-
-    def _parse_float_machine(self, row: int, col: int, title: str) -> float:
-        raw = self._cell_text(self.tbl_machines, row, col)
-        if not raw:
-            raise ValueError(f"Fila maquina {row + 1}: '{title}' no puede estar vacio.")
-        try:
-            return float(raw)
-        except ValueError as exc:
-            raise ValueError(
-                f"Fila maquina {row + 1}: '{title}' invalido ('{raw}')."
-            ) from exc
 
     def _cell_text(self, table: QTableWidget, row: int, col: int) -> str:
         w = table.cellWidget(row, col)
@@ -706,24 +711,7 @@ class ConfigPanel(QWidget):
         btn.setObjectName("ConfigDeleteButton")
         btn.setFixedSize(24, 24)
         btn.clicked.connect(self._remove_machine_from_sender)
-        self.tbl_machines.setCellWidget(row, 7, btn)
-
-    def _set_machine_turnos_button(self, row: int) -> None:
-        """Inserta boton para editar turnos custom de la fila."""
-        host = QWidget(self.tbl_machines)
-        lay = QHBoxLayout(host)
-        lay.setContentsMargins(4, 4, 4, 4)
-        lay.setSpacing(0)
-
-        btn = QPushButton("Editar")
-        btn.setObjectName("ConfigInlineButton")
-        btn.setMinimumWidth(82)
-        btn.setMaximumHeight(28)
-        btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        btn.clicked.connect(self._edit_machine_turnos_from_sender)
-
-        lay.addWidget(btn)
-        self.tbl_machines.setCellWidget(row, 7, host)
+        self.tbl_machines.setCellWidget(row, 8, btn)
 
     def _edit_machine_turnos_from_sender(self) -> None:
         """Resuelve la fila del boton presionado y abre editor custom."""
@@ -739,20 +727,25 @@ class ConfigPanel(QWidget):
         sender = self.sender()
         if sender is None:
             return
-        row = self._find_widget_row(sender, 7)
+        row = self._find_widget_row(sender, 8)
         if row < 0:
             return
         self.tbl_machines.removeRow(row)
         self._adjust_machines_table_height()
 
     def _edit_machine_turnos(self, row: int) -> None:
-        """Abre dialogo 7x3 y persiste en el combo como turno custom."""
+        """Abre dialogo 7x3 y persiste en el combo como turno custom.
+
+        El combo que arma ``_set_machine_turnos_editor`` ya queda en la col 6 con
+        el turno custom en su ``currentData`` y su propio botón ⚙, así que el
+        guardado (``_machine_turnos_value``) lo encuentra y persiste. No se debe
+        sobrescribir la celda con otro widget o se pierde el turno editado.
+        """
         base = self._machine_turnos_value(row)
         ok, turnos = TurnosDialog.edit(base, self)
         if not ok or turnos is None:
             return
         self._set_machine_turnos_editor(row, turnos)
-        self._set_machine_turnos_button(row)
 
     def _machine_turnos_value(self, row: int) -> dict | None:
         """Convierte el valor de combo a dict de turnos persistible o None (24/7)."""

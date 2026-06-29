@@ -220,27 +220,60 @@ class MachineCard(QFrame):
         self.state_label.setObjectName("Muted")
         col.addWidget(self.state_label)
 
-    def set_state(self, data: Optional[dict], operativa: bool = True) -> None:
-        """Pinta estado de maquina: ocupada, libre operativa o fuera de turno."""
-        if data:
+    def set_state(self, data: Optional[dict], operativa: bool = True,
+                  en_falla: bool = False) -> None:
+        """Pinta estado de maquina: fuera de turno, en falla, ocupada o libre operativa.
+
+        Precedencia ``off → falla → busy → idle``: **fuera de turno manda** (la
+        máquina no trabaja aunque tenga un cilindro montado/pausado); luego la falla
+        (es 'del tiempo disponible', solo aplica en turno) — si además hay un cilindro
+        montado se muestra "Rectificando · falla" conservando el progreso, si no "En
+        falla"; luego ocupada (rectificando) y por último libre operativa.
+
+        Tanto "off" como "falla" son *cylinder-aware*: si la máquina quedó a mitad de
+        un rectificado al cerrar el turno (o al caer en falla), se conserva el cilindro
+        montado y su progreso **congelado**, marcando además la parada por turno/falla
+        (consistente con el Gantt, que sombrea ese tramo como parada).
+        """
+        if not operativa:
+            self.setProperty("mode", "off")
+            if data:
+                # Cilindro montado pero pausado por fin de turno: se conserva el
+                # progreso (congelado) y se marca que está parada por turno.
+                prog = max(0, min(100, int(data.get("progreso", 0))))
+                self.progress.setValue(prog)
+                self.meta_label.setText(f"⏸ {data['id']} · {float(data['d']):.1f} mm")
+                self.state_label.setText(f"Fuera de turno · {data['id']} ({prog}%)")
+            else:
+                self.progress.setValue(0)
+                self.meta_label.setText("● Fuera de turno")
+                self.state_label.setText("Fuera de turno")
+            self.state_label.setObjectName("MachineOff")
+        elif en_falla:
+            self.setProperty("mode", "falla")
+            if data:
+                prog = max(0, min(100, int(data.get("progreso", 0))))
+                self.progress.setValue(prog)
+                self.meta_label.setText(f"{data['id']} · {float(data['d']):.1f} mm")
+                self.state_label.setText(f"Rectificando · falla ({prog}%)")
+            else:
+                self.progress.setValue(0)
+                self.meta_label.setText("● En falla")
+                self.state_label.setText("En falla")
+            self.state_label.setObjectName("MachineFalla")
+        elif data:
             self.setProperty("mode", "busy")
             prog = max(0, min(100, int(data.get("progreso", 0))))
             self.progress.setValue(prog)
             self.meta_label.setText(f"{data['id']} · {float(data['d']):.1f} mm")
             self.state_label.setText(f"Rectificando · {prog}%")
             self.state_label.setObjectName("MachineBusy")
-        elif operativa:
+        else:
             self.setProperty("mode", "idle")
             self.progress.setValue(0)
             self.meta_label.setText("● Libre · operativa")
             self.state_label.setText("Libre · operativa")
             self.state_label.setObjectName("MachineGood")
-        else:
-            self.setProperty("mode", "off")
-            self.progress.setValue(0)
-            self.meta_label.setText("● Fuera de turno")
-            self.state_label.setText("Fuera de turno")
-            self.state_label.setObjectName("MachineOff")
 
         self.style().unpolish(self)
         self.style().polish(self)
@@ -508,15 +541,19 @@ class RealTimeView(QWidget):
 
         # 4) Estado puntual de rectificadoras.
         operativas = getattr(snapshot, "detalle_maquinas_operativa", {})
+        fallas = getattr(snapshot, "detalle_maquinas_falla", {})
         details = getattr(snapshot, "detalle_maquinas", {})
         for name, card in self.machine_cards.items():
-            card.set_state(details.get(name), bool(operativas.get(name, True)))
+            card.set_state(details.get(name), bool(operativas.get(name, True)),
+                           bool(fallas.get(name, False)))
 
         conteos = getattr(snapshot, "conteo_por_estado", {})
-        total = sum(int(v) for v in conteos.values()) if conteos else 0
+        bajas = int(getattr(snapshot, "cantidad_bajas", 0))
+        total = (sum(int(v) for v in conteos.values()) if conteos else 0) - bajas
         self.lbl_total.setText(f"{total} cilindros")
         self.lbl_paradas.setText(f"{len(paradas)} paradas")
-        self.lbl_alertas.setText(f"{self._alertas_criticas} alerta crítica")
+        sufijo = "alerta crítica" if self._alertas_criticas == 1 else "alertas críticas"
+        self.lbl_alertas.setText(f"{self._alertas_criticas} {sufijo}")
         if self._alertas_criticas > 0:
             self.lbl_alertas.setObjectName("StatPillAlert")
         else:

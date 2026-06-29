@@ -307,16 +307,18 @@ class GanttChart(QWidget):
         self._maquinas: List[str] = []
         self._gantt: Dict[str, List[Tuple[datetime, datetime, str]]] = {}
         self._paradas: Dict[str, List[Tuple[datetime, datetime]]] = {}
+        self._fallas: Dict[str, List[Tuple[datetime, datetime]]] = {}
         self._colores: Dict[str, str] = {}
         self._t0: datetime | None = None
         self._t1: datetime | None = None
         self._cursor_frac: float | None = None
         self.setMinimumHeight(120)
 
-    def set_data(self, maquinas, gantt, paradas, t0, t1, colores_tipo) -> None:
+    def set_data(self, maquinas, gantt, paradas, t0, t1, colores_tipo, fallas=None) -> None:
         self._maquinas = list(maquinas)
         self._gantt = gantt
         self._paradas = paradas
+        self._fallas = fallas or {}
         self._colores = colores_tipo
         self._t0, self._t1 = t0, t1
         n = max(1, len(self._maquinas))
@@ -369,6 +371,11 @@ class GanttChart(QWidget):
             for ini, fin in self._paradas.get(maq, []):
                 x0, x1 = x_of(ini), x_of(fin)
                 p.setBrush(QBrush(_qc(tema.DASH_PARADA)))
+                p.drawRect(QRectF(x0, row_y, max(1.0, x1 - x0), self._ROW_H))
+            # Fallas (rojo menos oscuro que la parada; disjuntas de las paradas).
+            for ini, fin in self._fallas.get(maq, []):
+                x0, x1 = x_of(ini), x_of(fin)
+                p.setBrush(QBrush(_qc(tema.DASH_FALLA)))
                 p.drawRect(QRectF(x0, row_y, max(1.0, x1 - x0), self._ROW_H))
             # Gridlines verticales (ticks).
             for k in range(6):

@@ -7,7 +7,7 @@ sin romper el motor.
 """
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -277,3 +277,53 @@ def test_kpis_descomposicion_con_turno_restringido():
         assert abs(disp[nombre] / 100 * neta[nombre] - global_util) < 1e-6
     # Con turnos cerrados la disponibilidad es estrictamente < 100 en todas.
     assert all(disp[m] < 100.0 - 1e-6 for m in disp)
+
+
+# ── Tiempo laborable de la línea (minutos_operativos / avanzar_operativo) ─────
+
+_GRID_LV = T.expandir({d: ([True, True, True] if i < 5 else [False, False, False])
+                       for i, d in enumerate(T.DIAS)})
+
+
+def test_minutos_operativos_none_es_reloj():
+    a, b = datetime(2024, 1, 1, 0, 0), datetime(2024, 1, 1, 5, 30)
+    assert T.minutos_operativos(None, a, b) == 5.5 * 60
+    assert T.minutos_operativos(None, b, a) == 0.0  # intervalo vacío
+
+
+def test_avanzar_operativo_none_es_reloj():
+    t = datetime(2024, 1, 3, 9, 0)
+    assert T.avanzar_operativo(None, t, 125) == t + timedelta(minutes=125)
+    assert T.avanzar_operativo(None, t, 0) == t
+
+
+def test_avanzar_operativo_roundtrip_consume_solo_laborable():
+    """avanzar consume exactamente N min laborables desde el snap de inicio.
+
+    Invariante independiente del wraparound de T3:
+    minutos_operativos(grid, snap(t), avanzar(t, N)) == N.
+    """
+    for t in (datetime(2024, 1, 5, 22, 0),   # viernes (con derrame T3 al sábado)
+              datetime(2024, 1, 6, 3, 0),     # madrugada sábado
+              datetime(2024, 1, 7, 12, 0),    # domingo (fuera de turno)
+              datetime(2024, 1, 8, 10, 0)):   # lunes operativo
+        for n in (30, 180, 600, 3000):
+            r = T.avanzar_operativo(_GRID_LV, t, n)
+            start = T.proximo_inicio_operativo(_GRID_LV, t)
+            assert start is not None
+            assert abs(T.minutos_operativos(_GRID_LV, start, r) - n) < 1e-6
+
+
+def test_avanzar_operativo_snapea_fuera_de_turno():
+    """Si arranca fuera de turno, el resultado cae dentro de una hora operativa."""
+    dom = datetime(2024, 1, 7, 12, 0)  # domingo, fuera de turno
+    r = T.avanzar_operativo(_GRID_LV, dom, 0)
+    assert _GRID_LV[r.weekday()][r.hour]            # snap a hora operativa
+    assert r == T.proximo_inicio_operativo(_GRID_LV, dom)
+
+
+def test_avanzar_operativo_regimen_apagado_degrada_a_reloj():
+    grid_off = T.expandir(T.PRESETS["off"])
+    t = datetime(2024, 1, 3, 9, 0)
+    assert T.avanzar_operativo(grid_off, t, 120) == t + timedelta(minutes=120)
+    assert T.minutos_operativos(grid_off, t, t + timedelta(hours=5)) == 0.0

@@ -40,7 +40,13 @@ from config.persistencia import (
     set_generador_cambios,
 )
 from modelos import turnos as turnos_mod
-from modelos.generador_cambios import GENERADORES_CAMBIOS, ajustar_modelo, generar_cambios
+from modelos.generador_cambios import (
+    GENERADORES_CAMBIOS,
+    ajustar_modelo,
+    generar_cambios,
+    resolver_seed,
+)
+from gui_qt.format_utils import formato_horizonte
 from gui_qt.widgets.generation_timeline_qt import GenerationTimelineChart
 from gui_qt.widgets import LabeledFieldRow, SectionCard
 
@@ -52,7 +58,7 @@ class GenerationPanel(QWidget):
         self,
         cfg: Dict[str, Any],
         on_cfg_saved: Callable[[Dict[str, Any]], None] | None = None,
-        on_cambios_generated: Callable[[pd.DataFrame], None] | None = None,
+        on_cambios_generated: Callable[[pd.DataFrame, int | None], None] | None = None,
         on_go_to_snapshot: Callable[[int], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -70,6 +76,7 @@ class GenerationPanel(QWidget):
             if isinstance(clave_ini, str) and clave_ini:
                 self._modelos_por_clave[clave_ini] = self._modelo
         self._generated_df: pd.DataFrame | None = None
+        self._generated_seed: int | None = None
         self._sim_snapshots: list[Any] = []
 
         # === SCROLL AREA: evita que el contenido se solape ===
@@ -650,11 +657,14 @@ class GenerationPanel(QWidget):
         try:
             inicio = datetime.strptime(self.dt_start.date().toString("yyyy-MM-dd"), "%Y-%m-%d")
             fin = datetime.strptime(self.dt_end.date().toString("yyyy-MM-dd"), "%Y-%m-%d")
+            # Resolver la seed una sola vez (concreta aun si es -1/aleatoria) para
+            # poder reusarla en la realización de fallas de la simulación.
             seed = self.sp_seed.value()
+            self._generated_seed = resolver_seed(None if seed < 0 else int(seed))
             self._generated_df = generar_cambios(
                 self._modelo,
                 self._cfg,
-                seed=None if seed < 0 else int(seed),
+                seed=self._generated_seed,
                 inicio=inicio,
                 fin=fin,
                 horizonte_dias=7,
@@ -669,9 +679,10 @@ class GenerationPanel(QWidget):
 
         self._render_timeline(self._generated_df)
         self._update_param_cards()
-        # Notifica al MainWindow para activar "Generación" en verde
+        # Notifica al MainWindow (activa "Generación" en verde) y pasa la seed
+        # concreta para que la simulación realice las fallas con esa misma seed.
         if self._on_cambios_generated is not None:
-            self._on_cambios_generated(self._generated_df.copy())
+            self._on_cambios_generated(self._generated_df.copy(), self._generated_seed)
 
     def _load_changes_excel(self) -> None:
         """Carga Programa_Cambios desde un archivo Excel."""
@@ -696,18 +707,30 @@ class GenerationPanel(QWidget):
 
         self._render_timeline(self._generated_df)
         self._update_param_cards()
-        # Notifica al MainWindow para activar "Generación" en verde
+        # Cambios cargados de Excel: sin seed de generación ⇒ sin fallas reproducibles.
+        self._generated_seed = None
         if self._on_cambios_generated is not None:
-            self._on_cambios_generated(self._generated_df.copy())
+            self._on_cambios_generated(self._generated_df.copy(), None)
+
+    def _semilla_str(self) -> str:
+        """Texto de la card Semilla: número fijo, o el resuelto si fue aleatoria."""
+        seed_val = self.sp_seed.value()
+        if seed_val >= 0:
+            return str(seed_val)
+        if self._generated_seed is not None:
+            return f"{self._generated_seed} (aleatoria)"
+        return "aleatoria"
 
     def _update_param_cards(self) -> None:
         """Actualiza los parametros mostrados en las tarjetas (Semilla, Nº cambios, etc)."""
         gc = obtener_generador_cambios(self._cfg)
         if self._generated_df is None or self._generated_df.empty:
+            # Sin cambios generados: horizonte = ventana configurada (no el 7 fijo).
+            dias_cfg = max(1, self.dt_start.date().daysTo(self.dt_end.date()))
             params = [
-                ("Semilla", str(self.sp_seed.value()) if self.sp_seed.value() >= 0 else "aleatoria"),
+                ("Semilla", self._semilla_str()),
                 ("Nº de cambios", "-"),
-                ("Horizonte", f"{gc.get('horizonte_dias', 60)} d"),
+                ("Horizonte", formato_horizonte(dias_cfg * 24.0)),
                 ("Distribución", str(gc.get("generador", "empírico"))),
                 ("Cambios / día", "-"),
                 ("Ventana", "-"),
@@ -715,26 +738,31 @@ class GenerationPanel(QWidget):
         else:
             n_cambios = len(self._generated_df)
             generador_name = str(gc.get("generador", "empírico"))
-            horizonte = int(gc.get("horizonte_dias", 60))
-            cambios_dia = n_cambios / max(1, horizonte)
-            # Ventana real desde el DataFrame generado.
+            # Horizonte y cambios/día reales desde el span del DataFrame generado
+            # (coherente con la card "Ventana"), no desde el horizonte_dias fijo.
+            horizonte_str = "-"
+            cambios_dia_str = "-"
             ventana = "-"
             try:
                 fechas = pd.to_datetime(self._generated_df["Fecha_Hora"], errors="coerce").dropna()
                 if not fechas.empty:
                     ventana = f"{fechas.min():%d/%m} – {fechas.max():%d/%m}"
+                    horas = (fechas.max() - fechas.min()).total_seconds() / 3600.0
+                    horizonte_str = formato_horizonte(horas)
+                    dias = max(1.0, horas / 24.0)
+                    cambios_dia_str = f"~{n_cambios / dias:.0f}"
             except Exception:
-                ventana = "-"
+                pass
 
             params = [
-                ("Semilla", str(self.sp_seed.value()) if self.sp_seed.value() >= 0 else "aleatoria"),
+                ("Semilla", self._semilla_str()),
                 ("Nº de cambios", str(n_cambios)),
-                ("Horizonte", f"{horizonte} d"),
+                ("Horizonte", horizonte_str),
                 ("Distribución", generador_name),
-                ("Cambios / día", f"~{cambios_dia:.0f}"),
+                ("Cambios / día", cambios_dia_str),
                 ("Ventana", ventana),
             ]
-        
+
         for i, (k, v) in enumerate(params):
             if i < len(self._param_cards):
                 k_label, v_label = self._param_cards[i]

@@ -6,18 +6,12 @@ from datetime import datetime
 from typing import Dict, List, Sequence, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QBrush, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from config import tema
 from gui_qt.analysis_data import AnalysisData, EMPTY_ANALYSIS_DATA, HistogramBin
-from gui_qt.widgets.dashboard_charts_qt import _fmt_fecha, _t_frac
-
-
-def _qc(hex_str: str, alpha: int = 255) -> QColor:
-    c = QColor(hex_str)
-    c.setAlpha(alpha)
-    return c
+from gui_qt.widgets.dashboard_charts_qt import _fmt_fecha, _qc, _t_frac
 
 
 class CylinderMapChart(QWidget):
