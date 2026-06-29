@@ -7,7 +7,7 @@ import itertools
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Callable, Any, NamedTuple, Tuple
+from typing import List, Dict, Optional, Callable, Any, NamedTuple, Set, Tuple
 from .enums import EstadoCilindro, TipoRectificado
 from .cilindro import Cilindro
 from .substock import SubStock
@@ -18,6 +18,7 @@ from .estrategias import (
     ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO,
     ESTRATEGIAS_ASIGNACION, ESTRATEGIA_ASIGNACION_DEFECTO,
     ESTRATEGIAS_REPOSICION, ESTRATEGIA_REPOSICION_DEFECTO, PedidoReposicion,
+    resolver as _resolver_estrategia,
 )
 from . import turnos as turnos_mod
 
@@ -103,9 +104,11 @@ class TallerCilindros:
     # estados: al agregar un estado a EstadoCilindro, los gráficos lo recogen solos.
     ESTADOS_NOMBRES = [e.value for e in EstadoCilindro]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cilindros: Dict[str, Cilindro] = {}
         self.lista_substocks: List[SubStock] = []
+        # Índice jaula → SubStock (O(1)); se reconstruye al poblar lista_substocks.
+        self._substock_por_jaula: Dict[int, SubStock] = {}
         self.maquinas: Dict[str, MaquinaRectificadora] = {}
         self.jaulas: Dict[int, Jaula] = {}
         self.eventos_programados: List[EventoCambio] = []
@@ -118,7 +121,7 @@ class TallerCilindros:
         # vía pickle del taller resultante).
         self.log_simulacion: List[str] = []
         # IDs ya avisados por "ninguna máquina puede rectificar su tipo" (alerta 1 vez).
-        self._sin_maquina_alertados: set = set()
+        self._sin_maquina_alertados: Set[str] = set()
 
         # Parámetros de configuración (sobreescritos al cargar Excel)
         self.diametro_maximo: float = 575.0
@@ -128,6 +131,10 @@ class TallerCilindros:
         self.estrategia_seleccion: str = "mayor_diametro"
         self.estrategia_asignacion: str = ESTRATEGIA_ASIGNACION_DEFECTO
         self.estrategia_reposicion: str = ESTRATEGIA_REPOSICION_DEFECTO
+        # Objetos de estrategia resueltos (los reasigna simular() por corrida).
+        self._estrategia_sel_obj = ESTRATEGIAS_SELECCION[ESTRATEGIA_DEFECTO]
+        self._estrategia_asig_obj = ESTRATEGIAS_ASIGNACION[ESTRATEGIA_ASIGNACION_DEFECTO]
+        self._estrategia_repo_obj = ESTRATEGIAS_REPOSICION[ESTRATEGIA_REPOSICION_DEFECTO]
 
         # Régimen de turnos de la LÍNEA (laminador). None ⇒ 24/7. Solo se usa para
         # reprogramar los cambios tras una PARADA en tiempo laborable (ver
@@ -143,7 +150,7 @@ class TallerCilindros:
         # Recurso único de traslado Disponible→CRC (grúa/operario).
         # Las reposiciones se serializan: solo se mueve una pareja a la vez.
         self._recurso_crc_libre_en: Optional[datetime] = None
-        self._reposicion_pendiente: set = set()
+        self._reposicion_pendiente: Set[int] = set()
 
         # Parada de línea: cuando alguna jaula se detiene, la línea entera se
         # frena. Mientras dure, los CAMBIO posteriores se difieren; al reanudar,
@@ -156,9 +163,19 @@ class TallerCilindros:
         # dependa de un atributo que solo existe a mitad de corrida.
         self._seq_cola = itertools.count()
 
+        # Estado por corrida (lo reinicia simular()); declarado aquí para que
+        # consultarlo antes de una corrida —p. ej. calcular_kpis sobre un taller
+        # recién cargado— no rompa con AttributeError.
+        self._eventos_procesados: Set[str] = set()
+        self._repo_bajas_pendientes: int = 0
+        self._repo_ultima_llegada: Optional[datetime] = None
+        self._repo_contador_id: int = 0
+        self._repo_pendientes_fuera: int = 0
+        self._cambios_pendientes: int = 0
+
     # ── Pickling (paso a procesos: worker GUI y batch_simular) ───────────────
 
-    def __getstate__(self):
+    def __getstate__(self) -> Dict[str, Any]:
         # itertools.count() no es picklable. Es solo un contador transitorio de
         # la cola de eventos (válido únicamente a mitad de simular()), así que se
         # excluye del pickle y se reconstruye al despicklear. El resto del estado
@@ -167,7 +184,7 @@ class TallerCilindros:
         estado.pop("_seq_cola", None)
         return estado
 
-    def __setstate__(self, estado):
+    def __setstate__(self, estado: Dict[str, Any]) -> None:
         self.__dict__.update(estado)
         self._seq_cola = itertools.count()
 
@@ -184,6 +201,11 @@ class TallerCilindros:
             nombre = f"SS{jaula} ({hasta:.0f}-{desde:.0f})"
             self.lista_substocks.append(
                 SubStock(nombre, jaula, desde, hasta, jaula_asignada=jaula, perfil=perfil))
+        self._reindexar_substocks()
+
+    def _reindexar_substocks(self) -> None:
+        """Reconstruye el índice jaula → SubStock tras poblar ``lista_substocks``."""
+        self._substock_por_jaula = {ss.jaula_asignada: ss for ss in self.lista_substocks}
 
     def aplicar_prioridades_maquinas(self, prioridades: Dict[str, str]) -> None:
         """Asigna el tipo de rectificado prioritario a cada máquina."""
@@ -345,6 +367,7 @@ class TallerCilindros:
             self.lista_substocks.append(
                 SubStock(nombre, jaula, desde, hasta, jaula_asignada=jaula)
             )
+        self._reindexar_substocks()
         logger.info(
             "SubStocks derivados automáticamente (%d bandas de %.2f mm cada una).",
             n, paso
@@ -569,7 +592,8 @@ class TallerCilindros:
             self._instalar_en_jaula(cil, jaula_id, tiempo, f"Instalado en Jaula {jaula_id}")
         return True
 
-    def _parar_jaula(self, jaula_id: int, tiempo: datetime, log) -> None:
+    def _parar_jaula(self, jaula_id: int, tiempo: datetime,
+                     log: Callable[[str], None]) -> None:
         """
         Marca una jaula como PARADA (si no lo estaba) y, con ella, detiene toda
         la línea: registra el instante en que la línea se frenó (si no lo estaba).
@@ -591,7 +615,8 @@ class TallerCilindros:
             log(f"  >>> LÍNEA DETENIDA desde {tiempo.strftime('%m-%d %H:%M')} "
                 "(se difieren los cambios posteriores) <<<")
 
-    def _intentar_reactivar_jaulas(self, tiempo: datetime, log, cola: List[_ItemCola]) -> bool:
+    def _intentar_reactivar_jaulas(self, tiempo: datetime, log: Callable[[str], None],
+                                   cola: List[_ItemCola]) -> bool:
         """
         Intenta rearmar las jaulas en PARADA si ya hay stock para una pareja.
 
@@ -623,7 +648,8 @@ class TallerCilindros:
 
         return reactivo
 
-    def _reanudar_linea(self, tiempo: datetime, log, cola: List[_ItemCola]) -> None:
+    def _reanudar_linea(self, tiempo: datetime, log: Callable[[str], None],
+                        cola: List[_ItemCola]) -> None:
         """
         Reanuda la línea tras una parada: reprograma todos los CAMBIO pendientes
         (los diferidos y los que siguen en la cola con tiempo posterior al inicio
@@ -694,11 +720,8 @@ class TallerCilindros:
         return None
 
     def obtener_substock_por_jaula(self, jaula_id: int) -> Optional[SubStock]:
-        """Obtiene el SubStock configurado para una jaula específica."""
-        for ss in self.lista_substocks:
-            if ss.jaula_asignada == jaula_id:
-                return ss
-        return None
+        """Obtiene el SubStock configurado para una jaula específica (índice O(1))."""
+        return self._substock_por_jaula.get(jaula_id)
 
     def perfil_por_jaula(self, jaula_id: int) -> Optional[str]:
         """Devuelve el perfil (bombatura) requerido por una jaula (None = cualquiera)."""
@@ -786,10 +809,7 @@ class TallerCilindros:
             if preferidos:
                 candidatos = preferidos
 
-        estrategia = ESTRATEGIAS_SELECCION.get(
-            self.estrategia_seleccion, ESTRATEGIAS_SELECCION[ESTRATEGIA_DEFECTO]
-        )
-        return estrategia.seleccionar(candidatos, maquina)
+        return self._estrategia_sel_obj.seleccionar(candidatos, maquina)
 
     # ── Snapshot ────────────────────────────────────────────────────────────
 
@@ -948,10 +968,7 @@ class TallerCilindros:
             cil.jaula_destino = None
             return None, cil.perfil
 
-        estrategia = ESTRATEGIAS_ASIGNACION.get(
-            self.estrategia_asignacion, ESTRATEGIAS_ASIGNACION[ESTRATEGIA_ASIGNACION_DEFECTO]
-        )
-        destino = estrategia.asignar(cil, candidatas, self)
+        destino = self._estrategia_asig_obj.asignar(cil, candidatas, self)
         cil.jaula_destino = destino
         return destino, self.perfil_por_jaula(destino)
 
@@ -1025,10 +1042,7 @@ class TallerCilindros:
         stateless: el estado de la corrida vive en ``self._repo_*``.
         """
         self._repo_bajas_pendientes += 1
-        estrategia = ESTRATEGIAS_REPOSICION.get(
-            self.estrategia_reposicion, ESTRATEGIAS_REPOSICION[ESTRATEGIA_REPOSICION_DEFECTO]
-        )
-        for pedido in estrategia.planificar(self, tiempo):
+        for pedido in self._estrategia_repo_obj.planificar(self, tiempo):
             self._repo_bajas_pendientes -= pedido.cantidad
             self._repo_ultima_llegada = pedido.tiempo_llegada
             self._push_evento(cola, _EventoSim("REPOSICION", pedido.tiempo_llegada, pedido))
@@ -1262,6 +1276,14 @@ class TallerCilindros:
         persiste. Con todas las ``tasa_falla == 0`` la seed no tiene efecto.
         """
         self.estrategia_seleccion = estrategia
+        # Resuelve los objetos de estrategia una sola vez por corrida (en vez de
+        # buscarlos en el registry en cada llamada del bucle).
+        self._estrategia_sel_obj = _resolver_estrategia(
+            ESTRATEGIAS_SELECCION, self.estrategia_seleccion, ESTRATEGIA_DEFECTO)
+        self._estrategia_asig_obj = _resolver_estrategia(
+            ESTRATEGIAS_ASIGNACION, self.estrategia_asignacion, ESTRATEGIA_ASIGNACION_DEFECTO)
+        self._estrategia_repo_obj = _resolver_estrategia(
+            ESTRATEGIAS_REPOSICION, self.estrategia_reposicion, ESTRATEGIA_REPOSICION_DEFECTO)
         self.alertas.clear()
         self.snapshots.clear()
         self.log_simulacion.clear()
@@ -1294,12 +1316,12 @@ class TallerCilindros:
         self._reposicion_pendiente = set()
         self._linea_parada_desde = None
         self._cambios_diferidos = []
-        self._eventos_procesados: set = set()
+        self._eventos_procesados = set()
         self._seq_cola = itertools.count()
         # Estado de corrida de la reposición de cilindros (se reinicia para que
         # re-correr sobre la misma instancia no acumule bajas ni lotes).
         self._repo_bajas_pendientes = 0
-        self._repo_ultima_llegada: Optional[datetime] = None
+        self._repo_ultima_llegada = None
         self._repo_contador_id = 0
         self._repo_pendientes_fuera = 0
         # Cambios aún sin ejecutar (en cola o diferidos por PARADA). Define la

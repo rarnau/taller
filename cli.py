@@ -45,7 +45,7 @@ from modelos import turnos as turnos_mod
 _TIPOS_RECT = [t.value for t in TipoRectificado]
 
 
-def _resolver_turnos(args) -> Optional[Dict[str, Any]]:
+def _resolver_turnos(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
     """Obtiene el esquema de turnos desde --turnos-preset o --turnos (o None)."""
     if getattr(args, "turnos_preset", None):
         return {k: list(v) for k, v in turnos_mod.PRESETS[args.turnos_preset].items()}
@@ -282,7 +282,7 @@ def _formatear_resumen(kpis: Dict[str, Any]) -> str:
 
 # ── Comando: simular ──────────────────────────────────────────────────────────
 
-def _cmd_simular(args) -> int:
+def _cmd_simular(args: argparse.Namespace) -> int:
     if not os.path.isfile(args.excel):
         print(f"Error: no se encontró el archivo de datos: {args.excel}", file=sys.stderr)
         return 2
@@ -318,7 +318,7 @@ def _print_config(cfg: Dict[str, Any]) -> None:
     print(json.dumps(cfg, ensure_ascii=False, indent=2))
 
 
-def _cmd_config(args) -> int:
+def _cmd_config(args: argparse.Namespace) -> int:
     sub = args.subcomando
 
     if sub == "show":
@@ -392,7 +392,7 @@ def _cmd_config(args) -> int:
     return 2
 
 
-def _cmd_config_maquina(args, cfg) -> int:
+def _cmd_config_maquina(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     accion = args.accion
     if accion == "list":
         for m in obtener_maquinas(cfg):
@@ -428,7 +428,7 @@ def _cmd_config_maquina(args, cfg) -> int:
     return 2
 
 
-def _avisar_incoherencias(cfg) -> None:
+def _avisar_incoherencias(cfg: Dict[str, Any]) -> None:
     """Imprime avisos (no fatales) si jaulas y rangos quedaron desalineados.
 
     La edición por CLI es incremental (p. ej. subir jaulas y luego agregar el
@@ -439,7 +439,7 @@ def _avisar_incoherencias(cfg) -> None:
         print(f"Aviso: {p}", file=sys.stderr)
 
 
-def _cmd_config_jaula(args, cfg) -> int:
+def _cmd_config_jaula(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     accion = args.accion
     if accion == "list":
         for r in obtener_rangos(cfg):
@@ -481,7 +481,7 @@ def _resumen_modelo(modelo: Dict[str, Any]) -> str:
             f"  fechas    : {modelo.get('fecha_min')} → {modelo.get('fecha_max')}")
 
 
-def _cmd_modelo(args) -> int:
+def _cmd_modelo(args: argparse.Namespace) -> int:
     accion = args.accion
 
     if accion == "show":
@@ -521,7 +521,7 @@ def _cmd_modelo(args) -> int:
     return 2
 
 
-def _cmd_generar_cambios(args) -> int:
+def _cmd_generar_cambios(args: argparse.Namespace) -> int:
     cfg = cargar_config()
     if args.umbral_desbaste is not None:
         cfgmod.set_generador_cambios(cfg, umbral_desbaste=args.umbral_desbaste)
@@ -573,7 +573,7 @@ def _cmd_generar_cambios(args) -> int:
     return 0
 
 
-def _cmd_config_generador(args, cfg) -> int:
+def _cmd_config_generador(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     cfgmod.set_generador_cambios(cfg, generador=args.generador,
                                  umbral_desbaste=args.umbral_desbaste,
                                  horizonte_dias=args.horizonte_dias,
@@ -587,7 +587,7 @@ def _cmd_config_generador(args, cfg) -> int:
     return 0
 
 
-def _cmd_config_turnos_cambios(args, cfg) -> int:
+def _cmd_config_turnos_cambios(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     turnos = _resolver_turnos(args)
     cfgmod.set_turnos_cambios(cfg, turnos)
     guardar_config(cfg)
@@ -719,7 +719,7 @@ def _construir_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     parser = _construir_parser()
     args = parser.parse_args(argv)
 

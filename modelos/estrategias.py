@@ -8,12 +8,22 @@ en ESTRATEGIAS_SELECCION; la GUI y el CLI la toman de ahí.
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, TypeVar
 
 from . import turnos
 from .cilindro import Cilindro
 from .enums import EstadoCilindro, TipoRectificado
 from .maquina import MaquinaRectificadora
+
+if TYPE_CHECKING:  # solo para anotaciones: evita el ciclo taller → estrategias
+    from .taller import TallerCilindros
+
+_E = TypeVar("_E")
+
+
+def resolver(registro: Dict[str, _E], clave: str, defecto: str) -> _E:
+    """Devuelve la estrategia ``clave`` del registro, o la de ``defecto`` si falta."""
+    return registro.get(clave, registro[defecto])
 
 
 class EstrategiaSeleccion:
@@ -29,21 +39,21 @@ class EstrategiaSeleccion:
 class _MayorDiametro(EstrategiaSeleccion):
     clave, etiqueta = "mayor_diametro", "Mayor diámetro"
 
-    def seleccionar(self, cola, maquina):
+    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
         return max(cola, key=lambda c: c.diametro)
 
 
 class _MenorDiametro(EstrategiaSeleccion):
     clave, etiqueta = "menor_diametro", "Menor diámetro"
 
-    def seleccionar(self, cola, maquina):
+    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
         return min(cola, key=lambda c: c.diametro)
 
 
 class _Fifo(EstrategiaSeleccion):
     clave, etiqueta = "fifo", "FIFO (orden de llegada)"
 
-    def seleccionar(self, cola, maquina):
+    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
         return cola[0]
 
 
@@ -53,7 +63,7 @@ class _MenorMmDesbasteFifoProduccion(EstrategiaSeleccion):
     clave = "menor_mm_desb_fifo_prod"
     etiqueta = "Menor mm desbaste / FIFO producción"
 
-    def seleccionar(self, cola, maquina):
+    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
         if maquina is not None and maquina.prioridad_defecto == TipoRectificado.DESBASTE:
             return min(cola, key=lambda c: c.mm_a_rectificar)
         return cola[0]
@@ -79,13 +89,13 @@ ESTRATEGIA_DEFECTO = "fifo"
 # ESTRATEGIAS_ASIGNACION; la GUI y el CLI la toman de ahí.
 
 # Estados de un cilindro "en camino" a una jaula (comprometido pero no instalado).
-_ESTADOS_EN_CAMINO = (
+_ESTADOS_EN_CAMINO = frozenset((
     EstadoCilindro.ENFRIANDO,
     EstadoCilindro.A_RECTIFICAR,
     EstadoCilindro.RECTIFICANDO,
     EstadoCilindro.DISPONIBLE,
     EstadoCilindro.CRC,
-)
+))
 
 
 class EstrategiaAsignacion:
@@ -94,7 +104,8 @@ class EstrategiaAsignacion:
     clave: str = ""
     etiqueta: str = ""
 
-    def asignar(self, cilindro: Cilindro, jaulas_candidatas: List[int], taller) -> int:
+    def asignar(self, cilindro: Cilindro, jaulas_candidatas: List[int],
+                taller: "TallerCilindros") -> int:
         raise NotImplementedError
 
 
@@ -108,18 +119,22 @@ class _JaulaMasNecesitada(EstrategiaAsignacion):
 
     clave, etiqueta = "jaula_mas_necesitada", "Jaula más necesitada"
 
-    def asignar(self, cilindro, jaulas_candidatas, taller):
+    def asignar(self, cilindro: Cilindro, jaulas_candidatas: List[int],
+                taller: "TallerCilindros") -> int:
         # El déficit es buffer − (CRC + en_camino); el término "buffer" es igual
         # para todas las candidatas, así que ordenar por menor (CRC + en_camino)
         # equivale a mayor déficit (la más necesitada), sin depender del buffer.
+        # Un solo pase cuenta los "en camino" por jaula destino (antes se
+        # re-escaneaban todos los cilindros por cada candidata, O(candidatas×cil)).
+        en_camino_por_jaula: Dict[int, int] = {}
+        for c in taller.cilindros.values():
+            if c.jaula_destino is not None and c.estado in _ESTADOS_EN_CAMINO:
+                en_camino_por_jaula[c.jaula_destino] = en_camino_por_jaula.get(c.jaula_destino, 0) + 1
+
         def _orden(j: int):
             jaula = taller.jaulas[j]
             parada = 0 if getattr(jaula, "parada", False) else 1  # paradas primero
-            en_camino = sum(
-                1 for c in taller.cilindros.values()
-                if c.jaula_destino == j and c.estado in _ESTADOS_EN_CAMINO
-            )
-            comprometidos = len(jaula.cilindros_crc) + en_camino
+            comprometidos = len(jaula.cilindros_crc) + en_camino_por_jaula.get(j, 0)
             return (parada, comprometidos, j)  # menor tupla = más necesitada
 
         return min(jaulas_candidatas, key=_orden)
@@ -159,7 +174,8 @@ class EstrategiaReposicion:
     clave: str = ""
     etiqueta: str = ""
 
-    def planificar(self, taller, tiempo_baja: datetime) -> List[PedidoReposicion]:
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo_baja: datetime) -> List[PedidoReposicion]:
         """Tras una BAJA en ``tiempo_baja``, devuelve los lotes a agendar (puede ser [])."""
         raise NotImplementedError
 
@@ -169,7 +185,8 @@ class _SinReposicion(EstrategiaReposicion):
 
     clave, etiqueta = "ninguna", "Sin reposición"
 
-    def planificar(self, taller, tiempo_baja):
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo_baja: datetime) -> List[PedidoReposicion]:
         return []
 
 
@@ -185,7 +202,8 @@ class _LoteMensual(EstrategiaReposicion):
     clave, etiqueta = "lote_4_mensual", "Lote de 4 al mes siguiente"
     TAMANO_LOTE = 4
 
-    def planificar(self, taller, tiempo_baja):
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo_baja: datetime) -> List[PedidoReposicion]:
         pedidos: List[PedidoReposicion] = []
         ref = taller._repo_ultima_llegada or tiempo_baja
         pend = taller._repo_bajas_pendientes

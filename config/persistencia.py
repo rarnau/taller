@@ -207,8 +207,10 @@ def obtener_turnos_cambios(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 # ── Mutadores (capa única de CRUD usada por el CLI y la GUI) ──────────────────
 
-def set_config_global(cfg: Dict[str, Any], *, diametro_maximo=None, diametro_minimo=None,
-                      tiempo_traslado_crc_min=None, cantidad_jaulas=None) -> Dict[str, Any]:
+def set_config_global(cfg: Dict[str, Any], *, diametro_maximo: Optional[float] = None,
+                      diametro_minimo: Optional[float] = None,
+                      tiempo_traslado_crc_min: Optional[float] = None,
+                      cantidad_jaulas: Optional[int] = None) -> Dict[str, Any]:
     """Actualiza los campos indicados de ``config_global`` (los None se ignoran)."""
     cg = obtener_config_global(cfg)
     if diametro_maximo is not None:
@@ -269,8 +271,9 @@ def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: f
     return cfg
 
 
-def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None,
-                desb_mm=None, desb_min=None, prioridad=None,
+def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: Optional[float] = None,
+                prod_min: Optional[float] = None, desb_mm: Optional[float] = None,
+                desb_min: Optional[float] = None, prioridad: Optional[str] = None,
                 turnos: Optional[Dict[str, Any]] = None,
                 tasa_falla: Optional[float] = None) -> Dict[str, Any]:
     """Modifica los campos indicados de una máquina existente.
@@ -415,9 +418,11 @@ def verificar_coherencia(cfg: Dict[str, Any]) -> None:
         raise ValueError(" ".join(problemas))
 
 
-def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
-            estrategia_asignacion=None, estrategia_seleccion=None,
-            estrategia_reposicion=None) -> Dict[str, Any]:
+def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado: Optional[float] = None,
+            max_iteraciones: Optional[int] = None,
+            estrategia_asignacion: Optional[str] = None,
+            estrategia_seleccion: Optional[str] = None,
+            estrategia_reposicion: Optional[str] = None) -> Dict[str, Any]:
     """Actualiza los parámetros de simulación indicados."""
     if tiempo_enfriado is not None:
         t = round(float(tiempo_enfriado), 1)
@@ -438,9 +443,11 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
     return cfg
 
 
-def set_generador_cambios(cfg: Dict[str, Any], *, generador=None,
-                          umbral_desbaste=None, horizonte_dias=None,
-                          fecha_inicio=None, fecha_fin=None) -> Dict[str, Any]:
+def set_generador_cambios(cfg: Dict[str, Any], *, generador: Optional[str] = None,
+                          umbral_desbaste: Optional[float] = None,
+                          horizonte_dias: Optional[int] = None,
+                          fecha_inicio: Optional[str] = None,
+                          fecha_fin: Optional[str] = None) -> Dict[str, Any]:
     """Actualiza los campos indicados de la config del generador de cambios.
 
     ``fecha_inicio``/``fecha_fin`` son cadenas ISO ``YYYY-MM-DD`` (o ``""`` para
