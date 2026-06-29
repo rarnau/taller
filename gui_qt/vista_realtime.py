@@ -229,12 +229,25 @@ class MachineCard(QFrame):
         (es 'del tiempo disponible', solo aplica en turno) — si además hay un cilindro
         montado se muestra "Rectificando · falla" conservando el progreso, si no "En
         falla"; luego ocupada (rectificando) y por último libre operativa.
+
+        Tanto "off" como "falla" son *cylinder-aware*: si la máquina quedó a mitad de
+        un rectificado al cerrar el turno (o al caer en falla), se conserva el cilindro
+        montado y su progreso **congelado**, marcando además la parada por turno/falla
+        (consistente con el Gantt, que sombrea ese tramo como parada).
         """
         if not operativa:
             self.setProperty("mode", "off")
-            self.progress.setValue(0)
-            self.meta_label.setText("● Fuera de turno")
-            self.state_label.setText("Fuera de turno")
+            if data:
+                # Cilindro montado pero pausado por fin de turno: se conserva el
+                # progreso (congelado) y se marca que está parada por turno.
+                prog = max(0, min(100, int(data.get("progreso", 0))))
+                self.progress.setValue(prog)
+                self.meta_label.setText(f"⏸ {data['id']} · {float(data['d']):.1f} mm")
+                self.state_label.setText(f"Fuera de turno · {data['id']} ({prog}%)")
+            else:
+                self.progress.setValue(0)
+                self.meta_label.setText("● Fuera de turno")
+                self.state_label.setText("Fuera de turno")
             self.state_label.setObjectName("MachineOff")
         elif en_falla:
             self.setProperty("mode", "falla")
