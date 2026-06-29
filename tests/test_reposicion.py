@@ -182,6 +182,34 @@ def test_registry_expone_ambas_estrategias():
     assert set(ESTRATEGIAS_REPOSICION) == {"ninguna", "lote_4_mensual"}
 
 
+def test_reposicion_no_pisa_id_existente():
+    """Un cilindro de stock llamado NUEVO-001 no es sobrescrito por la reposición.
+
+    El guard de _nuevo_id_reposicion salta los ids ya presentes, así que los
+    nuevos arrancan en NUEVO-002 y el NUEVO-001 cargado queda intacto.
+    """
+    t = TallerCilindros()
+    t.configurar(_cfg_con_bajas("lote_4_mensual"))
+    # Stock estándar + un cilindro inerte (BAJA) que ya ocupa el id "NUEVO-001".
+    stock = pd.concat([
+        _stock_con_bajas(),
+        pd.DataFrame([{"ID_Cilindro": "NUEVO-001", "Diámetro_mm": 500.0, "Estado": "Baja",
+                       "Jaula_Asignada": None, "Posición": None}]),
+    ], ignore_index=True)
+    rows = list(_CAMBIOS_BAJAS) + [_CAMBIO_TARDIO]  # entrega dentro de ventana
+    t.cargar_datos_desde_dataframes(stock, _df_cambios(rows))
+    t.simular(callback_log=None)
+
+    preexistente = t.cilindros["NUEVO-001"]
+    assert preexistente.estado == EstadoCilindro.BAJA
+    assert preexistente.diametro == 500.0                      # intacto, no pisado
+    nuevos = [c for c in t.cilindros.values()
+              if c.id.startswith("NUEVO-") and c.id != "NUEVO-001"]
+    assert len(nuevos) == 4
+    assert "NUEVO-002" in t.cilindros                          # el guard saltó NUEVO-001
+    assert len({c.id for c in nuevos}) == 4                    # ids únicos
+
+
 def test_kpis_exponen_reposicion():
     """calcular_kpis expone entregados/pendientes como métricas escalares."""
     from modelos.kpis import calcular_kpis

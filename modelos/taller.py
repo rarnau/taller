@@ -1148,6 +1148,20 @@ class TallerCilindros:
             self._push_evento(cola, ev)
         self.generar_snapshot(ev_sim.tiempo)
 
+    def _nuevo_id_reposicion(self) -> str:
+        """Id único ``NUEVO-NNN`` para un cilindro de reposición.
+
+        El contador (``_repo_contador_id``) es monotónico por corrida; el guard
+        salta cualquier id ya presente en ``self.cilindros`` para no pisar stock
+        cargado ni cilindros de una corrida previa sobre la misma instancia.
+        """
+        self._repo_contador_id += 1
+        cid = f"NUEVO-{self._repo_contador_id:03d}"
+        while cid in self.cilindros:
+            self._repo_contador_id += 1
+            cid = f"NUEVO-{self._repo_contador_id:03d}"
+        return cid
+
     def _handle_reposicion(self, ev_sim: "_EventoSim", cola: List[_ItemCola],
                            log: Callable[[str], None]) -> None:
         """REPOSICION: llega un lote de cilindros nuevos para reemplazar BAJAs.
@@ -1180,8 +1194,7 @@ class TallerCilindros:
                 f"{pedido.cantidad} cilindros (fuera del horizonte simulado)"))
             return
         for _ in range(pedido.cantidad):
-            self._repo_contador_id += 1
-            cil = Cilindro(f"NUEVO-{self._repo_contador_id:03d}", pedido.diametro,
+            cil = Cilindro(self._nuevo_id_reposicion(), pedido.diametro,
                            EstadoCilindro.A_RECTIFICAR)
             cil.tipo_rectificado_actual = TipoRectificado.PRODUCCION
             cil.mm_a_rectificar = 0.0
