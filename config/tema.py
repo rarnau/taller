@@ -133,7 +133,7 @@ KPI_META_BASE = {
     "alertas_criticas": {"label": "Alertas Críticas", "color": KPI_COLOR_ALERT},
     "cambios_programados": {"label": "Cambios Programados", "color": KPI_COLOR_CAMBIOS},
     "rectificados_realizados": {"label": "Rectificados Realizados", "color": KPI_COLOR_RECTIFICADOS},
-    "horizonte_simulacion_h": {"label": "Horizonte Simulación (h)", "color": KPI_COLOR_HORIZONTE},
+    "horizonte_simulacion_h": {"label": "Horizonte Simulación", "color": KPI_COLOR_HORIZONTE},
     "diametro_promedio_mm": {"label": "Diámetro Promedio", "color": KPI_COLOR_DIAMETRO},
     "desgaste_medio_mm": {"label": "Desgaste Medio", "color": KPI_COLOR_DESGASTE},
 }

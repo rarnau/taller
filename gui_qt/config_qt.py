@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
-    QSizePolicy,
 )
 
 from config.persistencia import (
@@ -714,25 +713,6 @@ class ConfigPanel(QWidget):
         btn.clicked.connect(self._remove_machine_from_sender)
         self.tbl_machines.setCellWidget(row, 8, btn)
 
-    def _set_machine_turnos_button(self, row: int) -> None:
-        """Inserta boton para editar turnos custom de la fila."""
-        host = QWidget(self.tbl_machines)
-        lay = QHBoxLayout(host)
-        lay.setContentsMargins(4, 4, 4, 4)
-        lay.setSpacing(0)
-
-        btn = QPushButton("Editar")
-        btn.setObjectName("ConfigInlineButton")
-        btn.setMinimumWidth(82)
-        btn.setMaximumHeight(28)
-        btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        btn.clicked.connect(self._edit_machine_turnos_from_sender)
-
-        lay.addWidget(btn)
-        # Col 6 = columna de turnos (coincide con el finder de _edit_machine_turnos_from_sender,
-        # que busca el sender en la col 6); antes apuntaba a la 7 y pisaba el botón de borrar.
-        self.tbl_machines.setCellWidget(row, 6, host)
-
     def _edit_machine_turnos_from_sender(self) -> None:
         """Resuelve la fila del boton presionado y abre editor custom."""
         sender = self.sender()
@@ -754,13 +734,18 @@ class ConfigPanel(QWidget):
         self._adjust_machines_table_height()
 
     def _edit_machine_turnos(self, row: int) -> None:
-        """Abre dialogo 7x3 y persiste en el combo como turno custom."""
+        """Abre dialogo 7x3 y persiste en el combo como turno custom.
+
+        El combo que arma ``_set_machine_turnos_editor`` ya queda en la col 6 con
+        el turno custom en su ``currentData`` y su propio botón ⚙, así que el
+        guardado (``_machine_turnos_value``) lo encuentra y persiste. No se debe
+        sobrescribir la celda con otro widget o se pierde el turno editado.
+        """
         base = self._machine_turnos_value(row)
         ok, turnos = TurnosDialog.edit(base, self)
         if not ok or turnos is None:
             return
         self._set_machine_turnos_editor(row, turnos)
-        self._set_machine_turnos_button(row)
 
     def _machine_turnos_value(self, row: int) -> dict | None:
         """Convierte el valor de combo a dict de turnos persistible o None (24/7)."""

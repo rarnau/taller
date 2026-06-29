@@ -535,7 +535,8 @@ class RealTimeView(QWidget):
                            bool(fallas.get(name, False)))
 
         conteos = getattr(snapshot, "conteo_por_estado", {})
-        total = sum(int(v) for v in conteos.values()) if conteos else 0
+        bajas = int(getattr(snapshot, "cantidad_bajas", 0))
+        total = (sum(int(v) for v in conteos.values()) if conteos else 0) - bajas
         self.lbl_total.setText(f"{total} cilindros")
         self.lbl_paradas.setText(f"{len(paradas)} paradas")
         sufijo = "alerta crítica" if self._alertas_criticas == 1 else "alertas críticas"
