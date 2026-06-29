@@ -471,10 +471,10 @@ class ConfigPanel(QWidget):
             if not nombre:
                 raise ValueError(f"Fila maquina {row + 1}: 'Nombre' no puede estar vacio.")
 
-            prod_mm = self._parse_float_machine(row, 1, "Prod mm")
-            prod_min = self._parse_float_machine(row, 2, "Prod min")
-            desb_mm = self._parse_float_machine(row, 3, "Desb mm")
-            desb_min = self._parse_float_machine(row, 4, "Desb min")
+            prod_mm = self._parse_float(self.tbl_machines, row, 1, "Prod mm")
+            prod_min = self._parse_float(self.tbl_machines, row, 2, "Prod min")
+            desb_mm = self._parse_float(self.tbl_machines, row, 3, "Desb mm")
+            desb_min = self._parse_float(self.tbl_machines, row, 4, "Desb min")
             prioridad = self._machine_priority_value(row)
             if prioridad not in {"produccion", "desbaste"}:
                 raise ValueError(
@@ -492,7 +492,7 @@ class ConfigPanel(QWidget):
             turnos = self._machine_turnos_value(row)
             if turnos is not None and not turnos_mod.es_completo(turnos):
                 maq["turnos"] = turnos
-            tasa_pct = self._parse_float_machine(row, 7, "Falla %")
+            tasa_pct = self._parse_float(self.tbl_machines, row, 7, "Falla %")
             if not (0.0 <= tasa_pct <= 100.0):
                 raise ValueError(
                     f"Fila maquina {row + 1}: 'Falla %' debe estar entre 0 y 100."
@@ -504,8 +504,8 @@ class ConfigPanel(QWidget):
         new_cfg["rangos"] = []
         for row in range(self.tbl_ranges.rowCount()):
             jaula = int(self.tbl_ranges.item(row, 0).text())
-            desde = self._parse_float_cell(row, 1, "Desde")
-            hasta = self._parse_float_cell(row, 2, "Hasta")
+            desde = self._parse_float(self.tbl_ranges, row, 1, "Desde")
+            hasta = self._parse_float(self.tbl_ranges, row, 2, "Hasta")
             perfil_txt = self.tbl_ranges.item(row, 3).text().strip()
             set_rango(
                 new_cfg,
@@ -640,26 +640,18 @@ class ConfigPanel(QWidget):
             self.tbl_ranges.setItem(i, 2, QTableWidgetItem(data["hasta"]))
             self.tbl_ranges.setItem(i, 3, QTableWidgetItem(data["perfil"]))
 
-    def _parse_float_cell(self, row: int, col: int, title: str) -> float:
-        item = self.tbl_ranges.item(row, col)
-        raw = item.text().strip() if item is not None else ""
+    def _parse_float(self, table: QTableWidget, row: int, col: int, title: str) -> float:
+        """Lee y valida un float de una celda (maneja QLineEdit o item via _cell_text).
+
+        Fuente única usada por la tabla de máquinas y la de rangos.
+        """
+        raw = self._cell_text(table, row, col)
         if not raw:
             raise ValueError(f"Fila {row + 1}: '{title}' no puede estar vacio.")
         try:
             return float(raw)
         except ValueError as exc:
             raise ValueError(f"Fila {row + 1}: '{title}' invalido ('{raw}').") from exc
-
-    def _parse_float_machine(self, row: int, col: int, title: str) -> float:
-        raw = self._cell_text(self.tbl_machines, row, col)
-        if not raw:
-            raise ValueError(f"Fila maquina {row + 1}: '{title}' no puede estar vacio.")
-        try:
-            return float(raw)
-        except ValueError as exc:
-            raise ValueError(
-                f"Fila maquina {row + 1}: '{title}' invalido ('{raw}')."
-            ) from exc
 
     def _cell_text(self, table: QTableWidget, row: int, col: int) -> str:
         w = table.cellWidget(row, col)
