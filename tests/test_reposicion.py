@@ -233,7 +233,7 @@ def test_batch_simular_con_reposicion_es_determinista_y_paralelizable():
     secuencial (estrategia stateless, estado de corrida por instancia, taller
     picklable) y respeta el orden de la lista de cambios.
     """
-    from cli import batch_simular, simular_desde_dataframes
+    from runner import batch_simular, simular_desde_dataframes
 
     cfg = _cfg_con_bajas("lote_4_mensual")
     stock = _stock_con_bajas()

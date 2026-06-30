@@ -1,7 +1,7 @@
 """Servicios de integracion entre la nueva GUI Qt y el motor de simulacion.
 
-Esta capa encapsula llamadas a ``cli.py`` y mantiene la GUI desacoplada del
-modelo para facilitar pruebas y evolucion incremental.
+Esta capa encapsula los entry-points GUI-free de ``runner.py`` y mantiene la GUI
+desacoplada del modelo (y del CLI) para facilitar pruebas y evolucion incremental.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-from cli import (
+from runner import (
     ctx_paralelo,
     init_worker_simulacion,
     simular_cambios_worker,
