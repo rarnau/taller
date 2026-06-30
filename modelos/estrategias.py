@@ -6,11 +6,24 @@ YA filtrada por prioridad de la máquina y devuelve el cilindro a rectificar.
 Para agregar una estrategia nueva: subclasar EstrategiaSeleccion y registrarla
 en ESTRATEGIAS_SELECCION; la GUI y el CLI la toman de ahí.
 """
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from datetime import datetime
+from typing import TYPE_CHECKING, Dict, List, Optional, TypeVar
 
+from . import turnos
 from .cilindro import Cilindro
 from .enums import EstadoCilindro, TipoRectificado
 from .maquina import MaquinaRectificadora
+
+if TYPE_CHECKING:  # solo para anotaciones: evita el ciclo taller → estrategias
+    from .taller import TallerCilindros
+
+_E = TypeVar("_E")
+
+
+def resolver(registro: Dict[str, _E], clave: str, defecto: str) -> _E:
+    """Devuelve la estrategia ``clave`` del registro, o la de ``defecto`` si falta."""
+    return registro.get(clave, registro[defecto])
 
 
 class EstrategiaSeleccion:
@@ -26,21 +39,21 @@ class EstrategiaSeleccion:
 class _MayorDiametro(EstrategiaSeleccion):
     clave, etiqueta = "mayor_diametro", "Mayor diámetro"
 
-    def seleccionar(self, cola, maquina):
+    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
         return max(cola, key=lambda c: c.diametro)
 
 
 class _MenorDiametro(EstrategiaSeleccion):
     clave, etiqueta = "menor_diametro", "Menor diámetro"
 
-    def seleccionar(self, cola, maquina):
+    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
         return min(cola, key=lambda c: c.diametro)
 
 
 class _Fifo(EstrategiaSeleccion):
     clave, etiqueta = "fifo", "FIFO (orden de llegada)"
 
-    def seleccionar(self, cola, maquina):
+    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
         return cola[0]
 
 
@@ -50,7 +63,7 @@ class _MenorMmDesbasteFifoProduccion(EstrategiaSeleccion):
     clave = "menor_mm_desb_fifo_prod"
     etiqueta = "Menor mm desbaste / FIFO producción"
 
-    def seleccionar(self, cola, maquina):
+    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
         if maquina is not None and maquina.prioridad_defecto == TipoRectificado.DESBASTE:
             return min(cola, key=lambda c: c.mm_a_rectificar)
         return cola[0]
@@ -76,13 +89,13 @@ ESTRATEGIA_DEFECTO = "fifo"
 # ESTRATEGIAS_ASIGNACION; la GUI y el CLI la toman de ahí.
 
 # Estados de un cilindro "en camino" a una jaula (comprometido pero no instalado).
-_ESTADOS_EN_CAMINO = (
+_ESTADOS_EN_CAMINO = frozenset((
     EstadoCilindro.ENFRIANDO,
     EstadoCilindro.A_RECTIFICAR,
     EstadoCilindro.RECTIFICANDO,
     EstadoCilindro.DISPONIBLE,
     EstadoCilindro.CRC,
-)
+))
 
 
 class EstrategiaAsignacion:
@@ -91,7 +104,8 @@ class EstrategiaAsignacion:
     clave: str = ""
     etiqueta: str = ""
 
-    def asignar(self, cilindro: Cilindro, jaulas_candidatas: List[int], taller) -> int:
+    def asignar(self, cilindro: Cilindro, jaulas_candidatas: List[int],
+                taller: "TallerCilindros") -> int:
         raise NotImplementedError
 
 
@@ -105,18 +119,22 @@ class _JaulaMasNecesitada(EstrategiaAsignacion):
 
     clave, etiqueta = "jaula_mas_necesitada", "Jaula más necesitada"
 
-    def asignar(self, cilindro, jaulas_candidatas, taller):
+    def asignar(self, cilindro: Cilindro, jaulas_candidatas: List[int],
+                taller: "TallerCilindros") -> int:
         # El déficit es buffer − (CRC + en_camino); el término "buffer" es igual
         # para todas las candidatas, así que ordenar por menor (CRC + en_camino)
         # equivale a mayor déficit (la más necesitada), sin depender del buffer.
+        # Un solo pase cuenta los "en camino" por jaula destino (antes se
+        # re-escaneaban todos los cilindros por cada candidata, O(candidatas×cil)).
+        en_camino_por_jaula: Dict[int, int] = {}
+        for c in taller.cilindros.values():
+            if c.jaula_destino is not None and c.estado in _ESTADOS_EN_CAMINO:
+                en_camino_por_jaula[c.jaula_destino] = en_camino_por_jaula.get(c.jaula_destino, 0) + 1
+
         def _orden(j: int):
             jaula = taller.jaulas[j]
             parada = 0 if getattr(jaula, "parada", False) else 1  # paradas primero
-            en_camino = sum(
-                1 for c in taller.cilindros.values()
-                if c.jaula_destino == j and c.estado in _ESTADOS_EN_CAMINO
-            )
-            comprometidos = len(jaula.cilindros_crc) + en_camino
+            comprometidos = len(jaula.cilindros_crc) + en_camino_por_jaula.get(j, 0)
             return (parada, comprometidos, j)  # menor tupla = más necesitada
 
         return min(jaulas_candidatas, key=_orden)
@@ -128,3 +146,112 @@ ESTRATEGIAS_ASIGNACION: Dict[str, EstrategiaAsignacion] = {
     )
 }
 ESTRATEGIA_ASIGNACION_DEFECTO = "jaula_mas_necesitada"
+
+
+# ── Estrategias de reposición de cilindros ───────────────────────────────────
+#
+# Cuando un cilindro cae por debajo del diámetro mínimo se da de BAJA. La
+# estrategia de reposición decide si (y cuándo) llegan cilindros nuevos para
+# reemplazarlo. Se invoca tras cada BAJA de runtime (ver TallerCilindros.
+# _planificar_reposicion); es STATELESS (singleton compartido entre procesos):
+# todo el estado mutable de la corrida vive en el taller (_repo_bajas_pendientes,
+# _repo_ultima_llegada). Para agregar una estrategia nueva: subclasar
+# EstrategiaReposicion y registrarla en ESTRATEGIAS_REPOSICION; la GUI y el CLI
+# la toman de ahí.
+
+
+@dataclass
+class PedidoReposicion:
+    """Un lote de cilindros nuevos a agendar: cuándo llegan, cuántos y a qué diámetro."""
+    tiempo_llegada: datetime
+    cantidad: int
+    diametro: float
+
+
+class EstrategiaReposicion:
+    """Estrategia de reposición de cilindros nuevos ante las BAJAs."""
+
+    clave: str = ""
+    etiqueta: str = ""
+
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo_baja: datetime) -> List[PedidoReposicion]:
+        """Tras una BAJA en ``tiempo_baja``, devuelve los lotes a agendar (puede ser [])."""
+        raise NotImplementedError
+
+
+class _SinReposicion(EstrategiaReposicion):
+    """Por defecto: el taller nunca repone (comportamiento histórico)."""
+
+    clave, etiqueta = "ninguna", "Sin reposición"
+
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo_baja: datetime) -> List[PedidoReposicion]:
+        return []
+
+
+class _LoteMensual(EstrategiaReposicion):
+    """Cada ``TAMANO_LOTE`` bajas ⇒ un lote de cilindros nuevos al diámetro máximo.
+
+    El lote llega el primer día operativo (régimen de la línea, ``grilla_cambios``)
+    del mes siguiente. Si se acumula más de un lote, se escalonan uno por mes
+    (8 bajas ⇒ 4 el mes siguiente y 4 el mes posterior), encadenando desde
+    ``taller._repo_ultima_llegada``.
+    """
+
+    clave, etiqueta = "lote_4_mensual", "Lote de 4 al mes siguiente"
+    TAMANO_LOTE = 4
+
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo_baja: datetime) -> List[PedidoReposicion]:
+        pedidos: List[PedidoReposicion] = []
+        ref = taller._repo_ultima_llegada or tiempo_baja
+        pend = taller._repo_bajas_pendientes
+        while pend >= self.TAMANO_LOTE:
+            llegada = turnos.primer_dia_operativo_mes_siguiente(taller.grilla_cambios, ref)
+            pedidos.append(PedidoReposicion(llegada, self.TAMANO_LOTE, taller.diametro_maximo))
+            pend -= self.TAMANO_LOTE
+            ref = llegada  # el próximo lote llega el mes siguiente a éste
+        return pedidos
+
+
+ESTRATEGIAS_REPOSICION: Dict[str, EstrategiaReposicion] = {
+    e.clave: e for e in (
+        _SinReposicion(),
+        _LoteMensual(),
+    )
+}
+ESTRATEGIA_REPOSICION_DEFECTO = "ninguna"
+
+
+# ── Tabla de familias de estrategia ──────────────────────────────────────────
+#
+# Las tres familias (selección / asignación / reposición) se cablean igual en
+# varios consumidores (clave en user_config.json + atributo del taller, flag del
+# CLI, combo de la GUI, registro y defecto). Esta tabla declarativa es la fuente
+# única que recorren `cli.py` (flags de `config sim`), `gui_qt/config_qt.py`
+# (combos) y `TallerCilindros.configurar` (lectura de config), para que agregar
+# una familia nueva sea registrar la estrategia + añadir UNA fila aquí.
+
+
+@dataclass(frozen=True)
+class FamiliaEstrategia:
+    clave_cfg: str        # clave en user_config.json y atributo del taller
+    flag_cli: str         # flag de `cli.py config sim` (p. ej. "--estrategia-seleccion")
+    dest_cli: str         # argparse dest del flag (p. ej. "estrategia_seleccion")
+    etiqueta_ui: str      # etiqueta de la fila en la GUI
+    registro: Dict[str, object]
+    defecto: str
+
+
+FAMILIAS_ESTRATEGIA = (
+    FamiliaEstrategia("estrategia_seleccion", "--estrategia-seleccion",
+                      "estrategia_seleccion", "Estrategia de seleccion",
+                      ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO),
+    FamiliaEstrategia("estrategia_asignacion", "--estrategia-asignacion",
+                      "estrategia_asignacion", "Estrategia de asignacion",
+                      ESTRATEGIAS_ASIGNACION, ESTRATEGIA_ASIGNACION_DEFECTO),
+    FamiliaEstrategia("estrategia_reposicion", "--estrategia-reposicion",
+                      "estrategia_reposicion", "Estrategia de reposicion",
+                      ESTRATEGIAS_REPOSICION, ESTRATEGIA_REPOSICION_DEFECTO),
+)

@@ -179,6 +179,23 @@ def proximo_inicio_operativo(grilla: Optional[Grilla], dt: datetime) -> Optional
     return None
 
 
+def primer_dia_operativo_mes_siguiente(grilla: Optional[Grilla], dt: datetime) -> datetime:
+    """Primer instante **operativo** del régimen en el mes siguiente a ``dt``.
+
+    Toma el día 1 del mes siguiente a ``dt`` a las 00:00 y lo ajusta a la primera
+    hora operativa de la línea con ``proximo_inicio_operativo``. Con ``grilla is
+    None`` (24/7) devuelve el día 1 a las 00:00 sin ajuste. Si el régimen nunca
+    es operativo, degrada al día 1 a las 00:00.
+    """
+    if dt.month == 12:
+        primero = dt.replace(year=dt.year + 1, month=1, day=1,
+                             hour=0, minute=0, second=0, microsecond=0)
+    else:
+        primero = dt.replace(month=dt.month + 1, day=1,
+                             hour=0, minute=0, second=0, microsecond=0)
+    return proximo_inicio_operativo(grilla, primero) or primero
+
+
 def minutos_operativos(grilla: Optional[Grilla], t0: datetime, t1: datetime) -> float:
     """Minutos operativos (en turno) acumulados en ``[t0, t1)`` según la grilla.
 

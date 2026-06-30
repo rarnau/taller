@@ -78,6 +78,40 @@ def test_arranque_un_solo_cilindro_no_va_al_crc():
     assert t.cilindros["A"].jaula_destino == 1             # reservado a su jaula
 
 
+def test_reactivacion_no_reparte_un_cilindro_a_dos_jaulas():
+    """Con bandas solapadas, dos jaulas paradas no se reparten el mismo cilindro.
+
+    ``_intentar_reactivar_jaulas`` calcula los DISPONIBLE una sola vez y quita los
+    consumidos de la lista compartida, así que cada cilindro entra en exactamente
+    una jaula (la de menor id, que reactiva primero). Es el caso que el golden no
+    cubre (sus bandas no se solapan ⇒ un cilindro es admisible en una sola jaula).
+    """
+    t = TallerCilindros()
+    t.configurar({
+        "config_global": {"diametro_maximo": 575.0, "diametro_minimo": 520.0,
+                          "tiempo_traslado_crc_min": 10.0, "cantidad_jaulas": 2},
+        # Bandas solapadas: un Ø 560 es admisible en AMBAS jaulas.
+        "rangos": [{"jaula": 1, "desde": 575.0, "hasta": 540.0},
+                   {"jaula": 2, "desde": 575.0, "hasta": 540.0}],
+        "maquinas": _MAQ,
+    })
+    t.jaulas = {1: Jaula(1), 2: Jaula(2)}
+    for j in t.jaulas.values():
+        j.parada = True
+        j.parada_desde = T0
+    t.cilindros = {f"C{i}": Cilindro(f"C{i}", 560.0, EstadoCilindro.DISPONIBLE)
+                   for i in range(4)}
+
+    t._intentar_reactivar_jaulas(T0, lambda *_a: None, [])
+
+    ids1 = {c.id for c in t.jaulas[1].cilindros_trabajando}
+    ids2 = {c.id for c in t.jaulas[2].cilindros_trabajando}
+    assert len(ids1) == _BUFFER_CRC_SIZE and len(ids2) == _BUFFER_CRC_SIZE
+    assert ids1.isdisjoint(ids2)                       # nadie en dos jaulas
+    assert ids1 | ids2 == {f"C{i}" for i in range(4)}  # los 4 instalados, sin repetir
+    assert not t.jaulas[1].parada and not t.jaulas[2].parada
+
+
 @pytest.mark.parametrize("nombre", list(ESCENARIOS))
 def test_crc_nunca_impar_en_snapshots(nombre):
     """En ningún snapshot de ningún escenario el CRC de una jaula es impar."""

@@ -35,6 +35,12 @@ def calcular_kpis(taller: TallerCilindros) -> Dict[str, Any]:
     ]
     desgaste_medio = float(np.mean(desgastes)) if desgastes else 0.0
 
+    # Reposición de cilindros: entregados dentro de la ventana vs pedidos que
+    # cayeron fuera de [A, B] (ver "Cylinder replenishment" en CLAUDE.md). Con
+    # estrategia "ninguna" ambos son 0. getattr cubre un taller sin simular aún.
+    reposicion_entregados = int(getattr(taller, "_repo_contador_id", 0))
+    reposicion_pendientes = int(getattr(taller, "_repo_pendientes_fuera", 0))
+
     # Descomposición de la utilización por máquina (tipo OEE; disponible × neta =
     # utilización global = ocupada / calendario):
     #   - disponible: factor de disponibilidad = tiempo operativo / calendario, donde
@@ -72,6 +78,8 @@ def calcular_kpis(taller: TallerCilindros) -> Dict[str, Any]:
         "horizonte_simulacion_h": horizonte_h,
         "diametro_promedio_mm": diam_prom,
         "desgaste_medio_mm": desgaste_medio,
+        "reposicion_entregados": reposicion_entregados,
+        "reposicion_pendientes": reposicion_pendientes,
         "utilizacion_maquinas_pct": utilizacion_maquinas,
         "utilizacion_neta_pct": utilizacion_neta,
         "tiempo_falla_pct": tiempo_falla,

@@ -18,11 +18,9 @@ Subcomandos::
 """
 import argparse
 import json
-import multiprocessing
 import os
 import sys
-from concurrent.futures import ProcessPoolExecutor
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -32,214 +30,24 @@ from config import persistencia as cfgmod
 from config import generator_model as modmod
 from config.persistencia import (cargar_config, guardar_config, obtener_maquinas,
                                   obtener_max_iteraciones, obtener_rangos,
-                                  obtener_tiempo_enfriado, obtener_estrategia_asignacion)
+                                  obtener_tiempo_enfriado)
 from modelos.enums import TipoRectificado
 from modelos.kpis import calcular_kpis
-from modelos.estrategias import ESTRATEGIAS_SELECCION, ESTRATEGIAS_ASIGNACION
+from modelos.estrategias import ESTRATEGIAS_SELECCION, FAMILIAS_ESTRATEGIA
 from modelos import generador_cambios as gencambios
-from modelos.taller import TallerCilindros
 from modelos import turnos as turnos_mod
+from runner import cargar_config_path, ejecutar_simulacion
 
 _TIPOS_RECT = [t.value for t in TipoRectificado]
 
 
-def _resolver_turnos(args) -> Optional[Dict[str, Any]]:
+def _resolver_turnos(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
     """Obtiene el esquema de turnos desde --turnos-preset o --turnos (o None)."""
     if getattr(args, "turnos_preset", None):
         return {k: list(v) for k, v in turnos_mod.PRESETS[args.turnos_preset].items()}
     if getattr(args, "turnos", None):
         return turnos_mod.parse_compacto(args.turnos)
     return None
-
-
-# ── Núcleo reutilizable (sin argparse) ───────────────────────────────────────
-
-def construir_taller(cfg: Dict[str, Any], ruta_excel: str) -> TallerCilindros:
-    """Construye un taller configurado y con los datos del Excel cargados.
-
-    Aplica primero la configuración estructural (``configurar``) y luego los
-    datos (``cargar_datos``), en ese orden obligatorio. Pensado como base de un
-    futuro runner de lotes: cada simulación crea su propia instancia
-    independiente a partir de un mismo ``cfg``.
-    """
-    cfgmod.verificar_coherencia(cfg)  # jaulas ⇄ rangos: aborta antes de simular
-    taller = TallerCilindros()
-    taller.configurar(cfg)
-    taller.cargar_datos(ruta_excel)
-    return taller
-
-
-def construir_taller_desde_dataframes(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
-                                      cambios_df: "pd.DataFrame") -> TallerCilindros:
-    """Como ``construir_taller`` pero con DataFrames en memoria (sin I/O de disco).
-
-    Base del runner batch: el stock se carga una vez y el ``cambios_df`` lo
-    produce el generador para cada seed, sin escribir Excel intermedios.
-    """
-    cfgmod.verificar_coherencia(cfg)
-    taller = TallerCilindros()
-    taller.configurar(cfg)
-    taller.cargar_datos_desde_dataframes(stock_df, cambios_df)
-    return taller
-
-
-def simular_desde_dataframes(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
-                             cambios_df: "pd.DataFrame",
-                             estrategia: str = "mayor_diametro",
-                             seed: Optional[int] = None) -> TallerCilindros:
-    """Construye el taller desde DataFrames, simula y devuelve el taller resultante.
-
-    Función **a nivel de módulo** y sin GUI: es picklable, así que la GUI la corre
-    en un proceso aparte (``ProcessPoolExecutor``) para no congelar el event loop
-    de Qt (el GIL no alcanza con un hilo para una simulación CPU-bound). El
-    taller devuelto (snapshots, cilindros, máquinas, alertas) viaja por pickle.
-    ``seed`` determina la realización de fallas de máquina (ver
-    ``TallerCilindros.simular``); en Monte Carlo suele ser la misma seed que generó
-    el ``cambios_df``.
-    """
-    taller = construir_taller_desde_dataframes(cfg, stock_df, cambios_df)
-    taller.simular(estrategia=estrategia, callback_log=None, seed=seed)
-    return taller
-
-
-# ── Ejecución en procesos (worker reutilizable + barridos en paralelo) ────────
-#
-# La simulación es CPU-bound en Python puro, así que se corre en procesos aparte
-# (no hilos: el GIL los serializa). Para barridos de muchas corridas que comparten
-# el MISMO stock + config + estrategia y solo varían el ``Programa_Cambios`` (p. ej.
-# distintas seeds del generador), el stock/config/estrategia se cargan **una sola
-# vez por worker** vía un *initializer* del pool y cada tarea envía únicamente su
-# ``cambios_df`` — lo más liviano de serializar. Lo usan tanto la GUI (una corrida)
-# como ``batch_simular`` (N corridas en paralelo).
-
-# Estado por-worker: lo siembra el initializer en cada proceso del pool (no es
-# estado global compartido entre procesos — cada worker tiene su propia copia).
-_WORKER_STATE: Dict[str, Any] = {}
-
-
-def ctx_paralelo() -> "multiprocessing.context.BaseContext":
-    """Contexto de multiprocessing preferido: ``fork`` si está disponible.
-
-    Con ``fork`` el worker hereda los módulos ya importados (sin re-importar ni
-    re-ejecutar nada — clave cuando el padre es la GUI). Si la plataforma no
-    soporta fork (p. ej. Windows) se cae a ``spawn``; como el initializer y la
-    tarea viven en este módulo (sin GUI), spawn solo re-importa ``cli``.
-    """
-    metodos = multiprocessing.get_all_start_methods()
-    return multiprocessing.get_context("fork" if "fork" in metodos else "spawn")
-
-
-def init_worker_simulacion(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
-                           estrategia: str = "mayor_diametro",
-                           seed: Optional[int] = None) -> None:
-    """*Initializer* del pool: fija el stock+config+estrategia(+seed) compartidos del worker.
-
-    Se ejecuta una vez por proceso del pool; luego cada tarea
-    (``simular_cambios_worker``) reusa estos valores sin volver a serializarlos.
-    ``seed`` es la seed de fallas **compartida** por defecto; ``simular_cambios_worker``
-    con una tarea ``(cambios_df, seed)`` la sobreescribe por corrida (Monte Carlo).
-    """
-    _WORKER_STATE["cfg"] = cfg
-    _WORKER_STATE["stock_df"] = stock_df
-    _WORKER_STATE["estrategia"] = estrategia
-    _WORKER_STATE["seed"] = seed
-
-
-def simular_cambios_worker(tarea: Any) -> TallerCilindros:
-    """Tarea del pool: simula con el stock/config/estrategia del worker + la tarea.
-
-    ``tarea`` puede ser el ``cambios_df`` solo (usa la seed compartida del
-    initializer, p. ej. la GUI con seed=None) o una tupla ``(cambios_df, seed)``
-    para barridos de Monte Carlo donde cada corrida lleva su propia seed de fallas
-    (típicamente la misma que generó ese ``cambios_df``). Requiere que
-    ``init_worker_simulacion`` haya corrido en este proceso. Devuelve el taller.
-    """
-    if isinstance(tarea, tuple):
-        cambios_df, seed = tarea
-    else:
-        cambios_df, seed = tarea, _WORKER_STATE.get("seed")
-    return simular_desde_dataframes(
-        _WORKER_STATE["cfg"], _WORKER_STATE["stock_df"], cambios_df,
-        _WORKER_STATE["estrategia"], seed=seed)
-
-
-def batch_simular(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
-                  lista_cambios: List["pd.DataFrame"],
-                  estrategia: str = "mayor_diametro",
-                  max_workers: Optional[int] = None,
-                  seeds: Optional[List[Optional[int]]] = None) -> List[TallerCilindros]:
-    """Corre N simulaciones en paralelo: mismo stock+config+estrategia, distintos cambios.
-
-    El stock/config/estrategia se cargan **una vez por worker** (initializer) y cada
-    tarea solo manda su ``cambios_df``. Devuelve la lista de tallers en el **mismo
-    orden** que ``lista_cambios``. Pensado para barridos de seeds del generador
-    (combinar con ``gencambios.generar_cambios`` para producir cada ``cambios_df``).
-
-    ``seeds`` (opcional, alineada con ``lista_cambios``) fija la seed de **fallas**
-    por corrida — la base de Monte Carlo: cada simulación realiza sus fallas con la
-    misma seed que generó su ``cambios_df``. Si se omite, todas comparten ``None``
-    (sin fallas reproducibles).
-    """
-    if not lista_cambios:
-        return []
-    if seeds is not None and len(seeds) != len(lista_cambios):
-        raise ValueError("seeds debe tener el mismo largo que lista_cambios.")
-    tareas: List[Any] = (list(zip(lista_cambios, seeds)) if seeds is not None
-                         else list(lista_cambios))
-    with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx_paralelo(),
-                             initializer=init_worker_simulacion,
-                             initargs=(cfg, stock_df, estrategia)) as ex:
-        return list(ex.map(simular_cambios_worker, tareas))
-
-
-def generar_y_construir(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
-                        modelo: Dict[str, Any], *, seed: Optional[int] = None,
-                        horizonte_dias: Optional[int] = None) -> TallerCilindros:
-    """Genera el Programa_Cambios desde ``modelo`` y arma el taller listo a simular.
-
-    Pensado para que un runner paralelo itere sobre seeds reusando el mismo
-    ``stock_df`` y ``modelo`` ya ajustado.
-    """
-    cambios_df = gencambios.generar_cambios(modelo, cfg, seed=seed,
-                                            horizonte_dias=horizonte_dias)
-    return construir_taller_desde_dataframes(cfg, stock_df, cambios_df)
-
-
-def ejecutar_simulacion(ruta_excel: str, estrategia: str = "mayor_diametro",
-                        config_path: Optional[str] = None,
-                        callback_log: Optional[Callable[[str], None]] = print,
-                        tiempo_enfriado: Optional[float] = None,
-                        max_iteraciones: Optional[int] = None,
-                        seed: Optional[int] = None) -> TallerCilindros:
-    """Carga datos + configuración, ejecuta la simulación y devuelve el taller.
-
-    Replica la orquestación de ``App._simular()`` pero sin GUI. ``tiempo_enfriado``
-    y ``max_iteraciones``, si se indican, tienen prioridad sobre el valor del JSON.
-    ``seed`` determina la realización de las fallas de máquina (ver
-    ``TallerCilindros.simular``); ``None`` ⇒ sin fallas reproducibles.
-    """
-    cfg = _cargar_config(config_path)
-    if tiempo_enfriado is not None:
-        cfg["tiempo_enfriado_h"] = tiempo_enfriado
-    if max_iteraciones is not None:
-        cfg["max_iteraciones"] = max_iteraciones
-
-    taller = construir_taller(cfg, ruta_excel)
-
-    if callback_log:
-        for aviso in taller.avisos_carga:
-            callback_log(aviso)
-
-    taller.simular(estrategia=estrategia, callback_log=callback_log, seed=seed)
-    return taller
-
-
-def _cargar_config(config_path: Optional[str]) -> Dict[str, Any]:
-    """Carga la configuración del JSON indicado, o la de usuario por defecto."""
-    if config_path:
-        with open(config_path, "r", encoding="utf-8") as f:
-            return cfgmod.migrar(json.load(f))
-    return cargar_config()
 
 
 def _escribir_json(obj: Any, ruta: str) -> None:
@@ -266,8 +74,11 @@ def _formatear_resumen(kpis: Dict[str, Any]) -> str:
         f"  Horizonte simulación   : {kpis['horizonte_simulacion_h']:.1f} h",
         f"  Diámetro promedio      : {kpis['diametro_promedio_mm']:.1f} mm",
         f"  Desgaste medio         : {kpis['desgaste_medio_mm']:.2f} mm",
-        "  Utilización de máquinas (disponible / neta):",
     ]
+    if kpis.get("reposicion_entregados") or kpis.get("reposicion_pendientes"):
+        lineas.append(f"  Repuestos (entregados) : {kpis['reposicion_entregados']}")
+        lineas.append(f"  Reposición pendiente   : {kpis['reposicion_pendientes']}")
+    lineas.append("  Utilización de máquinas (disponible / neta):")
     for nombre, pct in kpis["utilizacion_maquinas_pct"].items():
         neta = kpis["utilizacion_neta_pct"].get(nombre, 0.0)
         lineas.append(f"    - {nombre:<18}: {pct:.0f}% / {neta:.0f}%")
@@ -277,7 +88,7 @@ def _formatear_resumen(kpis: Dict[str, Any]) -> str:
 
 # ── Comando: simular ──────────────────────────────────────────────────────────
 
-def _cmd_simular(args) -> int:
+def _cmd_simular(args: argparse.Namespace) -> int:
     if not os.path.isfile(args.excel):
         print(f"Error: no se encontró el archivo de datos: {args.excel}", file=sys.stderr)
         return 2
@@ -313,11 +124,11 @@ def _print_config(cfg: Dict[str, Any]) -> None:
     print(json.dumps(cfg, ensure_ascii=False, indent=2))
 
 
-def _cmd_config(args) -> int:
+def _cmd_config(args: argparse.Namespace) -> int:
     sub = args.subcomando
 
     if sub == "show":
-        _print_config(_cargar_config(args.config))
+        _print_config(cargar_config_path(args.config))
         return 0
 
     if sub == "export":
@@ -356,13 +167,16 @@ def _cmd_config(args) -> int:
             return 0
 
         if sub == "sim":
+            estr_kwargs = {fam.clave_cfg: getattr(args, fam.dest_cli)
+                           for fam in FAMILIAS_ESTRATEGIA}
             cfgmod.set_sim(cfg, tiempo_enfriado=args.tiempo_enfriado,
-                           max_iteraciones=args.max_iteraciones,
-                           estrategia_asignacion=args.estrategia_asignacion)
+                           max_iteraciones=args.max_iteraciones, **estr_kwargs)
             guardar_config(cfg)
+            estr_txt = ", ".join(f"{fam.clave_cfg}={cfg.get(fam.clave_cfg, fam.defecto)}"
+                                 for fam in FAMILIAS_ESTRATEGIA)
             print(f"Parámetros de simulación: tiempo_enfriado_h="
                   f"{obtener_tiempo_enfriado(cfg)}, max_iteraciones={obtener_max_iteraciones(cfg)}, "
-                  f"estrategia_asignacion={obtener_estrategia_asignacion(cfg)}")
+                  f"{estr_txt}")
             return 0
 
         if sub == "maquina":
@@ -385,7 +199,7 @@ def _cmd_config(args) -> int:
     return 2
 
 
-def _cmd_config_maquina(args, cfg) -> int:
+def _cmd_config_maquina(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     accion = args.accion
     if accion == "list":
         for m in obtener_maquinas(cfg):
@@ -421,7 +235,7 @@ def _cmd_config_maquina(args, cfg) -> int:
     return 2
 
 
-def _avisar_incoherencias(cfg) -> None:
+def _avisar_incoherencias(cfg: Dict[str, Any]) -> None:
     """Imprime avisos (no fatales) si jaulas y rangos quedaron desalineados.
 
     La edición por CLI es incremental (p. ej. subir jaulas y luego agregar el
@@ -432,7 +246,7 @@ def _avisar_incoherencias(cfg) -> None:
         print(f"Aviso: {p}", file=sys.stderr)
 
 
-def _cmd_config_jaula(args, cfg) -> int:
+def _cmd_config_jaula(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     accion = args.accion
     if accion == "list":
         for r in obtener_rangos(cfg):
@@ -474,7 +288,7 @@ def _resumen_modelo(modelo: Dict[str, Any]) -> str:
             f"  fechas    : {modelo.get('fecha_min')} → {modelo.get('fecha_max')}")
 
 
-def _cmd_modelo(args) -> int:
+def _cmd_modelo(args: argparse.Namespace) -> int:
     accion = args.accion
 
     if accion == "show":
@@ -514,7 +328,7 @@ def _cmd_modelo(args) -> int:
     return 2
 
 
-def _cmd_generar_cambios(args) -> int:
+def _cmd_generar_cambios(args: argparse.Namespace) -> int:
     cfg = cargar_config()
     if args.umbral_desbaste is not None:
         cfgmod.set_generador_cambios(cfg, umbral_desbaste=args.umbral_desbaste)
@@ -566,7 +380,7 @@ def _cmd_generar_cambios(args) -> int:
     return 0
 
 
-def _cmd_config_generador(args, cfg) -> int:
+def _cmd_config_generador(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     cfgmod.set_generador_cambios(cfg, generador=args.generador,
                                  umbral_desbaste=args.umbral_desbaste,
                                  horizonte_dias=args.horizonte_dias,
@@ -580,7 +394,7 @@ def _cmd_config_generador(args, cfg) -> int:
     return 0
 
 
-def _cmd_config_turnos_cambios(args, cfg) -> int:
+def _cmd_config_turnos_cambios(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     turnos = _resolver_turnos(args)
     cfgmod.set_turnos_cambios(cfg, turnos)
     guardar_config(cfg)
@@ -643,8 +457,12 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_simcfg = csub.add_parser("sim", help="Edita los parámetros de simulación.")
     p_simcfg.add_argument("--tiempo-enfriado", type=float)
     p_simcfg.add_argument("--max-iteraciones", type=int)
-    p_simcfg.add_argument("--estrategia-asignacion", choices=list(ESTRATEGIAS_ASIGNACION.keys()),
-                          help="Estrategia de asignación de jaula destino al rectificar.")
+    # Un flag por familia de estrategia, derivado de la tabla (agregar una
+    # familia nueva no requiere tocar el CLI).
+    for fam in FAMILIAS_ESTRATEGIA:
+        p_simcfg.add_argument(fam.flag_cli, dest=fam.dest_cli,
+                              choices=list(fam.registro.keys()),
+                              help=f"{fam.etiqueta_ui} (clave en user_config.json).")
 
     p_maq = csub.add_parser("maquina", help="Gestiona máquinas (list/add/remove/set).")
     p_maq.add_argument("accion", choices=["list", "add", "remove", "set"])
@@ -710,7 +528,7 @@ def _construir_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     parser = _construir_parser()
     args = parser.parse_args(argv)
 

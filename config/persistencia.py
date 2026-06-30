@@ -61,6 +61,7 @@ DEFAULTS: Dict[str, Any] = {
     "max_iteraciones": 10000,
     "estrategia_seleccion": "mayor_diametro",
     "estrategia_asignacion": "jaula_mas_necesitada",
+    "estrategia_reposicion": "ninguna",
     # Generador sintético del Programa_Cambios a partir de la historia real.
     # ``turnos_cambios`` (régimen propio del laminador) se omite ⇒ 24/7; sólo se
     # persiste el dict compacto cuando no es 24/7 (igual que los turnos de máquina).
@@ -187,6 +188,11 @@ def obtener_estrategia_seleccion(cfg: Dict[str, Any]) -> str:
     return str(cfg.get("estrategia_seleccion", DEFAULTS["estrategia_seleccion"]))
 
 
+def obtener_estrategia_reposicion(cfg: Dict[str, Any]) -> str:
+    """Devuelve la clave de la estrategia de reposición de cilindros nuevos."""
+    return str(cfg.get("estrategia_reposicion", DEFAULTS["estrategia_reposicion"]))
+
+
 def obtener_generador_cambios(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Devuelve la config del generador de cambios (merge con los defaults)."""
     gc = dict(DEFAULTS["generador_cambios"])
@@ -201,8 +207,10 @@ def obtener_turnos_cambios(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 # ── Mutadores (capa única de CRUD usada por el CLI y la GUI) ──────────────────
 
-def set_config_global(cfg: Dict[str, Any], *, diametro_maximo=None, diametro_minimo=None,
-                      tiempo_traslado_crc_min=None, cantidad_jaulas=None) -> Dict[str, Any]:
+def set_config_global(cfg: Dict[str, Any], *, diametro_maximo: Optional[float] = None,
+                      diametro_minimo: Optional[float] = None,
+                      tiempo_traslado_crc_min: Optional[float] = None,
+                      cantidad_jaulas: Optional[int] = None) -> Dict[str, Any]:
     """Actualiza los campos indicados de ``config_global`` (los None se ignoran)."""
     cg = obtener_config_global(cfg)
     if diametro_maximo is not None:
@@ -263,8 +271,9 @@ def add_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: float, prod_min: f
     return cfg
 
 
-def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm=None, prod_min=None,
-                desb_mm=None, desb_min=None, prioridad=None,
+def set_maquina(cfg: Dict[str, Any], nombre: str, *, prod_mm: Optional[float] = None,
+                prod_min: Optional[float] = None, desb_mm: Optional[float] = None,
+                desb_min: Optional[float] = None, prioridad: Optional[str] = None,
                 turnos: Optional[Dict[str, Any]] = None,
                 tasa_falla: Optional[float] = None) -> Dict[str, Any]:
     """Modifica los campos indicados de una máquina existente.
@@ -409,9 +418,15 @@ def verificar_coherencia(cfg: Dict[str, Any]) -> None:
         raise ValueError(" ".join(problemas))
 
 
-def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
-            estrategia_asignacion=None, estrategia_seleccion=None) -> Dict[str, Any]:
-    """Actualiza los parámetros de simulación indicados."""
+def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado: Optional[float] = None,
+            max_iteraciones: Optional[int] = None,
+            **estrategias: Optional[str]) -> Dict[str, Any]:
+    """Actualiza los parámetros de simulación indicados.
+
+    Las estrategias se pasan como kwargs ``estrategia_*`` (clave_cfg de cada
+    familia, ver ``FAMILIAS_ESTRATEGIA``): se escribe en ``cfg`` cada una no None.
+    Esto evita enumerar cada familia aquí — agregar una nueva no toca ``set_sim``.
+    """
     if tiempo_enfriado is not None:
         t = round(float(tiempo_enfriado), 1)
         if t < 0:
@@ -422,16 +437,17 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado=None, max_iteraciones=None,
         if n <= 0:
             raise ValueError("El máximo de iteraciones debe ser mayor que 0.")
         cfg["max_iteraciones"] = n
-    if estrategia_asignacion is not None:
-        cfg["estrategia_asignacion"] = str(estrategia_asignacion)
-    if estrategia_seleccion is not None:
-        cfg["estrategia_seleccion"] = str(estrategia_seleccion)
+    for clave, valor in estrategias.items():
+        if valor is not None:
+            cfg[clave] = str(valor)
     return cfg
 
 
-def set_generador_cambios(cfg: Dict[str, Any], *, generador=None,
-                          umbral_desbaste=None, horizonte_dias=None,
-                          fecha_inicio=None, fecha_fin=None) -> Dict[str, Any]:
+def set_generador_cambios(cfg: Dict[str, Any], *, generador: Optional[str] = None,
+                          umbral_desbaste: Optional[float] = None,
+                          horizonte_dias: Optional[int] = None,
+                          fecha_inicio: Optional[str] = None,
+                          fecha_fin: Optional[str] = None) -> Dict[str, Any]:
     """Actualiza los campos indicados de la config del generador de cambios.
 
     ``fecha_inicio``/``fecha_fin`` son cadenas ISO ``YYYY-MM-DD`` (o ``""`` para

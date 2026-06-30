@@ -67,6 +67,10 @@ def _kpi_color(key: str, value: Any) -> str:
         return tk_theme.KPI_COLOR_DIAMETRO
     if key == "desgaste_medio_mm":
         return tk_theme.KPI_COLOR_DESGASTE
+    if key == "reposicion_entregados":
+        return tk_theme.KPI_COLOR_OK
+    if key == "reposicion_pendientes":
+        return tk_theme.KPI_COLOR_ALERT if float(value or 0) > 0 else tk_theme.KPI_COLOR_OK
     return tk_theme.KPI_TEXT_DEFAULT
 
 
