@@ -6,13 +6,15 @@ desacoplada del modelo (y del CLI) para facilitar pruebas y evolucion incrementa
 
 from __future__ import annotations
 
-from concurrent.futures import Future, ProcessPoolExecutor
+import queue
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from runner import (
+from nucleo.montecarlo import EspecMonteCarlo, correr_montecarlo
+from nucleo.runner import (
     ctx_paralelo,
     init_worker_simulacion,
     simular_cambios_worker,
@@ -69,3 +71,63 @@ class SimulationService:
             initializer=init_worker_simulacion,
             initargs=(request.cfg, request.stock_df, request.estrategia, request.seed),
         )
+
+
+@dataclass
+class MonteCarloRequest:
+    """Payload para lanzar un estudio de Monte Carlo desde la GUI."""
+
+    base_cfg: Dict[str, Any]
+    stock_df: "pd.DataFrame"
+    modelo: Dict[str, Any]
+    spec: EspecMonteCarlo
+    csv_path: str
+    dump_dir: Optional[str] = None
+    resume: bool = False
+    max_workers: Optional[int] = None
+
+
+class MonteCarloService:
+    """Ejecuta ``correr_montecarlo`` en un hilo aparte y stream-ea el progreso.
+
+    ``correr_montecarlo`` ya distribuye las corridas en **procesos** (su propio
+    pool), por lo que el trabajo CPU-bound no toma el GIL del hilo de Qt. Acá lo
+    corremos en un **hilo** de fondo (un ``ThreadPoolExecutor`` de 1) que bloquea
+    esperando ese pool sin congelar el event loop, y publicamos el avance en una
+    cola que la GUI sondea con su ``QTimer``.
+    """
+
+    def __init__(self) -> None:
+        self._executor: Optional[ThreadPoolExecutor] = None
+        self.progress: "queue.Queue[Tuple[int, int]]" = queue.Queue()
+
+    def submit(self, request: MonteCarloRequest) -> Future:
+        """Lanza el barrido y devuelve el future (resultado = lista de filas)."""
+        self.shutdown()
+        # Cola nueva por corrida para no arrastrar avances viejos.
+        self.progress = queue.Queue()
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        return self._executor.submit(self._run, request)
+
+    def _run(self, request: MonteCarloRequest) -> List[Dict[str, Any]]:
+        return correr_montecarlo(
+            request.base_cfg, request.stock_df, request.modelo, request.spec,
+            csv_path=request.csv_path, dump_dir=request.dump_dir,
+            resume=request.resume, max_workers=request.max_workers,
+            on_progress=lambda hechos, total: self.progress.put((hechos, total)))
+
+    def drain_progress(self) -> Optional[Tuple[int, int]]:
+        """Devuelve el último avance publicado (o None si no hubo novedades)."""
+        ultimo: Optional[Tuple[int, int]] = None
+        try:
+            while True:
+                ultimo = self.progress.get_nowait()
+        except queue.Empty:
+            pass
+        return ultimo
+
+    def shutdown(self) -> None:
+        """Libera el hilo de fondo si existe."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None

@@ -37,9 +37,11 @@ from gui_qt.console_qt import ConsolePanel
 from gui_qt.dashboard_qt import DashboardPanel
 from gui_qt.generation_qt import GenerationPanel
 from gui_qt.inventory_qt import InventoryPanel
+from gui_qt.montecarlo_qt import MonteCarloPanel
 from gui_qt.playback_slider_qt import PlaybackTimelineSlider
 from gui_qt.sidebar_qt import build_sidebar
-from gui_qt.services import SimulationRequest, SimulationService
+from gui_qt.services import (MonteCarloRequest, MonteCarloService,
+                            SimulationRequest, SimulationService)
 from gui_qt.tab_kpis_qt import KpisPanel
 from gui_qt.vista_realtime import RealTimeView
 from gui_qt.widgets import FlowCard, SectionCard, StatusBarWidget, TabsCornerInfoWidget
@@ -64,6 +66,7 @@ class MainWindow(QMainWindow):
         "Inventario",
         "KPIs",
         "Generacion",
+        "Monte Carlo",
         "Configuracion",
         "Consola",
     ]
@@ -84,6 +87,8 @@ class MainWindow(QMainWindow):
 
         self.sim_service = SimulationService()
         self.sim_future = None
+        self.mc_service = MonteCarloService()
+        self.mc_future = None
         # Estado persistente del flujo — None = no cambiado, True/False = on/off
         self._flow_state = {"inventario": False, "generacion": False, "simulacion": False}
 
@@ -115,6 +120,10 @@ class MainWindow(QMainWindow):
 
         self.play_timer = QTimer(self)
         self.play_timer.timeout.connect(self._play_tick)
+
+        self.mc_poll_timer = QTimer(self)
+        self.mc_poll_timer.setInterval(150)
+        self.mc_poll_timer.timeout.connect(self._poll_montecarlo)
 
         root = QWidget(self)
         self.setCentralWidget(root)
@@ -186,6 +195,12 @@ class MainWindow(QMainWindow):
             on_go_to_snapshot=self._go_to_snapshot,
             parent=self,
         )
+        self.montecarlo_panel = MonteCarloPanel(
+            self.user_cfg,
+            on_run=self._run_montecarlo,
+            on_cfg_saved=self._on_cfg_saved,
+            parent=self,
+        )
         self.console_panel = ConsolePanel(self)
         self.config_panel = ConfigPanel(self.user_cfg, on_saved=self._on_cfg_saved, parent=self)
 
@@ -227,6 +242,11 @@ class MainWindow(QMainWindow):
                 title.setObjectName("BoardHeader")
                 card_col.addWidget(title)
                 card_col.addWidget(self.generation_panel)
+            elif name == "Monte Carlo":
+                title = QLabel(name)
+                title.setObjectName("BoardHeader")
+                card_col.addWidget(title)
+                card_col.addWidget(self.montecarlo_panel, 1)
             elif name == "Consola":
                 title = QLabel(name)
                 title.setObjectName("BoardHeader")
@@ -284,6 +304,7 @@ class MainWindow(QMainWindow):
 
         self.status_main_label.setText(f"Excel cargado: {Path(selected).name}")
         self.top_state.setText("● excel cargado")
+        self.montecarlo_panel.set_stock_df(self.stock_df)
         # Excel cargado (sin generación) ⇒ sin seed de fallas reproducible.
         self.fallas_seed = None
         # Cargar un nuevo Excel invalida overlays de PARADA previos.
@@ -387,6 +408,39 @@ class MainWindow(QMainWindow):
         self.progress_sim.setVisible(False)
         self._update_run_button_state()
         self._update_playback_button_state()
+
+    def _run_montecarlo(self, request: MonteCarloRequest) -> None:
+        """Lanza el estudio de Monte Carlo en un hilo de fondo y sondea su avance."""
+        if self.mc_future is not None:
+            return
+        self.mc_future = self.mc_service.submit(request)
+        self.status_main_label.setText("Monte Carlo en curso...")
+        self.top_state.setText("● monte carlo")
+        self.mc_poll_timer.start()
+
+    def _poll_montecarlo(self) -> None:
+        """Sondea el future del barrido y refleja el avance sin bloquear la UI."""
+        if self.mc_future is None:
+            self.mc_poll_timer.stop()
+            return
+        avance = self.mc_service.drain_progress()
+        if avance is not None:
+            self.montecarlo_panel.set_progress(avance[0], avance[1])
+        if not self.mc_future.done():
+            return
+
+        self.mc_poll_timer.stop()
+        fut = self.mc_future
+        self.mc_future = None
+        try:
+            filas = fut.result()
+        except Exception as exc:
+            self.montecarlo_panel.set_error(str(exc))
+            self.status_main_label.setText("Error en Monte Carlo")
+            return
+        self.montecarlo_panel.mostrar_resultados(filas)
+        self.status_main_label.setText(f"Monte Carlo completado: {len(filas)} corridas")
+        self.top_state.setText("● monte carlo completo")
 
     def _on_seek(self, value: int) -> None:
         """Actualiza el resumen de Vista Real al mover el slider."""
@@ -544,6 +598,7 @@ class MainWindow(QMainWindow):
         self.user_cfg = cfg
         self.config_panel.set_cfg(self.user_cfg)
         self.generation_panel.set_cfg(self.user_cfg)
+        self.montecarlo_panel.actualizar_cfg(self.user_cfg)
         self.estrategia = obtener_estrategia_seleccion(self.user_cfg)
         self.realtime_view.set_strategy(self.estrategia)
         self._sync_preview_from_config()
@@ -581,8 +636,10 @@ class MainWindow(QMainWindow):
         """Limpia recursos de procesos al cerrar la ventana."""
         self.poll_timer.stop()
         self.play_timer.stop()
+        self.mc_poll_timer.stop()
         self.progress_sim.setVisible(False)
         self.sim_service.shutdown()
+        self.mc_service.shutdown()
         super().closeEvent(event)
 
     def _sync_preview_from_config(self) -> None:

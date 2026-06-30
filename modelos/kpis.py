@@ -102,3 +102,60 @@ def calcular_kpis(taller: TallerCilindros) -> Dict[str, Any]:
     kpis["metric_order"] = metric_order
     kpis["metric_meta"] = metric_meta
     return kpis
+
+
+def _metricas_paradas(taller: TallerCilindros) -> Dict[str, float]:
+    """Métricas de servicio derivadas de los snapshots (para Monte Carlo).
+
+    - ``paradas``: episodios de PARADA (flancos de subida por jaula: una jaula
+      que pasa de operativa a detenida cuenta una vez por episodio).
+    - ``stock_min``: mínimo de cilindros Disponibles a lo largo de la corrida.
+    - ``nivel_servicio_pct``: % del tiempo simulado sin ninguna jaula parada
+      (ponderado por la duración entre snapshots).
+    """
+    snaps = taller.snapshots
+    if not snaps:
+        return {"paradas": 0.0, "stock_min": 0.0, "nivel_servicio_pct": 100.0}
+
+    episodios = 0
+    previas: set = set()
+    stock_min = min(s.cantidad_disponibles for s in snaps)
+
+    total_s = 0.0
+    servida_s = 0.0
+    for i, s in enumerate(snaps):
+        actuales = set(s.jaulas_paradas)
+        episodios += len(actuales - previas)  # flancos de subida
+        previas = actuales
+        if i + 1 < len(snaps):
+            dt = (snaps[i + 1].tiempo - s.tiempo).total_seconds()
+            if dt > 0:
+                total_s += dt
+                if not actuales:
+                    servida_s += dt
+    nivel = (servida_s / total_s * 100.0) if total_s > 0 else 100.0
+    return {"paradas": float(episodios), "stock_min": float(stock_min),
+            "nivel_servicio_pct": nivel}
+
+
+def metricas_montecarlo(taller: TallerCilindros) -> Dict[str, float]:
+    """KPIs **planos** (solo escalares) para una corrida de Monte Carlo.
+
+    Construido sobre ``calcular_kpis`` (única fuente de verdad), que **no se
+    toca** para no alterar el golden master: aplana los dicts por-máquina a
+    columnas ``util_disp_<maq>`` / ``util_neta_<maq>`` / ``falla_<maq>`` y suma
+    las métricas de servicio (``paradas``/``stock_min``/``nivel_servicio_pct``).
+    El resultado es un dict ``{str: float}`` listo para fila de CSV y agregación.
+    """
+    k = calcular_kpis(taller)
+    fila: Dict[str, float] = {clave: float(k[clave]) for clave in k["metric_order"]}
+
+    prefijos = {"utilizacion_maquinas_pct": "util_disp",
+                "utilizacion_neta_pct": "util_neta",
+                "tiempo_falla_pct": "falla"}
+    for clave, prefijo in prefijos.items():
+        for nombre, val in k.get(clave, {}).items():
+            fila[f"{prefijo}_{nombre}"] = float(val)
+
+    fila.update(_metricas_paradas(taller))
+    return fila

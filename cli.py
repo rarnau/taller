@@ -36,7 +36,9 @@ from modelos.kpis import calcular_kpis
 from modelos.estrategias import ESTRATEGIAS_SELECCION, FAMILIAS_ESTRATEGIA
 from modelos import generador_cambios as gencambios
 from modelos import turnos as turnos_mod
-from runner import cargar_config_path, ejecutar_simulacion
+from nucleo.montecarlo import (EspecMonteCarlo, correr_montecarlo, exportar_resumen_csv,
+                        resumir)
+from nucleo.runner import cargar_config_path, ejecutar_simulacion
 
 _TIPOS_RECT = [t.value for t in TipoRectificado]
 
@@ -380,6 +382,82 @@ def _cmd_generar_cambios(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── Comando: montecarlo ───────────────────────────────────────────────────────
+
+def _formatear_resumen_mc(resumen: Dict[str, Dict[str, float]], n: int) -> str:
+    """Tabla legible del resumen estadístico (media/desv/P10/P50/P90 por KPI)."""
+    lineas = ["", "═" * 72,
+              f"  RESUMEN MONTE CARLO · {n} corridas", "═" * 72,
+              f"  {'VARIABLE':<28}{'MEDIA':>9}{'DESV':>9}{'P10':>9}{'P50':>9}{'P90':>9}"]
+    for var in sorted(resumen):
+        st = resumen[var]
+        lineas.append(f"  {var:<28}{st['mean']:>9.2f}{st['std']:>9.2f}"
+                      f"{st['p10']:>9.2f}{st['p50']:>9.2f}{st['p90']:>9.2f}")
+    lineas.append("═" * 72)
+    return "\n".join(lineas)
+
+
+def _cmd_montecarlo(args: argparse.Namespace) -> int:
+    if not os.path.isfile(args.stock):
+        print(f"Error: no se encontró el Excel de stock: {args.stock}", file=sys.stderr)
+        return 2
+
+    cfg = cargar_config_path(args.config)
+
+    # Modelo del generador: re-ajusta si se pasó historia/--ajustar, si no el persistido.
+    modelo = modmod.load_active_model()
+    if args.historia or args.ajustar:
+        if not args.historia or not os.path.isfile(args.historia):
+            print("Error: --ajustar requiere una historia válida.", file=sys.stderr)
+            return 2
+        try:
+            historia = _leer_historia(args.historia)
+            modelo = gencambios.ajustar_modelo(historia, cfg, clave=args.generador,
+                                               modelo_previo=modmod.load_active_model())
+        except Exception as e:
+            print(f"Error al ajustar el modelo: {e}", file=sys.stderr)
+            return 1
+        modmod.save_model(modelo)
+    if not modelo:
+        print("Error: no hay modelo persistido. Use 'modelo ajustar' o pase una historia.",
+              file=sys.stderr)
+        return 2
+
+    try:
+        stock_df = pd.read_excel(args.stock, sheet_name="Stock_Inicial", engine="openpyxl")
+    except Exception as e:
+        print(f"Error al leer la hoja Stock_Inicial: {e}", file=sys.stderr)
+        return 1
+
+    spec = EspecMonteCarlo.desde_cfg(cfg)
+    if args.runs is not None:
+        spec.runs = int(args.runs)
+    if args.seed is not None:
+        spec.master_seed = int(args.seed)
+    if args.chunk is not None:
+        spec.chunk = int(args.chunk)
+    if args.generador:
+        spec.fijos["generador"] = args.generador
+
+    progreso = None if args.quiet else (
+        lambda hechos, total: print(f"  {hechos}/{total} corridas completadas..."))
+    try:
+        filas = correr_montecarlo(cfg, stock_df, modelo, spec, csv_path=args.csv,
+                                  dump_dir=args.dump_dir, resume=args.resume,
+                                  on_progress=progreso, max_workers=args.max_workers)
+    except Exception as e:
+        print(f"Error al ejecutar el Monte Carlo: {e}", file=sys.stderr)
+        return 1
+
+    resumen = resumir(filas)
+    print(_formatear_resumen_mc(resumen, len(filas)))
+    print(f"CSV de corridas: {args.csv}")
+    if args.resumen_csv:
+        exportar_resumen_csv(resumen, args.resumen_csv)
+        print(f"Resumen estadístico: {args.resumen_csv}")
+    return 0
+
+
 def _cmd_config_generador(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     cfgmod.set_generador_cambios(cfg, generador=args.generador,
                                  umbral_desbaste=args.umbral_desbaste,
@@ -524,6 +602,32 @@ def _construir_parser() -> argparse.ArgumentParser:
                       help="Re-ajusta el modelo con la historia antes de generar.")
     p_gc.add_argument("--salida", metavar="RUTA.xlsx", help="Excel de salida (si se omite, imprime).")
     p_gc.set_defaults(func=_cmd_generar_cambios)
+
+    # montecarlo
+    p_mc = sub.add_parser("montecarlo",
+                          help="Estudio de Monte Carlo: miles de corridas con parámetros sorteados.")
+    p_mc.add_argument("stock", help="Excel con la hoja Stock_Inicial.")
+    p_mc.add_argument("--csv", default="montecarlo_resultados.csv",
+                      metavar="RUTA.csv", help="CSV de salida (una fila por corrida).")
+    p_mc.add_argument("--runs", type=int, help="Número de corridas (pisa la config).")
+    p_mc.add_argument("--seed", type=int, metavar="MASTER",
+                      help="Master seed (reproducible/reanudable). Por defecto aleatoria.")
+    p_mc.add_argument("--chunk", type=int, help="Reporta progreso cada N corridas.")
+    p_mc.add_argument("--resume", action="store_true",
+                      help="Reanuda desde el CSV: saltea las corridas ya hechas.")
+    p_mc.add_argument("--dump-dir", metavar="DIR",
+                      help="Directorio para volcar el taller completo de cada corrida (pickle).")
+    p_mc.add_argument("--max-workers", type=int, help="Procesos en paralelo (default: CPUs).")
+    p_mc.add_argument("--resumen-csv", metavar="RUTA.csv",
+                      help="Escribe el resumen estadístico (una fila por KPI).")
+    p_mc.add_argument("--generador", choices=list(gencambios.GENERADORES_CAMBIOS),
+                      help="Generador de cambios (pisa la config).")
+    p_mc.add_argument("--historia", help="Historia para re-ajustar el modelo antes de correr.")
+    p_mc.add_argument("--ajustar", action="store_true",
+                      help="Re-ajusta el modelo con la historia antes de correr.")
+    p_mc.add_argument("--config", metavar="RUTA", help="JSON de configuración alternativo.")
+    p_mc.add_argument("--quiet", action="store_true", help="Suprime el progreso.")
+    p_mc.set_defaults(func=_cmd_montecarlo)
 
     return parser
 
