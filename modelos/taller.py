@@ -562,12 +562,19 @@ class TallerCilindros:
         jaula.cilindros_trabajando.append(cil)
         cil.registrar_evento(tiempo, motivo)
 
-    def _instalar_pareja_o_parar(self, jaula_id: int, tiempo: datetime) -> bool:
+    def _instalar_pareja_o_parar(self, jaula_id: int, tiempo: datetime,
+                                 disponibles: Optional[List[Cilindro]] = None) -> bool:
         """
         Completa la pareja de trabajo de una jaula (CRC primero, luego disponibles
         del rango). Una jaula no puede operar con menos de _BUFFER_CRC_SIZE
         cilindros: si no hay stock suficiente para completarla, NO instala ninguno
         y devuelve False (la jaula debe quedar PARADA).
+
+        ``disponibles`` (opcional) es una lista compartida y **mutable** de
+        cilindros DISPONIBLE: se filtra por jaula sin re-escanear todo el stock y
+        los cilindros instalados se **quitan de ella**, de modo que una llamada
+        siguiente (otra jaula en el mismo barrido de reactivación) no los reuse.
+        Con ``None`` se escanea el stock (comportamiento de una sola jaula).
         """
         jaula = self.jaulas[jaula_id]
         faltan = _BUFFER_CRC_SIZE - len(jaula.cilindros_trabajando)
@@ -576,17 +583,24 @@ class TallerCilindros:
 
         candidatos = list(jaula.cilindros_crc)
         if len(candidatos) < faltan:
-            disponibles = sorted(
-                self.obtener_disponibles_para_jaula(jaula_id),
+            admisibles = sorted(
+                self.obtener_disponibles_para_jaula(jaula_id, disponibles),
                 key=lambda c: c.diametro, reverse=True
             )
-            candidatos += [c for c in disponibles if c not in candidatos]
+            candidatos += [c for c in admisibles if c not in candidatos]
 
         if len(candidatos) < faltan:
             return False  # no se puede formar la pareja -> PARADA
 
-        for cil in candidatos[:faltan]:
+        elegidos = candidatos[:faltan]
+        for cil in elegidos:
             self._instalar_en_jaula(cil, jaula_id, tiempo, f"Instalado en Jaula {jaula_id}")
+        if disponibles is not None:
+            # Los instalados que venían del stock (no del CRC) salen de la lista
+            # compartida para que la próxima jaula del barrido no los tome.
+            for cil in elegidos:
+                if cil in disponibles:
+                    disponibles.remove(cil)
         return True
 
     def _parar_jaula(self, jaula_id: int, tiempo: datetime,
@@ -625,10 +639,14 @@ class TallerCilindros:
         Devuelve True si reactivó al menos una jaula.
         """
         reactivo = False
-        for jaula_id, jaula in self.jaulas.items():
-            if not jaula.parada:
-                continue
-            if self._instalar_pareja_o_parar(jaula_id, tiempo):
+        paradas = [(jid, j) for jid, j in self.jaulas.items() if j.parada]
+        # Lista de DISPONIBLE compartida y mutable: se calcula UNA sola vez (en
+        # orden de self.cilindros.values()) y _instalar_pareja_o_parar le quita
+        # los consumidos, en vez de re-escanear todo el stock por cada jaula parada.
+        disponibles = (self.obtener_cilindros_por_estado(EstadoCilindro.DISPONIBLE)
+                       if paradas else [])
+        for jaula_id, jaula in paradas:
+            if self._instalar_pareja_o_parar(jaula_id, tiempo, disponibles):
                 dur = (tiempo - jaula.parada_desde).total_seconds() / 60 if jaula.parada_desde else 0.0
                 jaula.parada = False
                 jaula.parada_desde = None
@@ -757,9 +775,17 @@ class TallerCilindros:
         """True si ``cil`` es admisible (diámetro+perfil) en alguna jaula."""
         return any(self._admisible_en_jaula(cil, j) for j in range(1, self.cantidad_jaulas + 1))
 
-    def obtener_disponibles_para_jaula(self, jaula_id: int) -> List[Cilindro]:
-        """Obtiene cilindros disponibles admisibles (diámetro + perfil + destino) en la jaula."""
-        disponibles = self.obtener_cilindros_por_estado(EstadoCilindro.DISPONIBLE)
+    def obtener_disponibles_para_jaula(self, jaula_id: int,
+                                       disponibles: Optional[List[Cilindro]] = None) -> List[Cilindro]:
+        """Cilindros disponibles admisibles (diámetro + perfil + destino) en la jaula.
+
+        ``disponibles`` permite pasar una lista ya calculada de cilindros
+        DISPONIBLE (en orden de ``self.cilindros.values()``) para filtrarla sin
+        re-escanear todo el stock; si es ``None`` se escanea. El orden se preserva,
+        así que el ``sorted(...)`` posterior es idéntico al del re-escaneo.
+        """
+        if disponibles is None:
+            disponibles = self.obtener_cilindros_por_estado(EstadoCilindro.DISPONIBLE)
         return [c for c in disponibles if self._admisible_en_jaula(c, jaula_id)]
 
     def obtener_cola_rectificado(self) -> List[Cilindro]:
