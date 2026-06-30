@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from config import persistencia as cfgmod
 from config.persistencia import cargar_config
 from modelos import generador_cambios as gencambios
+from modelos.kpis import calcular_kpis
 from modelos.taller import TallerCilindros
 
 if TYPE_CHECKING:  # solo para anotaciones (sin import duro de pandas)
@@ -136,17 +137,39 @@ def simular_cambios_worker(tarea: Any) -> TallerCilindros:
         _WORKER_STATE["estrategia"], seed=seed)
 
 
-def batch_simular(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
-                  lista_cambios: List["pd.DataFrame"],
-                  estrategia: str = "mayor_diametro",
-                  max_workers: Optional[int] = None,
-                  seeds: Optional[List[Optional[int]]] = None) -> List[TallerCilindros]:
-    """Corre N simulaciones en paralelo: mismo stock+config+estrategia, distintos cambios.
+def simular_kpis_worker(tarea: Any) -> Dict[str, Any]:
+    """Tarea liviana del pool: simula y devuelve solo ``calcular_kpis(taller)``.
+
+    Gemelo de ``simular_cambios_worker`` (misma desempaquetadura de tarea:
+    ``cambios_df`` solo ⇒ seed compartida del initializer; tupla
+    ``(cambios_df, seed)`` ⇒ seed por corrida) pero calcula los KPIs **dentro del
+    worker** y descarta el taller. Solo cruza el pickle el dict chico de KPIs
+    (escalares + dicts por máquina, sin snapshots), mucho más liviano que devolver
+    el ``TallerCilindros`` entero. Requiere que ``init_worker_simulacion`` haya
+    corrido en este proceso.
+    """
+    if isinstance(tarea, tuple):
+        cambios_df, seed = tarea
+    else:
+        cambios_df, seed = tarea, _WORKER_STATE.get("seed")
+    taller = simular_desde_dataframes(
+        _WORKER_STATE["cfg"], _WORKER_STATE["stock_df"], cambios_df,
+        _WORKER_STATE["estrategia"], seed=seed)
+    return calcular_kpis(taller)
+
+
+def _ejecutar_batch(worker: Callable[[Any], Any], cfg: Dict[str, Any],
+                    stock_df: "pd.DataFrame", lista_cambios: List["pd.DataFrame"],
+                    estrategia: str = "mayor_diametro",
+                    max_workers: Optional[int] = None,
+                    seeds: Optional[List[Optional[int]]] = None) -> List[Any]:
+    """Núcleo de los barridos en paralelo: comparte stock+config+estrategia, varía cambios.
 
     El stock/config/estrategia se cargan **una vez por worker** (initializer) y cada
-    tarea solo manda su ``cambios_df``. Devuelve la lista de tallers en el **mismo
-    orden** que ``lista_cambios``. Pensado para barridos de seeds del generador
-    (combinar con ``gencambios.generar_cambios`` para producir cada ``cambios_df``).
+    tarea solo manda su ``cambios_df`` (o ``(cambios_df, seed)``). Corre ``worker``
+    sobre cada tarea y devuelve los resultados en el **mismo orden** que
+    ``lista_cambios`` (``[]`` si la lista viene vacía). ``batch_simular`` y
+    ``batch_kpis`` solo difieren en qué devuelve ``worker``.
 
     ``seeds`` (opcional, alineada con ``lista_cambios``) fija la seed de **fallas**
     por corrida — la base de Monte Carlo: cada simulación realiza sus fallas con la
@@ -162,7 +185,39 @@ def batch_simular(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx_paralelo(),
                              initializer=init_worker_simulacion,
                              initargs=(cfg, stock_df, estrategia)) as ex:
-        return list(ex.map(simular_cambios_worker, tareas))
+        return list(ex.map(worker, tareas))
+
+
+def batch_simular(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
+                  lista_cambios: List["pd.DataFrame"],
+                  estrategia: str = "mayor_diametro",
+                  max_workers: Optional[int] = None,
+                  seeds: Optional[List[Optional[int]]] = None) -> List[TallerCilindros]:
+    """Corre N simulaciones en paralelo y devuelve los **tallers completos**.
+
+    Mismo stock+config+estrategia, distintos cambios. Pensado para barridos de seeds
+    del generador (combinar con ``gencambios.generar_cambios`` para producir cada
+    ``cambios_df``). Si solo necesitás las métricas finales usá ``batch_kpis``, que
+    no pickla el taller entero (snapshots/cilindros/…) y es mucho más liviano.
+    """
+    return _ejecutar_batch(simular_cambios_worker, cfg, stock_df, lista_cambios,
+                           estrategia, max_workers, seeds)
+
+
+def batch_kpis(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
+               lista_cambios: List["pd.DataFrame"],
+               estrategia: str = "mayor_diametro",
+               max_workers: Optional[int] = None,
+               seeds: Optional[List[Optional[int]]] = None) -> List[Dict[str, Any]]:
+    """Variante **liviana** de ``batch_simular``: devuelve solo los KPIs de cada corrida.
+
+    Idéntica firma y orden de salida, pero cada worker calcula
+    ``calcular_kpis(taller)`` en su propio proceso y descarta el taller, así que solo
+    cruza el pickle el dict chico de métricas (sin snapshots/cilindros). Es el
+    building block para barridos tipo Monte Carlo que agregan KPIs sobre muchas seeds.
+    """
+    return _ejecutar_batch(simular_kpis_worker, cfg, stock_df, lista_cambios,
+                           estrategia, max_workers, seeds)
 
 
 def generar_y_construir(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
