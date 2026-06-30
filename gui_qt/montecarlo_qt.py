@@ -24,7 +24,6 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -36,6 +35,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -125,6 +125,53 @@ class _HistogramWidget(QWidget):
         p.fillRect(int(w * 0.42), 4, int(w * 0.16), base - 4, col)
 
 
+class _FloatSlider(QWidget):
+    """Slider horizontal para un float en ``[0, maximo]`` con paso fijo + valor.
+
+    Qt maneja sliders enteros, así que internamente trabaja en *ticks*
+    (``valor / step``) y expone ``value()``/``setValue()`` en float, igual
+    interfaz que un ``QDoubleSpinBox`` (así el resto del panel no cambia).
+    """
+
+    def __init__(self, maximo: float, step: float, decimals: int, color: str,
+                 parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._step = step
+        self._dec = decimals
+        self._slider = QSlider(Qt.Orientation.Horizontal)
+        self._slider.setRange(0, max(1, int(round(maximo / step))))
+        self._slider.setSingleStep(1)
+        self._lbl = QLabel("0")
+        self._lbl.setMinimumWidth(46)
+        self._lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._lbl.setStyleSheet(f"color:{color}; font-family:monospace; font-size:11px;")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        lay.addWidget(self._slider, 1)
+        lay.addWidget(self._lbl, 0)
+        self._slider.valueChanged.connect(self._refrescar_label)
+        self._refrescar_label()
+
+    def value(self) -> float:
+        return self._slider.value() * self._step
+
+    def setValue(self, v: float) -> None:
+        # Bloquea señales: la carga programática no debe disparar el acople
+        # Mín≤Máx (que clamparía antes de fijar ambos sliders).
+        self._slider.blockSignals(True)
+        self._slider.setValue(int(round(float(v) / self._step)))
+        self._slider.blockSignals(False)
+        self._refrescar_label()
+
+    def _refrescar_label(self) -> None:
+        self._lbl.setText(f"{self.value():.{self._dec}f}")
+
+    @property
+    def slider(self) -> QSlider:
+        return self._slider
+
+
 class MonteCarloPanel(QWidget):
     """Panel de configuración y resultados del estudio de Monte Carlo."""
 
@@ -144,7 +191,7 @@ class MonteCarloPanel(QWidget):
         self._resumen: Dict[str, Dict[str, float]] = {}
 
         # Widgets de rangos: clave -> (spin_min, spin_max).
-        self._rangos: Dict[Tuple[str, ...], Tuple[QDoubleSpinBox, QDoubleSpinBox]] = {}
+        self._rangos: Dict[Tuple[str, ...], Tuple[_FloatSlider, _FloatSlider]] = {}
         self._hist: Dict[str, _HistogramWidget] = {}
         self._kpi_cards: Dict[str, QLabel] = {}
 
@@ -177,9 +224,9 @@ class MonteCarloPanel(QWidget):
         card_g = SectionCard(title="GLOBALES", object_name="CardSoft")
         gl = card_g.content_layout()
         gl.addLayout(self._fila_rango(("global", "tiempo_enfriado"),
-                                      "Tiempo de enfriamiento", "h", 0.0, 48.0, 0.5, 1))
+                                      "Tiempo de enfriamiento", "h", 0.0, 24.0, 0.5, 1))
         gl.addLayout(self._fila_rango(("global", "tiempo_traslado_crc"),
-                                      "Tiempo traslado CRC", "min", 0.0, 240.0, 1.0, 0))
+                                      "Tiempo traslado CRC", "min", 0.0, 120.0, 1.0, 0))
         col.addWidget(card_g)
 
         # Selectores fijos.
@@ -312,35 +359,48 @@ class MonteCarloPanel(QWidget):
         fila.addWidget(widget, 1)
         return fila
 
-    def _spin(self, decimals: int, step: float, maximo: float) -> QDoubleSpinBox:
-        s = QDoubleSpinBox()
-        s.setDecimals(decimals)
-        s.setSingleStep(step)
-        s.setRange(0.0, maximo)
-        s.setMaximumWidth(90)
-        return s
+    def _fila_slider(self, etiqueta: str, slider: _FloatSlider) -> QHBoxLayout:
+        fila = QHBoxLayout()
+        fila.setSpacing(6)
+        cap = QLabel(etiqueta)
+        cap.setFixedWidth(26)
+        cap.setStyleSheet(f"color:{tema.FG_DIM}; font-size:9.5px;")
+        fila.addWidget(cap, 0)
+        fila.addWidget(slider, 1)
+        return fila
 
     def _fila_rango(self, clave: Tuple[str, ...], label: str, unit: str,
                     maximo_inf: float, maximo: float, step: float,
                     decimals: int) -> QVBoxLayout:
+        """Una entrada de rango: cabecera + dos sliders apilados (Mín / Máx).
+
+        Stack vertical (no lado a lado) para que entre en el panel de 320px sin
+        cortar el control de Máx. Los sliders se acoplan: Mín nunca supera a Máx
+        ni viceversa (clamp del que se mueve, igual que el mockup HTML).
+        """
         box = QVBoxLayout()
+        box.setSpacing(3)
         cab = QHBoxLayout()
         lab = QLabel(label)
         u = QLabel(unit)
         u.setObjectName("Muted")
+        u.setStyleSheet(f"color:{tema.FG_DIM}; font-family:monospace; font-size:10px;")
         cab.addWidget(lab)
         cab.addStretch(1)
         cab.addWidget(u)
         box.addLayout(cab)
-        smin = self._spin(decimals, step, maximo)
-        smax = self._spin(decimals, step, maximo)
-        fila = QHBoxLayout()
-        fila.addWidget(QLabel("Mín"))
-        fila.addWidget(smin)
-        fila.addStretch(1)
-        fila.addWidget(QLabel("Máx"))
-        fila.addWidget(smax)
-        box.addLayout(fila)
+
+        smin = _FloatSlider(maximo, step, decimals, tema.RED)
+        smax = _FloatSlider(maximo, step, decimals, tema.GREEN)
+        box.addLayout(self._fila_slider("Mín", smin))
+        box.addLayout(self._fila_slider("Máx", smax))
+
+        # Acople Mín ≤ Máx (clamp del slider que se mueve).
+        smin.slider.valueChanged.connect(
+            lambda _=0: smin.slider.setValue(min(smin.slider.value(), smax.slider.value())))
+        smax.slider.valueChanged.connect(
+            lambda _=0: smax.slider.setValue(max(smax.slider.value(), smin.slider.value())))
+
         self._rangos[clave] = (smin, smax)
         return box
 
@@ -370,11 +430,11 @@ class MonteCarloPanel(QWidget):
             card = SectionCard(title=f"MÁQUINA · {nombre}", object_name="CardSoft")
             cl = card.content_layout()
             cl.addLayout(self._fila_rango(("maq", nombre, "rate_prod"),
-                                          "Rate producción", "mm/min", 0.0, 1.0, 0.001, 4))
+                                          "Rate producción", "mm/min", 0.0, 0.05, 0.0005, 4))
             cl.addLayout(self._fila_rango(("maq", nombre, "rate_desb"),
-                                          "Rate desbaste", "mm/min", 0.0, 1.0, 0.001, 4))
+                                          "Rate desbaste", "mm/min", 0.0, 0.06, 0.0005, 4))
             cl.addLayout(self._fila_rango(("maq", nombre, "tasa_falla"),
-                                          "Tasa de falla", "frac", 0.0, 1.0, 0.01, 3))
+                                          "Tasa de falla", "frac", 0.0, 0.5, 0.005, 3))
             self._maq_box.addWidget(card)
 
     def _reload_widgets_from_cfg(self) -> None:
