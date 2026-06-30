@@ -17,10 +17,9 @@ python datos/generar_caso_parada.py
 
 > **GUI migration (Tk → Qt):** the application now runs on a **PySide6 (Qt)**
 > front-end under `gui_qt/` (`main_qt.py`). The old CustomTkinter/Tkinter GUI
-> and its `main.py` entry point were removed. The only survivors of the old
-> `gui/` package are the two **pure-Matplotlib** rendering modules
-> `dashboard_principal.py` and `dashboard_detalle.py`, which `gui_qt` reuses
-> for its Dashboard/Análisis panels (they have no Tk dependency). See
+> and its `main.py` entry point were removed, as was the old `gui/` package
+> (the Dashboard/Análisis panels were reimplemented with **native Qt charts**
+> under `gui_qt/widgets/`, so the old Matplotlib renderers are gone). See
 > *GUI structure* below.
 
 ### Tests
@@ -45,12 +44,12 @@ python -m pytest                       # runs tests/
 ```
 main_qt.py
 └── gui_qt/main_window.py   # Qt MainWindow — wires UI to model, owns playback state
+    ├── runner.py           # GUI-free engine entry points (build/simulate/batch)
     ├── modelos/taller.py   # TallerCilindros — all simulation logic (no GUI imports)
-    ├── gui_qt/*.py         # Pure Qt display components (model only via main_window/services)
-    └── gui/dashboard_*.py  # Shared Matplotlib renderers reused by gui_qt (no Tk)
+    └── gui_qt/*.py         # Pure Qt display components (model via runner/services)
 ```
 
-**The model layer (`modelos/`) must never import from `gui/` or `gui_qt/`.**
+**The model layer (`modelos/`) must never import from `gui_qt/`.**
 
 ### Simulation engine — `modelos/taller.py`
 
@@ -153,24 +152,18 @@ controls) and a `QTabWidget` main area. Reusable Qt building blocks live in
 | Tab | File | Purpose |
 |-----|------|---------|
 | Vista Real | `gui_qt/vista_realtime.py` (`RealTimeView`) | Live playback of snapshots: jaula + CRC sections + machine widgets + queue + cooling section |
-| Dashboard | `gui_qt/dashboard_qt.py` (`DashboardPanel`) | Embeds the **shared** Matplotlib `crear_dashboard_principal` (from `gui/dashboard_principal.py`) in a `FigureCanvasQTAgg` |
-| Análisis | `gui_qt/analysis_qt.py` (`AnalysisPanel`) | Embeds the **shared** Matplotlib `crear_dashboard_detalle` (from `gui/dashboard_detalle.py`) in a `FigureCanvasQTAgg` |
+| Dashboard | `gui_qt/dashboard_qt.py` (`DashboardPanel`) | Native Qt charts (`gui_qt/widgets/dashboard_charts_qt.py`) fed by `gui_qt/dashboard_data.py` |
+| Análisis | `gui_qt/analysis_qt.py` (`AnalysisPanel`) | Native Qt charts (`gui_qt/widgets/analysis_charts_qt.py`) fed by `gui_qt/analysis_data.py` |
 | Inventario | `gui_qt/inventory_qt.py` (`InventoryPanel`) | Stock table (initial vs final view), per-column filtering, Excel export |
 | KPIs | `gui_qt/tab_kpis_qt.py` (`KpisPanel`) | Key performance indicators (disponible/neta utilization, etc.) |
 | Generación | `gui_qt/generation_qt.py` (`GenerationPanel`) | Synthetic-change generator config + adaptation + reproducible generation + timeline |
 | Configuración | `gui_qt/config_qt.py` (`ConfigPanel`) | Global params, SubStock ranges, machine park CRUD, sim params; saves to `user_config.json` and applies via `taller.configurar()` |
 | Consola | `gui_qt/console_qt.py` (`ConsolePanel`) | Simulation log and alerts |
 
-**Two shared Matplotlib renderers survive in `gui/`.** `gui/dashboard_principal.py`
-and `gui/dashboard_detalle.py` are **pure Matplotlib** (no Tk) and are reused by
-the Qt Dashboard/Análisis panels. They expose `crear_dashboard_principal` /
-`crear_dashboard_detalle` (which build an **empty preview** when `not taller.snapshots`,
-via `dashboard_principal.rellenar_preview_vacio`), plus the shared
-`formatter_tiempo(t0,t1)` x-axis formatter (drops the hour once the span exceeds
-7 days; adds the year once it exceeds 365 days) and `_marcar_paradas` (PARADA shading).
-`gui/dashboard_detalle.py` imports `formatter_tiempo`/`rellenar_preview_vacio`/`_marcar_paradas`
-from `gui/dashboard_principal.py`. **Do not delete these two modules without first
-moving them into `gui_qt`** — they are the only remaining `gui/` files.
+**The Dashboard/Análisis panels use native Qt charts** (`gui_qt/widgets/dashboard_charts_qt.py`
+and `analysis_charts_qt.py`), fed by the data adapters `gui_qt/dashboard_data.py` /
+`gui_qt/analysis_data.py`. There is **no Matplotlib** in the GUI anymore (the old
+`gui/` package of Matplotlib renderers was removed once these native charts replaced it).
 
 **The simulation runs in a separate process, not a thread.** `simular()` is
 CPU-bound pure Python, so a thread would freeze the Qt event loop (GIL).
@@ -208,7 +201,7 @@ Copy and adapt `datos/generar_caso_parada.py`. The Excel must have the two **dat
 
 ### Theme / colors
 
-All UI color constants are in `config/tema.py`. The Qt GUI consumes them through `gui_qt/theme.py::build_qss()` (which builds the application-wide QSS stylesheet, Dark theme) and directly in the Matplotlib renderers (`gui/dashboard_*.py`, `from config.tema import ...`). Do not hardcode color strings in GUI files.
+All UI color constants are in `config/tema.py`. The Qt GUI consumes them through `gui_qt/theme.py::build_qss()` (which builds the application-wide QSS stylesheet, Dark theme) and directly in the native Qt chart widgets (`gui_qt/widgets/*_charts_qt.py`, `from config.tema import ...`). Do not hardcode color strings in GUI files.
 
 ## Key Design Decisions
 
