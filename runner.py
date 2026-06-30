@@ -13,6 +13,7 @@ stock + config + estrategia entre corridas (cargados una vez por worker vía el
 """
 import json
 import multiprocessing
+import multiprocessing.context
 from concurrent.futures import ProcessPoolExecutor
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
@@ -89,7 +90,7 @@ def simular_desde_dataframes(cfg: Dict[str, Any], stock_df: "pd.DataFrame",
 _WORKER_STATE: Dict[str, Any] = {}
 
 
-def ctx_paralelo() -> "multiprocessing.context.BaseContext":
+def ctx_paralelo() -> multiprocessing.context.BaseContext:
     """Contexto de multiprocessing preferido: ``fork`` si está disponible.
 
     Con ``fork`` el worker hereda los módulos ya importados (sin re-importar ni
