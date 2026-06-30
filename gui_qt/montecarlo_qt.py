@@ -208,7 +208,10 @@ class MonteCarloPanel(QWidget):
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setFixedWidth(320)
+        scroll.setFixedWidth(330)
+        # Sin scroll horizontal: el contenido se ajusta al ancho y los valores
+        # de los sliders (a la derecha) nunca quedan recortados.
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         cont = QWidget()
         col = QVBoxLayout(cont)
@@ -257,6 +260,7 @@ class MonteCarloPanel(QWidget):
         presets = QHBoxLayout()
         for v in (100, 500, 1000, 2000):
             b = QPushButton(f"{v // 1000}k" if v >= 1000 else str(v))
+            b.setMaximumWidth(64)
             b.clicked.connect(lambda _=False, n=v: self.sp_runs.setValue(n))
             presets.addWidget(b)
         nl.addLayout(self._fila_widget("Número de corridas", self.sp_runs))
@@ -265,7 +269,7 @@ class MonteCarloPanel(QWidget):
         self.sp_seed.setRange(0, 2_000_000_000)
         self.sp_seed.setSpecialValueText("aleatoria")
         nl.addLayout(self._fila_widget("Master seed (0 = aleatoria)", self.sp_seed))
-        self.chk_dump = QCheckBox("Volcar tallers completos a disco")
+        self.chk_dump = QCheckBox("Volcar tallers a disco")
         nl.addWidget(self.chk_dump)
         col.addWidget(card_n)
 
@@ -349,15 +353,24 @@ class MonteCarloPanel(QWidget):
         cb = QComboBox()
         for clave, etiqueta in opciones:
             cb.addItem(etiqueta, clave)
+        # Permite que el combo se encoja y elida el texto largo en vez de forzar
+        # el ancho del panel (los nombres de estrategia son largos).
+        cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        cb.setMinimumContentsLength(6)
+        cb.setMinimumWidth(0)
+        cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return cb
 
-    def _fila_widget(self, label: str, widget: QWidget) -> QHBoxLayout:
-        fila = QHBoxLayout()
+    def _fila_widget(self, label: str, widget: QWidget) -> QVBoxLayout:
+        # Apilado (label arriba del control): el ancho de la fila es el del
+        # control, no label+control ⇒ las cards entran en el panel angosto.
+        box = QVBoxLayout()
+        box.setSpacing(2)
         lab = QLabel(label)
-        lab.setMinimumWidth(150)
-        fila.addWidget(lab)
-        fila.addWidget(widget, 1)
-        return fila
+        lab.setStyleSheet(f"color:{tema.FG2}; font-size:11px;")
+        box.addWidget(lab)
+        box.addWidget(widget)
+        return box
 
     def _fila_slider(self, etiqueta: str, slider: _FloatSlider) -> QHBoxLayout:
         fila = QHBoxLayout()
