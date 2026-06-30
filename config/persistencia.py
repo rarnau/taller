@@ -21,6 +21,7 @@ Esquema actual::
 Esquemas viejos (sin ``config_global``/``maquinas`` y con el dict suelto
 ``prioridades_maquinas``) se migran al cargar.
 """
+import copy
 import json
 import os
 from collections import Counter
@@ -73,6 +74,28 @@ DEFAULTS: Dict[str, Any] = {
         "fecha_inicio": None,
         "fecha_fin": None,
         "horizonte_dias": 7,  # legacy: fallback si no hay fecha_inicio/fecha_fin
+    },
+    # Estudio de Monte Carlo: miles de corridas que varían parámetros numéricos
+    # dentro de rangos [min,max] (sorteo uniforme por corrida) con selectores
+    # fijos. Los rangos por máquina se completan al vuelo desde la config vigente
+    # (ver obtener_montecarlo); acá sólo viven los defaults globales y fijos.
+    "montecarlo": {
+        "runs": 500,
+        "master_seed": None,   # None ⇒ seed aleatoria reproducible al correr
+        "chunk": 100,
+        "fijos": {
+            "estrategia_seleccion": "mayor_diametro",
+            "estrategia_asignacion": "jaula_mas_necesitada",
+            "generador": "empirico",
+            "duracion_dias": 7,
+            "turnos_maquinas_preset": "24x7",
+            "turnos_laminador_preset": "24x7",
+        },
+        "rangos": {
+            "tiempo_enfriado": [0.0, 8.0],        # horas
+            "tiempo_traslado_crc": [5.0, 60.0],   # minutos
+            "maquinas": {},                        # {nombre: {rate_prod,rate_desb,tasa_falla}}
+        },
     },
 }
 
@@ -203,6 +226,62 @@ def obtener_generador_cambios(cfg: Dict[str, Any]) -> Dict[str, Any]:
 def obtener_turnos_cambios(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Devuelve el régimen de turnos de los cambios (None = 24/7)."""
     return cfg.get("turnos_cambios")
+
+
+def _rango_maquina_defecto(maq: Dict[str, Any]) -> Dict[str, Any]:
+    """Rango Monte Carlo por defecto de una máquina (rate ±30%, falla 0..2x)."""
+    tasas = maq.get("tasas", {})
+    prod = tasas.get("produccion", {})
+    desb = tasas.get("desbaste", {})
+
+    def _rate(t: Dict[str, Any], mm_def: float, min_def: float) -> float:
+        tmin = float(t.get("tiempo_min", min_def) or min_def)
+        return float(t.get("mm", mm_def)) / tmin if tmin else mm_def / min_def
+
+    rp = _rate(prod, 0.8, 60.0)
+    rd = _rate(desb, 5.0, 480.0)
+    tf = float(maq.get("tasa_falla", 0.0) or 0.0)
+    return {
+        "rate_prod": [round(rp * 0.7, 5), round(rp * 1.3, 5)],
+        "rate_desb": [round(rd * 0.7, 5), round(rd * 1.3, 5)],
+        "tasa_falla": [0.0, round(max(0.1, tf * 2), 3)],
+    }
+
+
+def obtener_montecarlo(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Devuelve el spec de Monte Carlo (merge de defaults + config + máquinas).
+
+    Los rangos por máquina se completan al vuelo desde la config vigente: para
+    cada máquina presente se usa el rango persistido si existe, o uno derivado de
+    su tasa actual (±30% en los rates, 0..2x en la falla). Así el spec sigue
+    coherente aunque cambien las máquinas.
+    """
+    base = copy.deepcopy(DEFAULTS["montecarlo"])
+    user = cfg.get("montecarlo", {}) or {}
+    base["runs"] = int(user.get("runs", base["runs"]))
+    base["chunk"] = int(user.get("chunk", base["chunk"]))
+    if "master_seed" in user:
+        base["master_seed"] = user["master_seed"]
+    base["fijos"].update(user.get("fijos", {}) or {})
+
+    rangos_user = user.get("rangos", {}) or {}
+    for clave in ("tiempo_enfriado", "tiempo_traslado_crc"):
+        if clave in rangos_user:
+            base["rangos"][clave] = [float(x) for x in rangos_user[clave]]
+
+    maq_user = rangos_user.get("maquinas", {}) or {}
+    maq_out: Dict[str, Any] = {}
+    for m in obtener_maquinas(cfg):
+        nombre = m["nombre"]
+        maq_out[nombre] = maq_user.get(nombre) or _rango_maquina_defecto(m)
+    base["rangos"]["maquinas"] = maq_out
+    return base
+
+
+def set_montecarlo(cfg: Dict[str, Any], mc: Dict[str, Any]) -> Dict[str, Any]:
+    """Persiste el spec de Monte Carlo (reemplazo completo; la GUI arma el dict)."""
+    cfg["montecarlo"] = mc
+    return cfg
 
 
 # ── Mutadores (capa única de CRUD usada por el CLI y la GUI) ──────────────────
