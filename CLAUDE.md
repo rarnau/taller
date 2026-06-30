@@ -44,10 +44,14 @@ python -m pytest                       # runs tests/
 ```
 main_qt.py
 └── gui_qt/main_window.py   # Qt MainWindow — wires UI to model, owns playback state
-    ├── runner.py           # GUI-free engine entry points (build/simulate/batch)
+    ├── nucleo/runner.py     # GUI-free engine entry points (build/simulate/batch)
+    ├── nucleo/montecarlo.py # GUI-free Monte Carlo study (sampled-param sweep)
     ├── modelos/taller.py   # TallerCilindros — all simulation logic (no GUI imports)
-    └── gui_qt/*.py         # Pure Qt display components (model via runner/services)
+    └── gui_qt/*.py         # Pure Qt display components (model via nucleo/services)
 ```
+
+The GUI-free programmatic core lives in the **`nucleo/`** package (`runner.py` +
+`montecarlo.py`); `cli.py`/`gui_qt` import from `nucleo.runner` / `nucleo.montecarlo`.
 
 **The model layer (`modelos/`) must never import from `gui_qt/`.**
 
@@ -137,7 +141,7 @@ At startup, `MainWindow.__init__` (`gui_qt/main_window.py`) calls `taller.config
 
 This is safe because each run builds a **fresh** `TallerCilindros` and the engine has no module-level mutable state (the shift grid is per-instance). The GUI uses this **same initializer path** with `max_workers=1` (see below), so a future parallel runner is a drop-in (`batch_simular`) with no new machinery.
 
-### Monte Carlo runner (`montecarlo.py`)
+### Monte Carlo runner (`nucleo/montecarlo.py`)
 A Monte Carlo study: **thousands of sims where each run samples numeric taller params** from `[min,max]` ranges (per-machine production/desbaste *rates* mm/min and failure rate, cooling time, CRC transport time) with **fixed selectors** (strategies, generator, window, machine/laminador shift presets). Unlike `batch_kpis` (shared `cfg`, varies only the change schedule), this varies the **`cfg` per run**.
 - **Reproducible + resumable via derived seeds:** `seed_i = SeedSequence([master_seed, i]).generate_state(1)[0]`. Run `i` samples its params, generates its `Programa_Cambios` and realizes its failures with `seed_i`, so re-running `i` is identical ⇒ resuming = running only the indices missing from the CSV. The worker task is **just the index `i`**; everything else is rebuilt from the shared initializer state (`init_worker_montecarlo`). Reuses `runner.ctx_paralelo` + `construir_taller_desde_dataframes`.
 - `EspecMonteCarlo` (ranges + fixed selectors + `runs`/`master_seed`/`chunk`); `muestrear_overrides` (uniform draw) → `aplicar_a_cfg` (deep-copies the base cfg and applies overrides via the **existing `config/persistencia` mutators**; *rates* convert to `mm = rate × tiempo_min`, keeping `tiempo_min`).

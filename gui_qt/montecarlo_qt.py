@@ -54,7 +54,7 @@ from config.persistencia import (
 from modelos.estrategias import ESTRATEGIAS_ASIGNACION, ESTRATEGIAS_SELECCION
 from modelos.generador_cambios import GENERADORES_CAMBIOS
 from modelos import turnos as turnos_mod
-from montecarlo import EspecMonteCarlo, exportar_resumen_csv, resumir
+from nucleo.montecarlo import EspecMonteCarlo, exportar_resumen_csv, resumir
 from gui_qt.services import MonteCarloRequest
 from gui_qt.widgets import SectionCard
 

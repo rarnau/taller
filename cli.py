@@ -36,9 +36,9 @@ from modelos.kpis import calcular_kpis
 from modelos.estrategias import ESTRATEGIAS_SELECCION, FAMILIAS_ESTRATEGIA
 from modelos import generador_cambios as gencambios
 from modelos import turnos as turnos_mod
-from montecarlo import (EspecMonteCarlo, correr_montecarlo, exportar_resumen_csv,
+from nucleo.montecarlo import (EspecMonteCarlo, correr_montecarlo, exportar_resumen_csv,
                         resumir)
-from runner import cargar_config_path, ejecutar_simulacion
+from nucleo.runner import cargar_config_path, ejecutar_simulacion
 
 _TIPOS_RECT = [t.value for t in TipoRectificado]
 

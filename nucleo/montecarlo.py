@@ -34,7 +34,7 @@ from config import persistencia as cfgmod
 from modelos import generador_cambios as gencambios
 from modelos import turnos as turnos_mod
 from modelos.kpis import metricas_montecarlo
-from runner import construir_taller_desde_dataframes, ctx_paralelo
+from nucleo.runner import construir_taller_desde_dataframes, ctx_paralelo
 
 if TYPE_CHECKING:  # solo anotaciones (sin import duro de pandas)
     import pandas as pd

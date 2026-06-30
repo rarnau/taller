@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from modelos import generador_cambios as gencambios
-from montecarlo import (EspecMonteCarlo, aplicar_a_cfg, correr_montecarlo,
+from nucleo.montecarlo import (EspecMonteCarlo, aplicar_a_cfg, correr_montecarlo,
                         muestrear_overrides, resumir, _seed_corrida)
 
 _MAQ = [{"nombre": "G", "prioridad": "produccion",

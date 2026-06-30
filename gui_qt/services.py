@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from montecarlo import EspecMonteCarlo, correr_montecarlo
-from runner import (
+from nucleo.montecarlo import EspecMonteCarlo, correr_montecarlo
+from nucleo.runner import (
     ctx_paralelo,
     init_worker_simulacion,
     simular_cambios_worker,
