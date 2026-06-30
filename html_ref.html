@@ -455,10 +455,10 @@
               <button style="margin-left:auto; background:transparent; border:1px solid #e8a13a; color:#e8a13a; border-radius:7px; padding:5px 11px; font-size:11.5px; cursor:pointer;">+ Agregar máquina</button>
             </div>
             <div style="font-size:11px; color:#8b939d; margin-bottom:14px;">Tasas por tipo (mm removidos y minutos), prioridad y esquema de turnos.</div>
-            <div style="display:grid; grid-template-columns:1.1fr 0.7fr 0.7fr 0.7fr 0.7fr 1fr 1fr 0.35fr; gap:8px; font-size:9.5px; letter-spacing:.03em; color:#8b939d; font-weight:700; margin-bottom:9px;"><span>NOMBRE</span><span>PROD mm</span><span>PROD min</span><span>DESB mm</span><span>DESB min</span><span>PRIORIDAD</span><span>TURNOS</span><span></span></div>
+            <div style="display:grid; grid-template-columns:1.1fr 0.6fr 0.6fr 0.6fr 0.6fr 1fr 0.9fr 0.7fr 0.35fr; gap:8px; font-size:9.5px; letter-spacing:.03em; color:#8b939d; font-weight:700; margin-bottom:9px;"><span>NOMBRE</span><span>PROD mm</span><span>PROD min</span><span>DESB mm</span><span>DESB min</span><span>PRIORIDAD</span><span>TURNOS</span><span>FALLA %/h</span><span></span></div>
             <div style="display:flex; flex-direction:column; gap:8px;">
               <sc-for list="{{ cfgMaquinas }}" as="m" hint-placeholder-count="3">
-                <div style="display:grid; grid-template-columns:1.1fr 0.7fr 0.7fr 0.7fr 0.7fr 1fr 1fr 0.35fr; gap:8px; align-items:center;">
+                <div style="display:grid; grid-template-columns:1.1fr 0.6fr 0.6fr 0.6fr 0.6fr 1fr 0.9fr 0.7fr 0.35fr; gap:8px; align-items:center;">
                   <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 8px; font-family:'IBM Plex Mono'; font-size:12px; color:#e9ecef; font-weight:600;">{{ m.nombre }}</span>
                   <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 4px; text-align:center; font-family:'IBM Plex Mono'; font-size:11.5px; color:#cfd5dc;">{{ m.prodMm }}</span>
                   <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 4px; text-align:center; font-family:'IBM Plex Mono'; font-size:11.5px; color:#cfd5dc;">{{ m.prodMin }}</span>
@@ -466,6 +466,7 @@
                   <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 4px; text-align:center; font-family:'IBM Plex Mono'; font-size:11.5px; color:#cfd5dc;">{{ m.desbMin }}</span>
                   <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 8px; font-size:11px; color:#e9ecef; display:flex; justify-content:space-between; align-items:center;">{{ m.prioridad }}<span style="color:#8b939d;">▾</span></span>
                   <span style="background:#11151a; border:1px solid #313a45; border-radius:6px; padding:6px 6px; font-size:10.5px; color:#cfd5dc; text-align:center;">{{ m.turnos }}</span>
+                  <span style="background:#11151a; border:1px solid #f56b6b33; border-radius:6px; padding:6px 4px; text-align:center; font-family:'IBM Plex Mono'; font-size:11.5px; color:#f56b6b;">{{ m.tasaFalla }}</span>
                   <span style="text-align:center; color:#f56b6b; cursor:pointer; font-size:13px;">✕</span>
                 </div>
               </sc-for>
@@ -494,29 +495,74 @@
           <!-- LEFT: panel de parámetros -->
           <div style="width:290px; flex:none; display:flex; flex-direction:column; gap:10px; overflow-y:auto; padding-bottom:18px;">
 
-            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:14px 16px;">
-              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:#b08cf5; letter-spacing:.04em; margin-bottom:4px;">PARÁMETROS DE VARIACIÓN</div>
-              <div style="font-size:11px; color:#59616b; line-height:1.55;">Cada corrida samplea un valor uniforme dentro del rango definido.</div>
-            </div>
-
-            <sc-for list="{{ mcParams }}" as="p" hint-placeholder-count="7">
+            <!-- parámetros variables por máquina -->
+            <sc-for list="{{ mcMachineParams }}" as="mp" hint-placeholder-count="3">
             <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:13px 15px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <span style="font-size:12px; font-weight:600; color:#cfd5dc;">{{ p.label }}</span>
-                <span style="font-family:'IBM Plex Mono'; font-size:10px; color:#59616b;">{{ p.unit }}</span>
+              <div style="display:flex; align-items:center; gap:7px; margin-bottom:10px; padding-bottom:9px; border-bottom:1px solid #20262e;">
+                <span style="width:8px; height:8px; border-radius:2px; background:{{ mp.color }};"></span>
+                <span style="font-family:'IBM Plex Mono'; font-size:12px; font-weight:700; color:#e9ecef;">{{ mp.name }}</span>
               </div>
-              <div style="display:flex; align-items:center; gap:8px; margin-bottom:7px;">
-                <span style="font-size:10px; color:#59616b; width:24px; flex:none;">Mín</span>
-                <input type="range" min="{{ p.absMin }}" max="{{ p.absMax }}" step="{{ p.step }}" value="{{ p.minV }}" onInput="{{ p.onMin }}" style="flex:1;">
-                <span style="font-family:'IBM Plex Mono'; font-size:11px; color:#f56b6b; width:38px; text-align:right; flex:none;">{{ p.minLabel }}</span>
+              <sc-for list="{{ mp.params }}" as="p" hint-placeholder-count="3">
+              <div style="margin-bottom:9px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                  <span style="font-size:11px; color:#cfd5dc;">{{ p.label }}</span>
+                  <span style="font-family:'IBM Plex Mono'; font-size:10px; color:#59616b;">{{ p.unit }}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; margin-bottom:3px;">
+                  <span style="font-size:9.5px; color:#59616b; width:20px; flex:none;">Mín</span>
+                  <input type="range" min="{{ p.absMin }}" max="{{ p.absMax }}" step="{{ p.step }}" value="{{ p.minV }}" onInput="{{ p.onMin }}" style="flex:1;">
+                  <span style="font-family:'IBM Plex Mono'; font-size:10px; color:#f56b6b; width:34px; text-align:right; flex:none;">{{ p.minLabel }}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span style="font-size:9.5px; color:#59616b; width:20px; flex:none;">Máx</span>
+                  <input type="range" min="{{ p.absMin }}" max="{{ p.absMax }}" step="{{ p.step }}" value="{{ p.maxV }}" onInput="{{ p.onMax }}" style="flex:1;">
+                  <span style="font-family:'IBM Plex Mono'; font-size:10px; color:#35c98a; width:34px; text-align:right; flex:none;">{{ p.maxLabel }}</span>
+                </div>
               </div>
-              <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size:10px; color:#59616b; width:24px; flex:none;">Máx</span>
-                <input type="range" min="{{ p.absMin }}" max="{{ p.absMax }}" step="{{ p.step }}" value="{{ p.maxV }}" onInput="{{ p.onMax }}" style="flex:1;">
-                <span style="font-family:'IBM Plex Mono'; font-size:11px; color:#35c98a; width:38px; text-align:right; flex:none;">{{ p.maxLabel }}</span>
-              </div>
+              </sc-for>
             </div>
             </sc-for>
+
+            <!-- parámetros globales -->
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:13px 15px;">
+              <div style="font-size:10px; font-weight:700; color:#8b939d; letter-spacing:.07em; margin-bottom:10px;">GLOBALES</div>
+              <sc-for list="{{ mcGlobalParams }}" as="p" hint-placeholder-count="2">
+              <div style="margin-bottom:9px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                  <span style="font-size:11px; color:#cfd5dc;">{{ p.label }}</span>
+                  <span style="font-family:'IBM Plex Mono'; font-size:10px; color:#59616b;">{{ p.unit }}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; margin-bottom:3px;">
+                  <span style="font-size:9.5px; color:#59616b; width:20px; flex:none;">Mín</span>
+                  <input type="range" min="{{ p.absMin }}" max="{{ p.absMax }}" step="{{ p.step }}" value="{{ p.minV }}" onInput="{{ p.onMin }}" style="flex:1;">
+                  <span style="font-family:'IBM Plex Mono'; font-size:10px; color:#f56b6b; width:34px; text-align:right; flex:none;">{{ p.minLabel }}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span style="font-size:9.5px; color:#59616b; width:20px; flex:none;">Máx</span>
+                  <input type="range" min="{{ p.absMin }}" max="{{ p.absMax }}" step="{{ p.step }}" value="{{ p.maxV }}" onInput="{{ p.onMax }}" style="flex:1;">
+                  <span style="font-family:'IBM Plex Mono'; font-size:10px; color:#35c98a; width:34px; text-align:right; flex:none;">{{ p.maxLabel }}</span>
+                </div>
+              </div>
+              </sc-for>
+            </div>
+
+            <!-- configuración fija -->
+            <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:13px 15px;">
+              <div style="font-size:10px; font-weight:700; color:#8b939d; letter-spacing:.07em; margin-bottom:12px;">CONFIGURACIÓN FIJA</div>
+              <sc-for list="{{ mcFijadosItems }}" as="fi" hint-placeholder-count="6">
+              <div style="margin-bottom:11px;">
+                <div style="font-size:11px; color:#cfd5dc; margin-bottom:6px;">{{ fi.label }}</div>
+                <div style="display:flex; flex-wrap:wrap; gap:5px; align-items:center;">
+                  <sc-for list="{{ fi.opts }}" as="o" hint-placeholder-count="3">
+                    <button onClick="{{ o.onClick }}" style="background:{{ o.bg }}; border:1px solid {{ o.border }}; color:{{ o.color }}; border-radius:6px; padding:4px 9px; font-size:10.5px; cursor:pointer; font-family:'Space Grotesk'; font-weight:600; line-height:1.4;">{{ o.label }}</button>
+                  </sc-for>
+                  <sc-if value="{{ fi.hasCustom }}" hint-placeholder-val="{{ false }}">
+                    <input type="text" value="{{ fi.customVal }}" onInput="{{ fi.customChange }}" placeholder="otro" style="width:52px; background:{{ fi.customBg }}; border:1px solid {{ fi.customBorder }}; color:{{ fi.customColor }}; border-radius:6px; padding:4px 7px; font-size:10.5px; font-family:'IBM Plex Mono'; font-weight:600; outline:none; text-align:center;">
+                  </sc-if>
+                </div>
+              </div>
+              </sc-for>
+            </div>
 
             <div style="background:#1a1f26; border:1px solid #2b333d; border-radius:12px; padding:13px 15px;">
               <div style="font-size:12px; font-weight:600; color:#cfd5dc; margin-bottom:10px;">Número de corridas</div>
@@ -656,13 +702,19 @@ class Component extends DCLogic {
       apiStatus: "mock", simId: null,
       mcRuns: 500, mcRunning: false, mcProgress: 0, mcResults: null,
       mcParamState: {
-        desgaste:     { min: 1.2, max: 2.4 },
-        tiempoRect:   { min: 2.0, max: 3.0 },
-        tiempoEnf:    { min: 3.0, max: 5.0 },
-        tasaFalla:    { min: 0.02, max: 0.10 },
-        stockInicial: { min: 290,  max: 350  },
-        rateProd:     { min: 0.004, max: 0.008 },
-        rateDesb:     { min: 0.015, max: 0.025 },
+        tiempoEnf:      { min: 3.0,   max: 5.0  },
+        tiempoTraslado: { min: 20,    max: 40   },
+        rp_r01: { min: 0.004, max: 0.008 }, rp_r02: { min: 0.004, max: 0.008 }, rp_d01: { min: 0.008, max: 0.015 },
+        rd_r01: { min: 0.015, max: 0.025 }, rd_r02: { min: 0.015, max: 0.025 }, rd_d01: { min: 0.015, max: 0.025 },
+        tf_r01: { min: 0.02,  max: 0.10  }, tf_r02: { min: 0.02,  max: 0.10  }, tf_d01: { min: 0.02,  max: 0.10  },
+      },
+      mcFijados: {
+        estrategiaAsig:  "Mayor diámetro",
+        estrategiaRect:  "Mayor desgaste",
+        genCorridas:     "Aleatoria",
+        duracionCorrida: "3d",
+        turnosMaquinas:  "24/7",
+        turnosLaminador: "L-V 06-22",
       },
     };
     this._build();
@@ -1046,9 +1098,9 @@ class Component extends DCLogic {
       { jaula: "4", desde: "608.0", hasta: "620.0", perfil: "—", color: JC[3] },
     ];
     this.cfgMaquinas = [
-      { nombre: "RECT-01", prodMm: "0.8", prodMin: "150", desbMm: "2.0", desbMin: "90", prioridad: "Producción", turnos: "24/7" },
-      { nombre: "RECT-02", prodMm: "0.8", prodMin: "150", desbMm: "2.0", desbMin: "90", prioridad: "Producción", turnos: "24/7" },
-      { nombre: "DESB-01", prodMm: "0.6", prodMin: "180", desbMm: "2.5", desbMin: "120", prioridad: "Desbaste", turnos: "L–V 06–22" },
+      { nombre: "RECT-01", prodMm: "0.8", prodMin: "150", desbMm: "2.0", desbMin: "90", prioridad: "Producción", turnos: "24/7", tasaFalla: "4%" },
+      { nombre: "RECT-02", prodMm: "0.8", prodMin: "150", desbMm: "2.0", desbMin: "90", prioridad: "Producción", turnos: "24/7", tasaFalla: "4%" },
+      { nombre: "DESB-01", prodMm: "0.6", prodMin: "180", desbMm: "2.5", desbMin: "120", prioridad: "Desbaste", turnos: "L–V 06–22", tasaFalla: "6%" },
     ];
     this.cfgMaxIter = "100000";
   }
@@ -1073,14 +1125,12 @@ class Component extends DCLogic {
     const runBatch = () => {
       const end = Math.min(done + BATCH, runs);
       for (let i = done; i < end; i++) {
+        const r1 = (k) => ps[k].min + Math.random() * (ps[k].max - ps[k].min);
         results.push(this._mcOneRun({
-          desgaste:     ps.desgaste.min     + Math.random() * (ps.desgaste.max     - ps.desgaste.min),
-          tiempoRect:   ps.tiempoRect.min   + Math.random() * (ps.tiempoRect.max   - ps.tiempoRect.min),
-          tiempoEnf:    ps.tiempoEnf.min    + Math.random() * (ps.tiempoEnf.max    - ps.tiempoEnf.min),
-          tasaFalla:    ps.tasaFalla.min    + Math.random() * (ps.tasaFalla.max    - ps.tasaFalla.min),
-          stockInicial: Math.round(ps.stockInicial.min + Math.random() * (ps.stockInicial.max - ps.stockInicial.min)),
-          rateProd:     ps.rateProd.min + Math.random() * (ps.rateProd.max - ps.rateProd.min),
-          rateDesb:     ps.rateDesb.min + Math.random() * (ps.rateDesb.max  - ps.rateDesb.min),
+          tiempoEnf:    r1("tiempoEnf"), tiempoTraslado: r1("tiempoTraslado"),
+          rp_r01: r1("rp_r01"), rp_r02: r1("rp_r02"), rp_d01: r1("rp_d01"),
+          rd_r01: r1("rd_r01"), rd_r02: r1("rd_r02"), rd_d01: r1("rd_d01"),
+          tf_r01: r1("tf_r01"), tf_r02: r1("tf_r02"), tf_d01: r1("tf_d01"),
         }));
       }
       done = end;
@@ -1092,7 +1142,11 @@ class Component extends DCLogic {
   }
 
   _mcOneRun(params) {
-    const { desgaste, tiempoRect, tiempoEnf, tasaFalla, stockInicial, rateProd = 0.006, rateDesb = 0.020 } = params;
+    const { tiempoEnf, rp_r01 = 0.006, rp_r02 = 0.006, rp_d01 = 0.010, rd_r01 = 0.020, rd_r02 = 0.020, rd_d01 = 0.020, tf_r01 = 0.05, tf_r02 = 0.05, tf_d01 = 0.05 } = params;
+    const rateProd = (rp_r01 + rp_r02) / 2;
+    const rateDesb = (rd_r01 + rd_r02 + rd_d01) / 3;
+    const tasaFalla = (tf_r01 + tf_r02 + tf_d01) / 3;
+    const desgaste = 1.8, tiempoRect = 2.5, stockInicial = 320;
     let seed = (Math.random() * 99991) | 0;
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
     const minD = 585, maxD = 622;
@@ -1214,15 +1268,64 @@ class Component extends DCLogic {
       onMin: (e) => { const v = parseFloat(e.target.value); this.setState(st => { const ps = Object.assign({}, st.mcParamState); ps[key] = Object.assign({}, ps[key], { min: Math.min(v, ps[key].max) }); return { mcParamState: ps }; }); },
       onMax: (e) => { const v = parseFloat(e.target.value); this.setState(st => { const ps = Object.assign({}, st.mcParamState); ps[key] = Object.assign({}, ps[key], { max: Math.max(v, ps[key].min) }); return { mcParamState: ps }; }); },
     });
-    const mcParams = [
-      mkP("desgaste",     "Desgaste por campaña",  "mm",   0.5,  4.0, 0.1,  v => v.toFixed(1)),
-      mkP("tiempoRect",   "Tiempo de rectificado", "h",    0.5,  6.0, 0.5,  v => v.toFixed(1)),
-      mkP("tiempoEnf",    "Tiempo de enfriado",    "h",    0.5,  8.0, 0.5,  v => v.toFixed(1)),
-      mkP("tasaFalla",    "Prob. falla / hora",    "%/h",  0.00, 0.30, 0.01, v => (v * 100).toFixed(0) + "%"),
-      mkP("stockInicial", "Stock inicial",         "cil.", 200,  450,  5,   v => String(Math.round(v))),
-      mkP("rateProd",     "Rate producción",         "mm/min", 0.003, 0.012, 0.001, v => v.toFixed(3)),
-      mkP("rateDesb",     "Rate desbaste",           "mm/min", 0.010, 0.035, 0.001, v => v.toFixed(3)),
+    const fp3 = v => v.toFixed(3), fpPct = v => (v*100).toFixed(0)+"%";
+    const MC_MACHS = [
+      { key: "r01", name: "RECT-01", color: "#35c98a" },
+      { key: "r02", name: "RECT-02", color: "#35c98a" },
+      { key: "d01", name: "DESB-01", color: "#f0a32e" },
     ];
+    const mcMachineParams = MC_MACHS.map(m => ({
+      name: m.name, color: m.color,
+      params: [
+        mkP("rp_"+m.key, "Rate producción", "mm/min", 0.003, 0.020, 0.001, fp3),
+        mkP("rd_"+m.key, "Rate desbaste",   "mm/min", 0.010, 0.040, 0.001, fp3),
+        mkP("tf_"+m.key, "Tasa de falla",   "%/h",    0.00,  0.30,  0.01,  fpPct),
+      ],
+    }));
+    const mcGlobalParams = [
+      mkP("tiempoEnf",      "Tiempo de enfriamiento", "h",   0.5, 8.0, 0.5, v => v.toFixed(1)),
+      mkP("tiempoTraslado", "Tiempo traslado CRC",    "min", 5,   60,  5,   v => String(Math.round(v))),
+    ];
+    const mkSel = (key, label, opts) => ({
+      label, val: this.state.mcFijados[key],
+      opts: opts.map(o => ({
+        label: o,
+        active: this.state.mcFijados[key] === o,
+        bg:     this.state.mcFijados[key] === o ? "#b08cf522" : "transparent",
+        border: this.state.mcFijados[key] === o ? "#b08cf5"   : "#313a45",
+        color:  this.state.mcFijados[key] === o ? "#b08cf5"   : "#59616b",
+        onClick: () => this.setState(st => ({ mcFijados: Object.assign({}, st.mcFijados, { [key]: o }) })),
+      })),
+    });
+    const mcFijadosItems = [
+      mkSel("estrategiaAsig",  "Estrategia de asignación",  ["Mayor diámetro", "Menor diámetro", "FIFO"]),
+      mkSel("estrategiaRect",  "Estrategia de rectificado", ["Mayor desgaste",  "Menor desgaste",  "FIFO"]),
+      mkSel("genCorridas",     "Generación de corridas",    ["Aleatoria", "Sistemática", "LHS"]),
+      (() => {
+        const DUR_OPTS = ["1d", "2d", "3d", "7d"];
+        const durVal = this.state.mcFijados.duracionCorrida;
+        const durCustom = !!durVal && !DUR_OPTS.includes(durVal);
+        return {
+          label: "Duración de corrida",
+          hasCustom: true,
+          customVal: durCustom ? durVal : "",
+          customBg:     durCustom ? "#b08cf522" : "transparent",
+          customBorder: durCustom ? "#b08cf5"   : "#313a45",
+          customColor:  durCustom ? "#b08cf5"   : "#59616b",
+          customChange: (e) => { const v = e.target.value.trim(); if (v) this.setState(st => ({ mcFijados: Object.assign({}, st.mcFijados, { duracionCorrida: v }) })); },
+          opts: DUR_OPTS.map(o => ({
+            label: o,
+            bg:     durVal === o ? "#b08cf522" : "transparent",
+            border: durVal === o ? "#b08cf5"   : "#313a45",
+            color:  durVal === o ? "#b08cf5"   : "#59616b",
+            onClick: () => this.setState(st => ({ mcFijados: Object.assign({}, st.mcFijados, { duracionCorrida: o }) })),
+          })),
+        };
+      })(),
+      mkSel("turnosMaquinas",  "Turnos máquinas",           ["24/7", "L-V 06-22", "L-S 06-22"]),
+      mkSel("turnosLaminador", "Turnos laminador",          ["24/7", "L-V 06-22", "L-S 06-22"]),
+    ];
+    const mcParams = [];
     const RUN_OPTS = [100, 500, 1000, 2000];
     const mcRunOptions = RUN_OPTS.map(v => ({
       label: v >= 1000 ? (v / 1000) + "k" : String(v),
@@ -1396,7 +1499,7 @@ class Component extends DCLogic {
       ssEvol: this.ssEvol, ssParadaBands: this.ssParadaBands,
       cfgGlobales: this.cfgGlobales, cfgRangos: this.cfgRangos, cfgMaquinas: this.cfgMaquinas, cfgMaxIter: this.cfgMaxIter,
       cfgEstrategias: [{ label: "Estrategia de rectificado", val: ({ "Mayor diámetro": "Mayor diámetro primero", "Menor diámetro": "Menor diámetro primero", "FIFO": "Orden de llegada (FIFO)" })[estr] }, { label: "Estrategia de asignación", val: "Menor stock disponible" }],
-      mcParams, mcRunOptions, mcIsCustom, mcCustomVal, mcCustomChange, mcCustomBg, mcCustomBorder, mcCustomColor, mcHasResults, mcNoResults,
+      mcParams, mcMachineParams, mcGlobalParams, mcFijadosItems, mcRunOptions, mcIsCustom, mcCustomVal, mcCustomChange, mcCustomBg, mcCustomBorder, mcCustomColor, mcHasResults, mcNoResults,
       mcRunning: this.state.mcRunning, mcProgress: this.state.mcProgress,
       mcRun: () => this._runMC(),
       mcRunLabel: this.state.mcRunning ? "Simulando\u2026" : "\u25b6\u2002Ejecutar Monte Carlo",
