@@ -53,7 +53,7 @@ class PlaybackState:
 
     current_index: int = 0
     total_snapshots: int = 0
-    speed: int = 1
+    speed: int = 2
 
 
 class MainWindow(QMainWindow):
@@ -62,13 +62,13 @@ class MainWindow(QMainWindow):
     TAB_NAMES = [
         "Vista Real",
         "Dashboard",
-        "Analisis",
+        "Análisis",
         "Inventario",
         "KPIs",
-        "Generacion",
-        "Monte Carlo",
-        "Configuracion",
+        "Generación",
+        "Configuración",
         "Consola",
+        "Monte Carlo",
     ]
 
     def __init__(self) -> None:
@@ -210,14 +210,19 @@ class MainWindow(QMainWindow):
             page_col = QVBoxLayout(page)
             page_col.setContentsMargins(14, 14, 14, 14)
 
-            card = SectionCard(
-                self,
-                object_name="Card",
-                margins=(14, 12, 14, 12),
-                spacing=8,
-            )
-            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            card_col = card.content_layout()
+            use_card = name in {"Vista Real", "Consola"}
+            card = None
+            if use_card:
+                card = SectionCard(
+                    self,
+                    object_name="Card",
+                    margins=(14, 12, 14, 12),
+                    spacing=8,
+                )
+                card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+                card_col = card.content_layout()
+            else:
+                card_col = page_col
             if name == "Vista Real":
                 card_col.addWidget(self.realtime_view)
             elif name == "Dashboard":
@@ -225,7 +230,7 @@ class MainWindow(QMainWindow):
                 title.setObjectName("BoardHeader")
                 card_col.addWidget(title)
                 card_col.addWidget(self.dashboard_panel)
-            elif name == "Analisis":
+            elif name == "Análisis":
                 title = QLabel(name)
                 title.setObjectName("BoardHeader")
                 card_col.addWidget(title)
@@ -237,7 +242,7 @@ class MainWindow(QMainWindow):
                 title.setObjectName("BoardHeader")
                 card_col.addWidget(title)
                 card_col.addWidget(self.kpis_panel)
-            elif name == "Generacion":
+            elif name == "Generación":
                 title = QLabel(name)
                 title.setObjectName("BoardHeader")
                 card_col.addWidget(title)
@@ -252,7 +257,7 @@ class MainWindow(QMainWindow):
                 title.setObjectName("BoardHeader")
                 card_col.addWidget(title)
                 card_col.addWidget(self.console_panel)
-            elif name == "Configuracion":
+            elif name == "Configuración":
                 title = QLabel(name)
                 title.setObjectName("BoardHeader")
                 card_col.addWidget(title)
@@ -265,7 +270,8 @@ class MainWindow(QMainWindow):
                 hint.setObjectName("Muted")
                 card_col.addWidget(hint)
 
-            page_col.addWidget(card, 1)
+            if use_card and card is not None:
+                page_col.addWidget(card, 1)
             tabs.addTab(page, name)
 
         return tabs
@@ -357,13 +363,20 @@ class MainWindow(QMainWindow):
         fut = self.sim_future
         self.sim_future = None
         try:
-            self.taller = fut.result()
+            nuevo_taller = fut.result()
         except Exception as exc:
             self.status_main_label.setText("Error en simulacion")
             self.progress_sim.setVisible(False)
             self._update_run_button_state()
             QMessageBox.critical(self, "Error", f"No se pudo ejecutar la simulacion:\n{exc}")
             return
+
+        # Libera el taller anterior antes de asignar el nuevo para no acumular
+        # snapshots de corridas pasadas en memoria.
+        if self.taller is not None:
+            self.generation_panel.set_simulation_snapshots([])
+            self.taller = None
+        self.taller = nuevo_taller
 
         self.playback.current_index = 0
         self.playback.total_snapshots = len(self.taller.snapshots)

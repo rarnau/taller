@@ -1,0 +1,22 @@
+Archivos modificados en esta sesión (sin duplicados)
+
+1. gui_qt/ui_constants_qt.py
+2. gui_qt/main_window.py
+3. gui_qt/sidebar_qt.py
+4. gui_qt/widgets/flow_card_qt.py
+5. gui_qt/theme.py
+6. gui_qt/widgets/status_bar_qt.py
+7. gui_qt/widgets/tabs_corner_qt.py
+8. gui_qt/montecarlo_qt.py
+9. gui_qt/playback_slider_qt.py
+10. gui_qt/widgets/analysis_charts_qt.py
+11. gui_qt/widgets/flow_layout_qt.py
+12. gui_qt/widgets/__init__.py
+13. gui_qt/config_qt.py
+14. nucleo/montecarlo.py
+15. cli.py
+16. modelos/kpis.py
+17. gui_qt/widgets/kpi_cards_qt.py
+18. gui_qt/tab_kpis_qt.py
+19. tests/test_turnos.py
+20. config/tema.py

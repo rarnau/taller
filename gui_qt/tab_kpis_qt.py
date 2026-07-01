@@ -44,6 +44,8 @@ def _format_value(key: str, value: Any) -> str:
             return f"{value:.1f} mm"
         if key == "desgaste_medio_mm":
             return f"{value:.2f} mm"
+        if key == "tiempo_parada_h":
+            return formato_horizonte(value)
         if key == "horizonte_simulacion_h":
             return formato_horizonte(value)
         return f"{value:.2f}"
@@ -70,6 +72,8 @@ def _kpi_color(key: str, value: Any) -> str:
     if key == "reposicion_entregados":
         return tk_theme.KPI_COLOR_OK
     if key == "reposicion_pendientes":
+        return tk_theme.KPI_COLOR_ALERT if float(value or 0) > 0 else tk_theme.KPI_COLOR_OK
+    if key == "tiempo_parada_h":
         return tk_theme.KPI_COLOR_ALERT if float(value or 0) > 0 else tk_theme.KPI_COLOR_OK
     return tk_theme.KPI_TEXT_DEFAULT
 
@@ -233,10 +237,11 @@ class KpisPanel(QWidget):
         for idx, key in enumerate(metric_keys):
             meta = metric_meta.get(key, {}) if isinstance(metric_meta, dict) else {}
             label = str(meta.get("label", _pretty_label(key)))
+            detail = str(meta.get("detail", ""))
             value = _format_value(key, k[key])
             color = _kpi_color(key, k[key])
             r, c = divmod(idx, 3)
-            self.general_grid.addWidget(SummaryCard(label, value, color), r, c)
+            self.general_grid.addWidget(SummaryCard(label, value, color, detail), r, c)
 
         util_disp = k.get("utilizacion_maquinas_pct", {})
         util_neta = k.get("utilizacion_neta_pct", {})

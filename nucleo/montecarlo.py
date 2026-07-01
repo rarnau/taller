@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import csv
+import logging
 import os
 import pickle
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -112,10 +113,22 @@ def aplicar_a_cfg(base_cfg: Dict[str, Any], overrides: Dict[str, Any],
         cfgmod.set_generador_cambios(cfg, generador=fijos["generador"])
 
     preset_maq = fijos.get("turnos_maquinas_preset")
-    if preset_maq and preset_maq in turnos_mod.PRESETS:
-        grid = {k: list(v) for k, v in turnos_mod.PRESETS[preset_maq].items()}
-        for m in cfgmod.obtener_maquinas(cfg):
-            cfgmod.set_maquina(cfg, m["nombre"], turnos=grid)
+    turnos_por_maquina = fijos.get("turnos_por_maquina") or {}
+    for m in cfgmod.obtener_maquinas(cfg):
+        nombre_m = m["nombre"]
+        # Turno per-máquina tiene prioridad; luego el preset global (legacy).
+        preset_this = turnos_por_maquina.get(nombre_m, preset_maq)
+        if preset_this and preset_this in turnos_mod.PRESETS:
+            grid = {k: list(v) for k, v in turnos_mod.PRESETS[preset_this].items()}
+            cfgmod.set_maquina(cfg, nombre_m, turnos=grid)
+        elif preset_this and preset_this not in turnos_mod.PRESETS:
+            # Puede ser un string compacto personalizado
+            try:
+                grid_custom = {k: list(v) for k, v in
+                               turnos_mod.expandir(turnos_mod.parse_compacto(preset_this)).items()}
+                cfgmod.set_maquina(cfg, nombre_m, turnos=grid_custom)
+            except Exception:
+                pass  # String inválido: se deja el turno original de la máquina
     preset_lam = fijos.get("turnos_laminador_preset")
     if preset_lam and preset_lam in turnos_mod.PRESETS:
         cfgmod.set_turnos_cambios(
@@ -151,6 +164,12 @@ def init_worker_montecarlo(base_cfg: Dict[str, Any], stock_df: "pd.DataFrame",
                            modelo: Dict[str, Any], spec: EspecMonteCarlo,
                            dump_dir: Optional[str] = None) -> None:
     """*Initializer* del pool: fija el estado compartido (base_cfg/stock/modelo/spec)."""
+    # Monte Carlo corre miles de simulaciones en procesos hijos: silenciamos el
+    # logger del motor para no inundar stderr con avisos de cada corrida.
+    logger_taller = logging.getLogger("modelos.taller")
+    if not any(isinstance(h, logging.NullHandler) for h in logger_taller.handlers):
+        logger_taller.addHandler(logging.NullHandler())
+    logger_taller.propagate = False
     _WORKER_STATE_MC.update(base_cfg=base_cfg, stock_df=stock_df, modelo=modelo,
                             spec=spec, dump_dir=dump_dir)
 
