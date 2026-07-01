@@ -136,6 +136,7 @@ KPI_META_BASE = {
     "horizonte_simulacion_h": {"label": "Horizonte Simulación", "color": KPI_COLOR_HORIZONTE},
     "diametro_promedio_mm": {"label": "Diámetro Promedio", "color": KPI_COLOR_DIAMETRO},
     "desgaste_medio_mm": {"label": "Desgaste Medio", "color": KPI_COLOR_DESGASTE},
+    "tiempo_parada_h": {"label": "Tiempo de Parada", "color": KPI_COLOR_ALERT},
     "reposicion_entregados": {"label": "Repuestos (entregados)", "color": KPI_COLOR_OK},
     "reposicion_pendientes": {"label": "Reposición Pendiente", "color": KPI_COLOR_ALERT},
 }

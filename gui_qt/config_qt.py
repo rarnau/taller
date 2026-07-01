@@ -508,10 +508,44 @@ class ConfigPanel(QWidget):
                 perfil=perfil_txt,
             )
 
+        # Si cambian los parámetros de una máquina (tasas o falla), se descarta
+        # su rango Monte Carlo persistido para que se re-derive (±30%) de las
+        # nuevas tasas; las máquinas sin cambios conservan su rango custom.
+        self._invalidar_rangos_montecarlo(self._cfg, new_cfg)
+
         probs = problemas_coherencia(new_cfg)
         if probs:
             raise ValueError(" ".join(probs))
         return new_cfg
+
+    @staticmethod
+    def _invalidar_rangos_montecarlo(old_cfg: Dict[str, Any], new_cfg: Dict[str, Any]) -> None:
+        """Elimina de ``new_cfg`` los rangos MC de máquinas cuyos parámetros cambiaron."""
+        mc = new_cfg.get("montecarlo")
+        if not isinstance(mc, dict):
+            return
+        maq_ranges = (mc.get("rangos") or {}).get("maquinas")
+        if not isinstance(maq_ranges, dict) or not maq_ranges:
+            return
+
+        def _params(cfg: Dict[str, Any]) -> Dict[str, Any]:
+            out: Dict[str, Any] = {}
+            for m in cfg.get("maquinas", []):
+                t = m.get("tasas", {})
+                p = t.get("produccion", {})
+                d = t.get("desbaste", {})
+                out[m["nombre"]] = (
+                    p.get("mm"), p.get("tiempo_min"),
+                    d.get("mm"), d.get("tiempo_min"),
+                    m.get("tasa_falla", 0.0),
+                )
+            return out
+
+        antes = _params(old_cfg)
+        despues = _params(new_cfg)
+        for nombre in list(maq_ranges):
+            if nombre not in despues or antes.get(nombre) != despues.get(nombre):
+                maq_ranges.pop(nombre, None)
 
     def _wire_live_status_signals(self) -> None:
         """Conecta señales de edición para refrescar estado de coherencia."""

@@ -178,7 +178,7 @@ def test_resumir_coincide_con_numpy(tmp_path):
     filas = correr_montecarlo(cfg, _stock(), modelo, _spec(cfg, runs=5),
                               csv_path=str(tmp_path / "mc.csv"), max_workers=2)
     resumen = resumir(filas)
-    assert "bajas" in resumen and "nivel_servicio_pct" in resumen
+    assert "bajas" in resumen and "parada_pct" in resumen
     vals = np.array([float(r["bajas"]) for r in filas])
     assert resumen["bajas"]["mean"] == pytest.approx(float(np.mean(vals)))
     assert resumen["bajas"]["p50"] == pytest.approx(float(np.percentile(vals, 50)))

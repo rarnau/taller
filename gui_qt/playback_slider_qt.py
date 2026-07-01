@@ -102,7 +102,7 @@ class PlaybackTimelineSlider(QSlider):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor("#D04A53"))
+        p.setBrush(QColor("#F56B6B"))
         y_top = max(0, groove.top() - 8)
         y_tip = max(0, groove.top() - 2)
         for idx in self._indices:

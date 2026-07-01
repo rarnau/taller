@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -62,9 +63,22 @@ from gui_qt.widgets import SectionCard
 _KPI_DESTACADOS: List[Tuple[str, str, str]] = [
     ("bajas", "Bajas", tema.RED),
     ("paradas", "Paradas de jaula", tema.ORANGE),
+    ("tiempo_parada_h", "Tiempo de parada", tema.DASH_PARADA_BAND),
+    ("parada_pct", "Tiempo en parada %", tema.DASH_PARADA),
     ("stock_min", "Stock mínimo", tema.GREEN),
-    ("nivel_servicio_pct", "Nivel de servicio %", tema.PURPLE),
 ]
+
+
+def _fmt_mc_kpi(clave: str, valor: float, *, compact: bool = False) -> str:
+    """Formatea valores de KPIs de Monte Carlo para cards/tabla."""
+    v = float(valor)
+    if clave == "tiempo_parada_h":
+        return f"{v:.1f} h"
+    if clave == "parada_pct":
+        return f"{v:.1f}%"
+    if clave in {"bajas", "paradas", "stock_min"}:
+        return f"{v:.0f}" if compact else f"{v:.2f}"
+    return f"{v:.0f}" if compact else f"{v:.2f}"
 
 
 class _HistogramWidget(QWidget):
@@ -105,7 +119,7 @@ class _HistogramWidget(QWidget):
                 bh = (c / cmax) * (base - 4)
                 p.fillRect(int(i * bw) + 1, int(base - bh),
                            max(1, int(bw) - 2), int(bh), col)
-            for pct, color in ((10, tema.ACCENT), (50, tema.DASH_TITLE), (90, tema.GREEN)):
+            for pct, color in ((10, tema.ACCENT), (50, tema.ACCENT), (90, tema.GREEN)):
                 x = (np.percentile(self._vals, pct) - lo) / (hi - lo) * w
                 pen = QPen(QColor(color))
                 pen.setWidth(2)
@@ -139,10 +153,11 @@ class _FloatSlider(QWidget):
         self._step = step
         self._dec = decimals
         self._slider = QSlider(Qt.Orientation.Horizontal)
+        self._slider.setObjectName("McRangeSlider")
         self._slider.setRange(0, max(1, int(round(maximo / step))))
         self._slider.setSingleStep(1)
         self._lbl = QLabel("0")
-        self._lbl.setMinimumWidth(46)
+        self._lbl.setMinimumWidth(48)
         self._lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._lbl.setStyleSheet(f"color:{color}; font-family:monospace; font-size:11px;")
         lay = QHBoxLayout(self)
@@ -194,6 +209,11 @@ class MonteCarloPanel(QWidget):
         self._rangos: Dict[Tuple[str, ...], Tuple[_FloatSlider, _FloatSlider]] = {}
         self._hist: Dict[str, _HistogramWidget] = {}
         self._kpi_cards: Dict[str, QLabel] = {}
+        self._kpi_sub: Dict[str, QLabel] = {}
+        self._chip_groups: Dict[str, List[Tuple[QPushButton, Any]]] = {}
+        self._run_preset_buttons: List[Tuple[int, QPushButton]] = []
+        # {nombre_maquina: (combo_hidden, le_custom)} para turnos per-máquina
+        self._turnos_maq_widgets: Dict[str, Tuple[QComboBox, Any]] = {}
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -208,14 +228,15 @@ class MonteCarloPanel(QWidget):
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setFixedWidth(330)
+        scroll.setMinimumWidth(290)
+        scroll.setMaximumWidth(320)
         # Sin scroll horizontal: el contenido se ajusta al ancho y los valores
         # de los sliders (a la derecha) nunca quedan recortados.
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         cont = QWidget()
         col = QVBoxLayout(cont)
-        col.setContentsMargins(2, 2, 8, 2)
+        col.setContentsMargins(6, 4, 12, 4)
         col.setSpacing(10)
 
         # Una card por máquina (rate prod/desb, tasa de falla).
@@ -238,18 +259,17 @@ class MonteCarloPanel(QWidget):
         self.cb_sel = self._combo([(k, v.etiqueta) for k, v in ESTRATEGIAS_SELECCION.items()])
         self.cb_asig = self._combo([(k, v.etiqueta) for k, v in ESTRATEGIAS_ASIGNACION.items()])
         self.cb_gen = self._combo([(k, g.etiqueta) for k, g in GENERADORES_CAMBIOS.items()])
-        self.cb_turnos_maq = self._combo(
-            [(k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS])
         self.cb_turnos_lam = self._combo(
             [(k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS])
+        for cb in (self.cb_sel, self.cb_asig, self.cb_gen, self.cb_turnos_lam):
+            cb.setVisible(False)
         self.sp_duracion = QSpinBox()
         self.sp_duracion.setRange(1, 120)
-        fl.addLayout(self._fila_widget("Estrategia de rectificado", self.cb_sel))
-        fl.addLayout(self._fila_widget("Estrategia de asignación", self.cb_asig))
-        fl.addLayout(self._fila_widget("Generador de cambios", self.cb_gen))
+        fl.addLayout(self._fila_chips("Estrategia de rectificado", "sel", self.cb_sel))
+        fl.addLayout(self._fila_chips("Estrategia de asignación", "asig", self.cb_asig))
+        fl.addLayout(self._fila_chips("Generador de cambios", "gen", self.cb_gen))
         fl.addLayout(self._fila_widget("Duración de corrida (días)", self.sp_duracion))
-        fl.addLayout(self._fila_widget("Turnos máquinas", self.cb_turnos_maq))
-        fl.addLayout(self._fila_widget("Turnos laminador", self.cb_turnos_lam))
+        fl.addLayout(self._fila_chips("Turnos laminador", "tlam", self.cb_turnos_lam))
         col.addWidget(card_f)
 
         # Corridas + seed.
@@ -258,13 +278,18 @@ class MonteCarloPanel(QWidget):
         self.sp_runs = QSpinBox()
         self.sp_runs.setRange(1, 100000)
         presets = QHBoxLayout()
+        presets.setSpacing(6)
         for v in (100, 500, 1000, 2000):
             b = QPushButton(f"{v // 1000}k" if v >= 1000 else str(v))
-            b.setMaximumWidth(64)
+            b.setObjectName("McPresetChip")
+            b.setCheckable(True)
+            b.setMinimumWidth(52)
             b.clicked.connect(lambda _=False, n=v: self.sp_runs.setValue(n))
             presets.addWidget(b)
+            self._run_preset_buttons.append((v, b))
         nl.addLayout(self._fila_widget("Número de corridas", self.sp_runs))
         nl.addLayout(presets)
+        self.sp_runs.valueChanged.connect(self._sync_run_presets)
         self.sp_seed = QSpinBox()
         self.sp_seed.setRange(0, 2_000_000_000)
         self.sp_seed.setSpecialValueText("aleatoria")
@@ -273,7 +298,7 @@ class MonteCarloPanel(QWidget):
         nl.addWidget(self.chk_dump)
         col.addWidget(card_n)
 
-        self.btn_run = QPushButton("▶  Ejecutar Monte Carlo")
+        self.btn_run = QPushButton("▶ Ejecutar Monte Carlo")
         self.btn_run.setObjectName("RunButton")
         self.btn_run.clicked.connect(self._ejecutar)
         col.addWidget(self.btn_run)
@@ -287,6 +312,7 @@ class MonteCarloPanel(QWidget):
 
         col.addStretch(1)
         scroll.setWidget(cont)
+        self._sync_run_presets(self.sp_runs.value())
         return scroll
 
     def _build_right(self) -> QWidget:
@@ -301,14 +327,20 @@ class MonteCarloPanel(QWidget):
 
         # Cards de KPIs (P50 grande + P10/P90).
         cards = QGridLayout()
-        cards.setSpacing(10)
+        cards.setSpacing(12)
+        ncols_cards = 3
         for i, (clave, etiqueta, color) in enumerate(_KPI_DESTACADOS):
             card = SectionCard(title=etiqueta, object_name="CardSoft")
+            card.setMinimumWidth(160)
             lbl = QLabel("—")
-            lbl.setStyleSheet(f"font-size:24px; font-weight:700; color:{color};")
+            lbl.setStyleSheet(f"font-size:26px; font-weight:700; color:{color};")
+            sub = QLabel("")
+            sub.setStyleSheet(f"font-size:11px; color:{tema.DASH_LEGEND_TEXT};")
             card.content_layout().addWidget(lbl)
+            card.content_layout().addWidget(sub)
             self._kpi_cards[clave] = lbl
-            cards.addWidget(card, 0, i)
+            self._kpi_sub[clave] = sub
+            cards.addWidget(card, i // ncols_cards, i % ncols_cards)
         col.addLayout(cards)
 
         # Histogramas 2×2.
@@ -326,10 +358,13 @@ class MonteCarloPanel(QWidget):
         card_t = SectionCard(title="RESUMEN ESTADÍSTICO", object_name="CardSoft")
         self.lbl_tabla = card_t.title_label
         self.tabla = QTableWidget(0, 6)
+        self.tabla.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.tabla.setHorizontalHeaderLabels(["Variable", "Media", "Desv.", "P10", "P50", "P90"])
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabla.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         card_t.content_layout().addWidget(self.tabla)
         btns = QHBoxLayout()
         self.btn_csv = QPushButton("⤓ Exportar CSV de corridas")
@@ -356,7 +391,7 @@ class MonteCarloPanel(QWidget):
         # Permite que el combo se encoja y elida el texto largo en vez de forzar
         # el ancho del panel (los nombres de estrategia son largos).
         cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        cb.setMinimumContentsLength(6)
+        cb.setMinimumContentsLength(12)
         cb.setMinimumWidth(0)
         cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return cb
@@ -369,15 +404,118 @@ class MonteCarloPanel(QWidget):
         lab = QLabel(label)
         lab.setStyleSheet(f"color:{tema.FG2}; font-size:11px;")
         box.addWidget(lab)
+        if isinstance(widget, (QComboBox, QSpinBox)):
+            widget.setMinimumHeight(28)
         box.addWidget(widget)
+        return box
+
+    def _fila_chips(self, label: str, key: str, combo: QComboBox) -> QVBoxLayout:
+        box = QVBoxLayout()
+        box.setSpacing(4)
+        lab = QLabel(label)
+        lab.setStyleSheet(f"color:{tema.FG2}; font-size:11px;")
+        box.addWidget(lab)
+
+        chips: List[Tuple[QPushButton, Any]] = []
+        for i in range(combo.count()):
+            txt = combo.itemText(i)
+            data = combo.itemData(i)
+            btn = QPushButton(txt)
+            btn.setObjectName("McOptionChip")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.clicked.connect(lambda _=False, c=combo, d=data: self._select_chip(c, d))
+            box.addWidget(btn)
+            chips.append((btn, data))
+
+        self._chip_groups[key] = chips
+        combo.currentIndexChanged.connect(lambda _=0, k=key: self._refresh_chips(k))
+        self._refresh_chips(key)
+        return box
+
+    def _select_chip(self, combo: QComboBox, data: Any) -> None:
+        idx = combo.findData(data)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+
+    def _refresh_chips(self, key: str) -> None:
+        group = self._chip_groups.get(key, [])
+        if not group:
+            return
+        combo_map = {
+            "sel": self.cb_sel,
+            "asig": self.cb_asig,
+            "gen": self.cb_gen,
+            "tlam": self.cb_turnos_lam,
+        }
+        combo = combo_map.get(key)
+        # Claves dinámicas tmaq_<nombre>
+        if combo is None and key.startswith("tmaq_"):
+            nombre = key[5:]
+            t = self._turnos_maq_widgets.get(nombre)
+            combo = t[0] if t else None
+        if combo is None:
+            return
+        cur = combo.currentData()
+        for btn, data in group:
+            btn.setChecked(data == cur)
+
+    def _sync_run_presets(self, value: int) -> None:
+        for n, btn in self._run_preset_buttons:
+            btn.setChecked(n == value)
+
+    def _fila_turnos_maquina(self, nombre: str) -> QVBoxLayout:
+        """Fila de turnos para una máquina: chips de preset + campo Personalizado."""
+        opciones = [(k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS]
+        # None = Personalizado
+        opciones.append((None, "Personalizado"))
+        cb_t = self._combo(opciones)
+        cb_t.setVisible(False)
+
+        le_custom = QLineEdit()
+        le_custom.setPlaceholderText("ej: lv5|lv5|lv5|lv5|lv5|off|off")
+        le_custom.setVisible(False)
+        le_custom.setStyleSheet(f"font-size:10px; font-family:monospace; color:{tema.FG2};")
+
+        box = QVBoxLayout()
+        box.setSpacing(4)
+        lab = QLabel("Turnos")
+        lab.setStyleSheet(f"color:{tema.FG2}; font-size:11px;")
+        box.addWidget(lab)
+
+        key = f"tmaq_{nombre}"
+        chips: List[Tuple[QPushButton, Any]] = []
+        for data, txt in opciones:
+            btn = QPushButton(txt)
+            btn.setObjectName("McOptionChip")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            def _on_click(_, cb=cb_t, d=data, le=le_custom):
+                idx = cb.findData(d)
+                if idx >= 0:
+                    cb.setCurrentIndex(idx)
+                le.setVisible(d is None)
+            btn.clicked.connect(_on_click)
+            box.addWidget(btn)
+            chips.append((btn, data))
+
+        box.addWidget(le_custom)
+
+        self._chip_groups[key] = chips
+        cb_t.currentIndexChanged.connect(lambda _=0, k=key: self._refresh_chips(k))
+        self._turnos_maq_widgets[nombre] = (cb_t, le_custom)
+        self._refresh_chips(key)
         return box
 
     def _fila_slider(self, etiqueta: str, slider: _FloatSlider) -> QHBoxLayout:
         fila = QHBoxLayout()
         fila.setSpacing(6)
         cap = QLabel(etiqueta)
-        cap.setFixedWidth(26)
-        cap.setStyleSheet(f"color:{tema.FG_DIM}; font-size:9.5px;")
+        cap.setMinimumWidth(32)
+        cap_color = tema.RED if etiqueta == "Mín" else tema.GREEN
+        cap.setStyleSheet(f"color:{cap_color}; font-size:9.5px;")
         fila.addWidget(cap, 0)
         fila.addWidget(slider, 1)
         return fila
@@ -396,6 +534,7 @@ class MonteCarloPanel(QWidget):
         cab = QHBoxLayout()
         lab = QLabel(label)
         u = QLabel(unit)
+        u.setMinimumWidth(30)
         u.setObjectName("Muted")
         u.setStyleSheet(f"color:{tema.FG_DIM}; font-family:monospace; font-size:10px;")
         cab.addWidget(lab)
@@ -437,10 +576,20 @@ class MonteCarloPanel(QWidget):
                 w.deleteLater()
         for clave in [k for k in self._rangos if k[0] == "maq"]:
             self._rangos.pop(clave, None)
+        # Limpia widgets de turnos por máquina previos
+        for key in [k for k in self._chip_groups if k.startswith("tmaq_")]:
+            self._chip_groups.pop(key, None)
+        self._turnos_maq_widgets.clear()
 
         for m in obtener_maquinas(self._cfg):
             nombre = m["nombre"]
             card = SectionCard(title=f"MÁQUINA · {nombre}", object_name="CardSoft")
+            prio = str(m.get("prioridad", "")).lower()
+            dot = tema.DASH_ORANGE if "desb" in prio else tema.DASH_ESTADO_DISPONIBLE
+            if card.title_label is not None:
+                card.title_label.setTextFormat(Qt.TextFormat.RichText)
+                card.title_label.setText(
+                    f'<span style="color:{dot};">●</span>&nbsp;&nbsp;MÁQUINA · {nombre}')
             cl = card.content_layout()
             cl.addLayout(self._fila_rango(("maq", nombre, "rate_prod"),
                                           "Rate producción", "mm/min", 0.0, 0.05, 0.0005, 4))
@@ -448,6 +597,7 @@ class MonteCarloPanel(QWidget):
                                           "Rate desbaste", "mm/min", 0.0, 0.06, 0.0005, 4))
             cl.addLayout(self._fila_rango(("maq", nombre, "tasa_falla"),
                                           "Tasa de falla", "frac", 0.0, 0.5, 0.005, 3))
+            cl.addLayout(self._fila_turnos_maquina(nombre))
             self._maq_box.addWidget(card)
 
     def _reload_widgets_from_cfg(self) -> None:
@@ -461,7 +611,6 @@ class MonteCarloPanel(QWidget):
         self._set_combo(self.cb_sel, fijos.get("estrategia_seleccion"))
         self._set_combo(self.cb_asig, fijos.get("estrategia_asignacion"))
         self._set_combo(self.cb_gen, fijos.get("generador"))
-        self._set_combo(self.cb_turnos_maq, fijos.get("turnos_maquinas_preset"))
         self._set_combo(self.cb_turnos_lam, fijos.get("turnos_laminador_preset"))
         self.sp_duracion.setValue(int(fijos.get("duracion_dias", 7)))
 
@@ -472,10 +621,29 @@ class MonteCarloPanel(QWidget):
             for campo in ("rate_prod", "rate_desb", "tasa_falla"):
                 self._set_rango(("maq", nombre, campo), rr[campo])
 
+        # Turnos por máquina
+        turnos_por_maq = fijos.get("turnos_por_maquina") or {}
+        for nombre, widgets in self._turnos_maq_widgets.items():
+            cb_t, le_custom = widgets
+            val = turnos_por_maq.get(nombre, "24x7")
+            idx = cb_t.findData(val)
+            if idx >= 0:
+                cb_t.setCurrentIndex(idx)
+                le_custom.setVisible(False)
+            else:
+                cb_t.setCurrentIndex(cb_t.count() - 1)  # «Personalizado»
+                le_custom.setText(val)
+                le_custom.setVisible(True)
+            self._refresh_chips(f"tmaq_{nombre}")
+
     def _set_combo(self, cb: QComboBox, clave: Optional[str]) -> None:
         idx = cb.findData(clave)
         if idx >= 0:
             cb.setCurrentIndex(idx)
+        self._refresh_chips("sel")
+        self._refresh_chips("asig")
+        self._refresh_chips("gen")
+        self._refresh_chips("tlam")
 
     def _set_rango(self, clave: Tuple[str, ...], par: Any) -> None:
         widgets = self._rangos.get(clave)
@@ -490,6 +658,16 @@ class MonteCarloPanel(QWidget):
             if clave[0] == "maq":
                 _, nombre, campo = clave
                 maquinas.setdefault(nombre, {})[campo] = [smin.value(), smax.value()]
+
+        turnos_por_maquina: Dict[str, str] = {}
+        for nombre, (cb_t, le_custom) in self._turnos_maq_widgets.items():
+            data = cb_t.currentData()
+            if data is None:  # «Personalizado»
+                val = le_custom.text().strip() or "24x7"
+            else:
+                val = data
+            turnos_por_maquina[nombre] = val
+
         return {
             "runs": self.sp_runs.value(),
             "master_seed": (self.sp_seed.value() or None),
@@ -499,7 +677,7 @@ class MonteCarloPanel(QWidget):
                 "estrategia_asignacion": self.cb_asig.currentData(),
                 "generador": self.cb_gen.currentData(),
                 "duracion_dias": self.sp_duracion.value(),
-                "turnos_maquinas_preset": self.cb_turnos_maq.currentData(),
+                "turnos_por_maquina": turnos_por_maquina,
                 "turnos_laminador_preset": self.cb_turnos_lam.currentData(),
             },
             "rangos": {
@@ -565,21 +743,28 @@ class MonteCarloPanel(QWidget):
         for clave, _et, _c in _KPI_DESTACADOS:
             st = self._resumen.get(clave)
             if st:
-                self._kpi_cards[clave].setText(
-                    f"{st['p50']:.0f}\nP10 {st['p10']:.0f} · P90 {st['p90']:.0f}")
+                self._kpi_cards[clave].setText(_fmt_mc_kpi(clave, st["p50"], compact=True))
+                self._kpi_sub[clave].setText(
+                    f"P10 {_fmt_mc_kpi(clave, st['p10'], compact=True)} · "
+                    f"P90 {_fmt_mc_kpi(clave, st['p90'], compact=True)}")
             self._hist[clave].set_values([float(r[clave]) for r in filas if clave in r])
 
         variables = sorted(self._resumen)
         self.tabla.setRowCount(len(variables))
         for i, var in enumerate(variables):
             st = self._resumen[var]
-            celdas = [var, f"{st['mean']:.2f}", f"{st['std']:.2f}",
-                      f"{st['p10']:.2f}", f"{st['p50']:.2f}", f"{st['p90']:.2f}"]
+            celdas = [var,
+                      _fmt_mc_kpi(var, st["mean"]),
+                      _fmt_mc_kpi(var, st["std"]),
+                      _fmt_mc_kpi(var, st["p10"]),
+                      _fmt_mc_kpi(var, st["p50"]),
+                      _fmt_mc_kpi(var, st["p90"])]
             for j, txt in enumerate(celdas):
                 item = QTableWidgetItem(txt)
                 if j > 0:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(i, j, item)
+            self._ajustar_altura_tabla()
         self._set_export_enabled(True)
 
     def set_error(self, msg: str) -> None:
@@ -592,6 +777,13 @@ class MonteCarloPanel(QWidget):
     def _set_export_enabled(self, on: bool) -> None:
         self.btn_csv.setEnabled(on)
         self.btn_resumen.setEnabled(on)
+
+    def _ajustar_altura_tabla(self) -> None:
+        """Expande la tabla para mostrar todas las filas sin scroll interno."""
+        header_h = self.tabla.horizontalHeader().height()
+        frame = self.tabla.frameWidth() * 2
+        filas_h = sum(self.tabla.rowHeight(i) for i in range(self.tabla.rowCount()))
+        self.tabla.setFixedHeight(header_h + filas_h + frame)
 
     def _exportar_corridas(self) -> None:
         if not self._csv_path or not os.path.exists(self._csv_path):

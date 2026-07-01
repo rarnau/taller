@@ -55,13 +55,15 @@ class CylinderMapChart(QWidget):
         hi = max(self._data.diametro_maximo, self._data.dist_max)
         if hi <= lo:
             hi = lo + 1.0
+        clamp_min = float(self._data.diametro_minimo)
         # Margen para que los puntos no queden pegados en extremos del eje.
         span = hi - lo
         lo -= span * tema.ANALYSIS_MAP_X_MARGIN_RATIO
         hi += span * tema.ANALYSIS_MAP_X_MARGIN_RATIO
 
         def x_of(diam: float) -> float:
-            return r.left() + ((diam - lo) / (hi - lo)) * r.width()
+            diam_plot = max(float(diam), clamp_min)
+            return r.left() + ((diam_plot - lo) / (hi - lo)) * r.width()
 
         n = len(estados)
         lane_h = r.height() / n

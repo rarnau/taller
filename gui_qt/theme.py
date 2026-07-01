@@ -12,19 +12,19 @@ def build_qss() -> str:
 
     return f"""
     QWidget {{
-        background-color: #0F141A;
+        background-color: #12161B;
         color: #E9ECEF;
         font-family: 'Hanken Grotesk', 'Segoe UI', sans-serif;
         font-size: {tk_theme.FONT_SIZE_MD}px;
     }}
 
     QMainWindow {{
-        background-color: #0F141A;
+        background-color: #12161B;
     }}
 
     QFrame#Sidebar {{
-        background-color: #17232D;
-        border-right: 1px solid #252E3A;
+        background-color: #1A1F26;
+        border-right: 1px solid #262D36;
     }}
 
     QFrame#ContentTopBar {{
@@ -39,7 +39,7 @@ def build_qss() -> str:
     QTabWidget::right-corner {{
         background: transparent;
         border: none;
-        margin: 0px;
+        margin: 0px 10px 0px 2px;
         padding: 0px;
     }}
 
@@ -56,6 +56,7 @@ def build_qss() -> str:
         letter-spacing: 0.06em;
         font-weight: 700;
         background-color: transparent;
+        font-family: 'Space Grotesk', 'Hanken Grotesk', sans-serif;
     }}
 
     QLabel#BrandSubtitle {{
@@ -64,17 +65,28 @@ def build_qss() -> str:
         background-color: transparent;
     }}
 
+    QLabel#BrandMark {{
+        color: #1A1206;
+        font-family: 'Space Grotesk', 'Hanken Grotesk', sans-serif;
+        font-size: {tk_theme.FONT_SIZE_LG + 4}px;
+        font-weight: 700;
+        border-radius: 8px;
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #E8A13A, stop:1 #C47A1D);
+    }}
+
     QPushButton#PrimaryAction {{
-        background-color: #35D18A;
+        background-color: #2BB579;
         color: #062014;
         border: none;
         border-radius: 9px;
-        padding: 10px 14px;
+        padding: 11px 14px;
         font-weight: 700;
+        font-size: {tk_theme.FONT_SIZE_MD + 1}px;
     }}
 
     QPushButton#PrimaryAction:hover {{
-        background-color: #4DE89A;
+        background-color: #39D18F;
     }}
 
     QFrame#FlowCard {{
@@ -143,27 +155,29 @@ def build_qss() -> str:
 
     QLabel#TopState {{
         color: #8B939D;
-        background: #232A33;
-        border: 1px solid #313A45;
-        border-radius: 8px;
-        padding: 4px 10px;
+        background: transparent;
+        border: none;
+        border-radius: 0px;
+        padding: 0px;
         font-size: {tk_theme.FONT_SIZE_SM}px;
         font-weight: 600;
     }}
 
     QLabel#TopClock {{
-        color: #DCE4EB;
-        background: #1A1F26;
-        border: 1px solid #2B333D;
-        border-radius: 8px;
+        color: #8B939D;
+        background: transparent;
+        border: none;
+        border-radius: 0px;
         padding: 4px 10px;
-        font-size: {tk_theme.FONT_SIZE_SM}px;
+        min-width: 150px;
+        font-size: {tk_theme.FONT_SIZE_SM + 1}px;
         font-weight: 600;
+        font-family: 'IBM Plex Mono', 'Consolas', monospace;
     }}
 
     QPushButton#PlaybackButton {{
-        background-color: #1F2A35;
-        border: 1px solid #3B4756;
+        background-color: #232A33;
+        border: 1px solid #313A45;
         border-radius: 7px;
         color: #CFD5DC;
         min-height: 30px;
@@ -179,8 +193,8 @@ def build_qss() -> str:
     }}
 
     QPushButton#PlaybackButton:hover {{
-        background-color: #2A3644;
-        border: 1px solid #4A5A6D;
+        background-color: #2A3340;
+        border: 1px solid #3A4552;
     }}
 
     QPushButton#PlaybackButton:checked {{
@@ -191,7 +205,7 @@ def build_qss() -> str:
 
     QPushButton#PlaybackPlayButton {{
         background-color: #E8A13A;
-        border: 1px solid #E8A13A;
+        border: none;
         border-radius: 7px;
         color: #12161B;
         min-height: 30px;
@@ -202,24 +216,112 @@ def build_qss() -> str:
     }}
 
     QPushButton#PlaybackPlayButton:focus {{
-        border: 1px solid #E8A13A;
+        border: none;
         outline: none;
     }}
 
     QPushButton#PlaybackPlayButton:hover {{
-        background-color: #F2B14E;
-        border: 1px solid #F2B14E;
+        background-color: #EEAE52;
+        border: none;
     }}
 
     QPushButton#PlaybackPlayButton:checked {{
         background-color: #E8A13A;
-        border: 1px solid #E8A13A;
+        border: none;
         color: #12161B;
     }}
 
+    QPushButton#RunButton {{
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #B08CF5, stop:1 #8B5CF6);
+        color: #E9ECEF;
+        border: 1px solid #8B5CF6;
+        border-radius: 10px;
+        min-height: 38px;
+        font-size: {tk_theme.FONT_SIZE_MD + 1}px;
+        font-weight: 700;
+    }}
+
+    QPushButton#RunButton:hover {{
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #B99BFF, stop:1 #9A6AFF);
+        border-color: #9A6AFF;
+    }}
+
+    QPushButton#RunButton:disabled {{
+        background: #313545;
+        border-color: #404758;
+        color: #8B939D;
+    }}
+
+    QPushButton#McOptionChip,
+    QPushButton#McPresetChip {{
+        background: transparent;
+        border: 1px solid #313A45;
+        border-radius: 8px;
+        color: #8B939D;
+        min-height: 28px;
+        padding: 2px 12px;
+        font-size: {tk_theme.FONT_SIZE_SM + 1}px;
+        font-weight: 600;
+        text-align: center;
+    }}
+
+    QPushButton#McOptionChip {{
+        text-align: left;
+    }}
+
+    QPushButton#McOptionChip:hover,
+    QPushButton#McPresetChip:hover {{
+        background: #222B36;
+        border-color: #3A4656;
+        color: #D1DAE3;
+    }}
+
+    QPushButton#McOptionChip:checked,
+    QPushButton#McPresetChip:checked {{
+        background: rgba(176, 140, 245, 0.16);
+        border-color: #B08CF5;
+        color: #B08CF5;
+    }}
+
+    QSlider#McRangeSlider {{
+        background: transparent;
+        border: none;
+        outline: none;
+    }}
+
+    QSlider#McRangeSlider::groove:horizontal {{
+        border: none;
+        background: #2A2140;
+        height: 6px;
+        border-radius: 3px;
+    }}
+
+    QSlider#McRangeSlider::sub-page:horizontal {{
+        background: #B08CF5;
+        border: none;
+        border-radius: 3px;
+    }}
+
+    QSlider#McRangeSlider::add-page:horizontal {{
+        background: #2A2140;
+        border: none;
+        border-radius: 3px;
+    }}
+
+    QSlider#McRangeSlider::handle:horizontal {{
+        background: #FFFFFF;
+        border: none;
+        width: 13px;
+        height: 13px;
+        margin: -4px 0;
+        border-radius: 6px;
+    }}
+
     QPushButton#PlaybackSpeedButton {{
-        background-color: #1F2A35;
-        border: 1px solid #3B4756;
+        background-color: #232A33;
+        border: 1px solid #313A45;
         border-radius: 7px;
         color: #9FB0BD;
         min-height: 23px;
@@ -235,8 +337,8 @@ def build_qss() -> str:
     }}
 
     QPushButton#PlaybackSpeedButton:hover {{
-        background-color: #2A3644;
-        border: 1px solid #4A5A6D;
+        background-color: #2A3340;
+        border: 1px solid #3A4552;
         color: #C7D3DD;
     }}
 
@@ -321,7 +423,7 @@ def build_qss() -> str:
     QTabWidget::pane {{
         border: none;
         border-radius: 0px;
-        background: #0F141A;
+        background: #12161B;
         top: 0px;
     }}
 
@@ -347,8 +449,8 @@ def build_qss() -> str:
     }}
 
     QFrame#Card {{
-        background-color: #141A25;
-        border: 1px solid #232E3A;
+        background-color: #1A1F26;
+        border: 1px solid #2B333D;
         border-radius: 12px;
     }}
 
@@ -358,8 +460,8 @@ def build_qss() -> str:
     }}
 
     QFrame#CardSoft {{
-        background-color: #1A2230;
-        border: 1px solid #2B3645;
+        background-color: #1A1F26;
+        border: 1px solid #2B333D;
         border-radius: 12px;
     }}
 
@@ -460,11 +562,12 @@ def build_qss() -> str:
     }}
 
     QLabel#BoardHeader {{
-        color: #8E98A3;
+        color: #59616B;
         font-size: {tk_theme.FONT_SIZE_SM}px;
         letter-spacing: 0.08em;
         background-color: transparent;
         font-weight: 700;
+        font-family: 'Space Grotesk', 'Hanken Grotesk', sans-serif;
     }}
 
     QLabel#StockBoardHeader {{
@@ -486,6 +589,14 @@ def build_qss() -> str:
     QLabel#Muted {{
         background-color: transparent;
         color: #86909B;
+    }}
+
+    QLabel#Muted[small="true"] {{
+        font-size: {tk_theme.FONT_SIZE_SM}px;
+    }}
+
+    QLabel#Muted[mono="true"] {{
+        font-family: 'IBM Plex Mono', 'Consolas', monospace;
     }}
 
     QFrame#DashboardCard {{
@@ -1017,28 +1128,28 @@ def build_qss() -> str:
 
     QSlider#PlaybackSlider::groove:horizontal {{
         border: none;
-        background: #2A3440;
-        height: 4px;
-        border-radius: 2px;
+        background: #232A33;
+        height: 6px;
+        border-radius: 3px;
     }}
 
     QSlider#PlaybackSlider::handle:horizontal {{
         background: #FFFFFF;
         border: 1px solid #D8DEE4;
-        width: 10px;
-        height: 10px;
+        width: 13px;
+        height: 13px;
         margin: -4px 0;
-        border-radius: 5px;
+        border-radius: 6px;
     }}
 
     QSlider#PlaybackSlider::sub-page:horizontal {{
-        background: #2A3440;
-        border-radius: 2px;
+        background: #232A33;
+        border-radius: 3px;
     }}
 
     QSlider#PlaybackSlider::add-page:horizontal {{
-        background: #2A3440;
-        border-radius: 2px;
+        background: #232A33;
+        border-radius: 3px;
     }}
 
     QPlainTextEdit#ConsoleView {{

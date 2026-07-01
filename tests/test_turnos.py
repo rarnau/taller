@@ -279,6 +279,29 @@ def test_kpis_descomposicion_con_turno_restringido():
     assert all(disp[m] < 100.0 - 1e-6 for m in disp)
 
 
+def test_kpis_exponen_tiempo_y_porcentaje_de_parada():
+    """El KPI de parada agrega duración total y % del horizonte en metric_meta."""
+    from tests._escenarios import ejecutar_escenario, ESCENARIOS
+
+    t = ejecutar_escenario(ESCENARIOS["parada_mayor_diametro"])
+    k = calcular_kpis(t)
+    parada_s = 0.0
+    total_s = 0.0
+    for i, snap in enumerate(t.snapshots[:-1]):
+        dt = (t.snapshots[i + 1].tiempo - snap.tiempo).total_seconds()
+        if dt <= 0:
+            continue
+        total_s += dt
+        if snap.jaulas_paradas:
+            parada_s += dt
+
+    assert abs(k["tiempo_parada_h"] - parada_s / 3600.0) < 1e-6
+    assert "tiempo_parada_h" in k["metric_order"]
+    meta = k["metric_meta"]["tiempo_parada_h"]
+    assert meta["label"]
+    assert meta["detail"] == f"{(parada_s / total_s * 100.0):.1f}% del horizonte"
+
+
 # ── Tiempo laborable de la línea (minutos_operativos / avanzar_operativo) ─────
 
 _GRID_LV = T.expandir({d: ([True, True, True] if i < 5 else [False, False, False])

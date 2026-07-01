@@ -11,7 +11,7 @@ from config import tema as tk_theme
 class SummaryCard(QFrame):
     """Card de KPI general: label arriba + valor grande centrado."""
 
-    def __init__(self, title: str, value: str, color: str) -> None:
+    def __init__(self, title: str, value: str, color: str, detail: str = "") -> None:
         super().__init__()
         self.setObjectName("KpiSummaryCard")
         self.setStyleSheet(
@@ -37,8 +37,17 @@ class SummaryCard(QFrame):
         )
         v.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
+        d = QLabel(detail)
+        d.setStyleSheet(
+            f"background:transparent; color:{tk_theme.KPI_TEXT_MUTED}; font-size:11px; "
+            "font-weight:600;"
+        )
+        d.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        d.setVisible(bool(detail))
+
         col.addWidget(t)
         col.addWidget(v)
+        col.addWidget(d)
 
 
 class UtilCard(QFrame):

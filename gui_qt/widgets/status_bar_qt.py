@@ -29,10 +29,12 @@ class StatusBarWidget(QFrame):
 
         self.status_main_label = QLabel("● Listo")
         self.status_main_label.setObjectName("Muted")
+        self.status_main_label.setProperty("ok", "true")
         row.addWidget(self.status_main_label)
 
         self.status_clock = QLabel(datetime.now().strftime("%Y-%m-%d %H:%M"))
         self.status_clock.setObjectName("Muted")
+        self.status_clock.setProperty("mono", "true")
         row.addWidget(self.status_clock)
 
         self.status_snap = QLabel("Snapshot 0/0")
@@ -49,4 +51,5 @@ class StatusBarWidget(QFrame):
 
         self.status_strategy = QLabel("Simulador de Cilindros Pro v4")
         self.status_strategy.setObjectName("Muted")
+        self.status_strategy.setProperty("mono", "true")
         row.addWidget(self.status_strategy)

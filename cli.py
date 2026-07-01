@@ -450,11 +450,13 @@ def _cmd_montecarlo(args: argparse.Namespace) -> int:
         return 1
 
     resumen = resumir(filas)
-    print(_formatear_resumen_mc(resumen, len(filas)))
-    print(f"CSV de corridas: {args.csv}")
+    if not args.quiet:
+        print(_formatear_resumen_mc(resumen, len(filas)))
+        print(f"CSV de corridas: {args.csv}")
     if args.resumen_csv:
         exportar_resumen_csv(resumen, args.resumen_csv)
-        print(f"Resumen estadístico: {args.resumen_csv}")
+        if not args.quiet:
+            print(f"Resumen estadístico: {args.resumen_csv}")
     return 0
 
 
@@ -626,7 +628,8 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_mc.add_argument("--ajustar", action="store_true",
                       help="Re-ajusta el modelo con la historia antes de correr.")
     p_mc.add_argument("--config", metavar="RUTA", help="JSON de configuración alternativo.")
-    p_mc.add_argument("--quiet", action="store_true", help="Suprime el progreso.")
+    p_mc.add_argument("--quiet", action="store_true",
+                      help="Suprime el progreso y el resumen final; deja solo errores.")
     p_mc.set_defaults(func=_cmd_montecarlo)
 
     return parser
