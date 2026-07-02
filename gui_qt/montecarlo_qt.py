@@ -15,9 +15,10 @@ from __future__ import annotations
 import copy
 import os
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+import pandas as pd
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
@@ -60,6 +61,8 @@ from nucleo.montecarlo import (EspecMonteCarlo, cargar_filas_csv, cargar_spec_si
 from gui_qt.config_qt import TurnosDialog
 from gui_qt.services import MonteCarloRequest
 from gui_qt.widgets import SectionCard
+
+_ComboData = Optional[str]
 
 # KPIs destacados en cards + histogramas (clave, etiqueta, color).
 _KPI_DESTACADOS: List[Tuple[str, str, str]] = [
@@ -205,12 +208,13 @@ class MonteCarloPanel(QWidget):
         self._on_run = on_run
         self._on_cfg_saved = on_cfg_saved
         self._on_pause = on_pause
-        self._stock_df = None
+        self._stock_df: Optional[pd.DataFrame] = None
         # Set de resultados: CSV incremental + sidecar <csv>.spec.json con la
         # spec (rangos/fijos/seed). Por defecto un archivo temporal; "cambiar…"
         # permite fijar una ruta durable para pausar hoy y reanudar otro día.
         self._csv_path: str = os.path.join(tempfile.gettempdir(), "montecarlo_resultados.csv")
         self._resumen: Dict[str, Dict[str, float]] = {}
+        self._corriendo = False  # el botón Ejecutar/Pausar alterna según esto
 
         # Widgets de rangos: clave -> (spin_min, spin_max).
         self._rangos: Dict[Tuple[str, ...], Tuple[_FloatSlider, _FloatSlider]] = {}
@@ -331,6 +335,7 @@ class MonteCarloPanel(QWidget):
         fila_set.addWidget(self.btn_set_path, 0)
         sl.addLayout(fila_set)
         self.btn_abrir_set = QPushButton("📂 Abrir set (CSV)…")
+        self.btn_abrir_set.setObjectName("PlaybackButton")
         self.btn_abrir_set.setToolTip(
             "Carga un set existente: restaura los rangos de input desde su spec "
             "y muestra los resultados acumulados. Después se puede reanudar o "
@@ -341,18 +346,11 @@ class MonteCarloPanel(QWidget):
 
         self.btn_run = QPushButton("▶ Ejecutar Monte Carlo")
         self.btn_run.setObjectName("RunButton")
-        self.btn_run.clicked.connect(self._ejecutar)
+        self.btn_run.clicked.connect(self._toggle_run)
         col.addWidget(self.btn_run)
 
-        self.btn_pause = QPushButton("⏸ Pausar")
-        self.btn_pause.setToolTip(
-            "Corta el barrido de forma limpia: las corridas completadas quedan "
-            "en el set (CSV) y se puede reanudar cuando quieras.")
-        self.btn_pause.setVisible(False)
-        self.btn_pause.clicked.connect(self._pausar)
-        col.addWidget(self.btn_pause)
-
         self.btn_resume = QPushButton("↻ Reanudar / agregar corridas")
+        self.btn_resume.setObjectName("PlaybackButton")
         self.btn_resume.setToolTip(
             "Completa las corridas pendientes del set actual usando los rangos "
             "de su spec (subí «Número de corridas» para agregar más al set).")
@@ -442,7 +440,7 @@ class MonteCarloPanel(QWidget):
 
     # ── Helpers de construcción ──────────────────────────────────────────────
 
-    def _combo(self, opciones: List[Tuple[str, str]]) -> QComboBox:
+    def _combo(self, opciones: Sequence[Tuple[_ComboData, str]]) -> QComboBox:
         cb = QComboBox()
         for clave, etiqueta in opciones:
             cb.addItem(etiqueta, clave)
@@ -534,7 +532,9 @@ class MonteCarloPanel(QWidget):
         compacto; la grilla elegida se guarda en ``_turnos_custom[nombre]`` (en
         formato compacto, que es lo que persiste la spec) y se muestra resumida.
         """
-        opciones = [(k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS]
+        opciones: List[Tuple[_ComboData, str]] = [
+            (k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS
+        ]
         # None = Personalizado
         opciones.append((None, "Personalizado"))
         cb_t = self._combo(opciones)
@@ -726,6 +726,8 @@ class MonteCarloPanel(QWidget):
         # Limpia las cards de máquina y los rangos por máquina previos.
         while self._maq_box.count():
             item = self._maq_box.takeAt(0)
+            if item is None:
+                continue
             w = item.widget()
             if w is not None:
                 w.deleteLater()
@@ -969,16 +971,25 @@ class MonteCarloPanel(QWidget):
 
     def _lanzar(self, modelo: Dict[str, Any], spec: EspecMonteCarlo,
                 *, resume: bool, dump_dir: Optional[str]) -> None:
+        if self._stock_df is None:
+            return
         req = MonteCarloRequest(base_cfg=self._cfg, stock_df=self._stock_df,
                                 modelo=modelo, spec=spec, csv_path=self._csv_path,
                                 dump_dir=dump_dir or None, resume=resume)
         self.set_running(True)
         self._on_run(req)
 
+    def _toggle_run(self) -> None:
+        """El botón principal alterna entre ejecutar (parado) y pausar (corriendo)."""
+        if self._corriendo:
+            self._pausar()
+        else:
+            self._ejecutar()
+
     def _pausar(self) -> None:
         if self._on_pause:
-            self.btn_pause.setEnabled(False)
-            self.btn_pause.setText("⏸ Pausando…")
+            self.btn_run.setEnabled(False)
+            self.btn_run.setText("|| Pausando...")
             self.lbl_progress.setText("Pausando (termina la corrida en vuelo)…")
             self._on_pause()
 
@@ -1026,12 +1037,14 @@ class MonteCarloPanel(QWidget):
         self.btn_resume.setEnabled(puede_reanudar and self.btn_run.isEnabled())
 
     def set_running(self, running: bool) -> None:
-        self.btn_run.setEnabled(not running)
+        self._corriendo = running
+        self.btn_run.setEnabled(True)
+        self.btn_run.setText("|| Pausar Monte Carlo" if running else "▶ Ejecutar Monte Carlo")
+        self.btn_run.setToolTip(
+            "Corta el barrido de forma limpia: las corridas completadas quedan "
+            "en el set (CSV) y se puede reanudar cuando quieras." if running else "")
         self.btn_abrir_set.setEnabled(not running)
         self.btn_set_path.setEnabled(not running)
-        self.btn_pause.setVisible(running)
-        self.btn_pause.setEnabled(running)
-        self.btn_pause.setText("⏸ Pausar")
         self.progress.setVisible(running)
         if running:
             self.btn_resume.setEnabled(False)
