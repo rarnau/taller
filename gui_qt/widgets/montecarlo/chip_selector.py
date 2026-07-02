@@ -16,16 +16,23 @@ from PySide6.QtWidgets import (
 )
 
 from config import tema
+from gui_qt.widgets.flow_layout_qt import FlowLayout, FlowWidget
 
 _Opciones = Sequence[Tuple[Any, str]]
 
 
 class ChipSelector(QWidget):
-    """Fila de chips exclusivos sobre un ``QComboBox`` oculto (fuente de verdad).
+    """Chips exclusivos sobre un ``QComboBox`` oculto (fuente de verdad).
 
     El combo mantiene la semántica de ``findData``/``currentData`` y emite
     ``changed`` cuando cambia la selección (por chip o programáticamente). El
     resto del panel interactúa vía ``current_data()``/``set_current_data()``.
+
+    ``orientation``:
+      - ``"flow"``: chips del ancho de su texto que envuelven a la línea
+        siguiente (varios por línea) vía ``FlowLayout``.
+      - ``"h"``: una fila horizontal de chips expandidos (p. ej. un par).
+      - ``"v"`` (defecto): un chip expandido por línea.
     """
 
     changed = Signal()
@@ -47,6 +54,9 @@ class ChipSelector(QWidget):
             lab.setStyleSheet(f"color:{tema.FG2}; font-size:11px;")
             box.addWidget(lab)
 
+        flow_w = FlowWidget() if orientation == "flow" else None
+        if flow_w is not None:
+            FlowLayout(flow_w, margin=0, h_spacing=6, v_spacing=6)
         contenedor = QHBoxLayout() if orientation == "h" else None
         if contenedor is not None:
             contenedor.setSpacing(6)
@@ -58,14 +68,20 @@ class ChipSelector(QWidget):
                 btn.setObjectName(chip_object_name)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _=False, d=data: self.set_current_data(d))
-            if contenedor is not None:
+            if flow_w is not None:
+                # Ancho natural (al texto): permite varios chips por línea.
+                flow_w.layout().addWidget(btn)
+            elif contenedor is not None:
+                btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                 contenedor.addWidget(btn)
             else:
+                btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                 box.addWidget(btn)
             self._chips.append((btn, data))
-        if contenedor is not None:
+        if flow_w is not None:
+            box.addWidget(flow_w)
+        elif contenedor is not None:
             box.addLayout(contenedor)
 
         self._combo.currentIndexChanged.connect(self._on_combo_changed)

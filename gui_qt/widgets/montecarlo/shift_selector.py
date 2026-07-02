@@ -9,13 +9,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from config import tema
 from modelos import turnos as turnos_mod
+from gui_qt.widgets.flow_layout_qt import FlowLayout, FlowWidget
 
 
 class ShiftSelector(QWidget):
@@ -47,16 +47,18 @@ class ShiftSelector(QWidget):
         lab.setStyleSheet(f"color:{tema.FG2}; font-size:11px;")
         box.addWidget(lab)
 
+        flow_w = FlowWidget()
+        FlowLayout(flow_w, margin=0, h_spacing=6, v_spacing=6)
         self._chips: List[Tuple[QPushButton, Any]] = []
         for data, texto in opciones:
             btn = QPushButton(texto)
             btn.setObjectName("McOptionChip")
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _=False, d=data: self._on_chip(d))
-            box.addWidget(btn)
+            flow_w.layout().addWidget(btn)  # ancho natural: varios por línea
             self._chips.append((btn, data))
+        box.addWidget(flow_w)
 
         self._btn_editar = QPushButton("✎ Editar grilla…")
         self._btn_editar.setObjectName("PlaybackButton")

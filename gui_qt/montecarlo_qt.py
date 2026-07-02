@@ -109,9 +109,8 @@ class MonteCarloPanel(QWidget):
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        # Panel más ancho para que el chip de estrategia más largo (p. ej.
-        # "Menor mm + jaula stock (desb) / más necesitada (prod)") entre completo
-        # sin recortarse contra el borde de la card.
+        # Panel algo más ancho: los chips fluyen al ancho de su texto (FlowLayout)
+        # y este ancho deja entrar varios por línea sin recortarse contra el borde.
         scroll.setMinimumWidth(355)
         scroll.setMaximumWidth(390)
         # Sin scroll horizontal: el contenido se ajusta al ancho y los valores
@@ -145,23 +144,23 @@ class MonteCarloPanel(QWidget):
         self.sel_estrategia = ChipSelector(
             "Estrategia de rectificado",
             [(k, v.etiqueta) for k, v in ESTRATEGIAS_SELECCION.items()],
-            chip_object_name="McOptionChip")
+            orientation="flow", chip_object_name="McOptionChip")
         self.sel_asignacion = ChipSelector(
             "Estrategia de asignación",
             [(k, v.etiqueta) for k, v in ESTRATEGIAS_ASIGNACION.items()],
-            chip_object_name="McOptionChip")
+            orientation="flow", chip_object_name="McOptionChip")
         self.sel_reposicion = ChipSelector(
             "Estrategia de reposición",
             [(k, v.etiqueta) for k, v in ESTRATEGIAS_REPOSICION.items()],
-            chip_object_name="McOptionChip")
+            orientation="flow", chip_object_name="McOptionChip")
         self.sel_generador = ChipSelector(
             "Generador de cambios",
             [(k, g.etiqueta) for k, g in GENERADORES_CAMBIOS.items()],
-            chip_object_name="McOptionChip")
+            orientation="flow", chip_object_name="McOptionChip")
         self.sel_turnos_lam = ChipSelector(
             "Turnos laminador",
             [(k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS],
-            chip_object_name="McOptionChip")
+            orientation="flow", chip_object_name="McOptionChip")
         self.sp_duracion = QSpinBox()
         # Sin tope práctico de días: el máximo es el límite del propio QSpinBox
         # (2^31-1), no una restricción del motor. El único freno real de una
