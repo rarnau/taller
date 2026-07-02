@@ -973,11 +973,28 @@ class MonteCarloPanel(QWidget):
                 *, resume: bool, dump_dir: Optional[str]) -> None:
         if self._stock_df is None:
             return
+        if not resume:
+            # Set nuevo desde cero: descarta los resultados de la corrida previa
+            # (cards/histogramas/tabla) para no mezclarlos con los nuevos.
+            self._reset_resultados()
         req = MonteCarloRequest(base_cfg=self._cfg, stock_df=self._stock_df,
                                 modelo=modelo, spec=spec, csv_path=self._csv_path,
                                 dump_dir=dump_dir or None, resume=resume)
         self.set_running(True)
         self._on_run(req)
+
+    def _reset_resultados(self) -> None:
+        """Limpia cards de KPIs, histogramas y tabla resumen a su estado vacío."""
+        self._resumen = {}
+        for clave, _et, _c in _KPI_DESTACADOS:
+            self._kpi_cards[clave].setText("—")
+            self._kpi_sub[clave].setText("")
+            self._hist[clave].set_values([])
+        self.tabla.setRowCount(0)
+        self._ajustar_altura_tabla()
+        if self.lbl_tabla is not None:
+            self.lbl_tabla.setText("RESUMEN ESTADÍSTICO")
+        self._set_export_enabled(False)
 
     def _toggle_run(self) -> None:
         """El botón principal alterna entre ejecutar (parado) y pausar (corriendo)."""
