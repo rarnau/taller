@@ -45,7 +45,7 @@ class MachineCard(SectionCard):
 
         self._prio = ChipSelector(
             "Prioridad", [("produccion", "Producción"), ("desbaste", "Desbaste")],
-            orientation="h", chip_object_name="McOptionChip")
+            orientation="flow", chip_object_name="McOptionChip")
         self._prio.changed.connect(self._recolorear_titulo)
         cl.addWidget(self._prio)
 

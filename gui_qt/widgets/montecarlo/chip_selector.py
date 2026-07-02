@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from config import tema
-from gui_qt.widgets.flow_layout_qt import FlowLayout, FlowWidget
+from gui_qt.widgets.montecarlo.flow_chips import FlowChips
 
 _Opciones = Sequence[Tuple[Any, str]]
 
@@ -54,9 +54,7 @@ class ChipSelector(QWidget):
             lab.setStyleSheet(f"color:{tema.FG2}; font-size:11px;")
             box.addWidget(lab)
 
-        flow_w = FlowWidget() if orientation == "flow" else None
-        if flow_w is not None:
-            FlowLayout(flow_w, margin=0, h_spacing=6, v_spacing=6)
+        flow = FlowChips() if orientation == "flow" else None
         contenedor = QHBoxLayout() if orientation == "h" else None
         if contenedor is not None:
             contenedor.setSpacing(6)
@@ -69,9 +67,9 @@ class ChipSelector(QWidget):
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(lambda _=False, d=data: self.set_current_data(d))
-            if flow_w is not None:
+            if flow is not None:
                 # Ancho natural (al texto): permite varios chips por línea.
-                flow_w.layout().addWidget(btn)
+                flow.add(btn)
             elif contenedor is not None:
                 btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                 contenedor.addWidget(btn)
@@ -79,8 +77,8 @@ class ChipSelector(QWidget):
                 btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                 box.addWidget(btn)
             self._chips.append((btn, data))
-        if flow_w is not None:
-            box.addWidget(flow_w)
+        if flow is not None:
+            box.addWidget(flow)
         elif contenedor is not None:
             box.addLayout(contenedor)
 
