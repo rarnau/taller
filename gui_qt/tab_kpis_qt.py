@@ -42,7 +42,7 @@ def _format_value(key: str, value: Any) -> str:
     if isinstance(value, float):
         if key == "diametro_promedio_mm":
             return f"{value:.1f} mm"
-        if key == "desgaste_medio_mm":
+        if key in ("desgaste_medio_mm", "mm_medio_desbaste_mm", "mm_medio_produccion_mm"):
             return f"{value:.2f} mm"
         if key == "tiempo_parada_h":
             return formato_horizonte(value)
@@ -67,7 +67,7 @@ def _kpi_color(key: str, value: Any) -> str:
         return tk_theme.KPI_COLOR_HORIZONTE
     if key == "diametro_promedio_mm":
         return tk_theme.KPI_COLOR_DIAMETRO
-    if key == "desgaste_medio_mm":
+    if key in ("desgaste_medio_mm", "mm_medio_desbaste_mm", "mm_medio_produccion_mm"):
         return tk_theme.KPI_COLOR_DESGASTE
     if key == "reposicion_entregados":
         return tk_theme.KPI_COLOR_OK
