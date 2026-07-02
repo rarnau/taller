@@ -285,7 +285,10 @@ class MonteCarloPanel(QWidget):
         for cb in (self.cb_sel, self.cb_asig, self.cb_repo, self.cb_gen, self.cb_turnos_lam):
             cb.setVisible(False)
         self.sp_duracion = QSpinBox()
-        self.sp_duracion.setRange(1, 120)
+        # Sin tope práctico de días: el máximo es el límite del propio QSpinBox
+        # (2^31-1), no una restricción del motor. El único freno real de una
+        # corrida es max_iteraciones (eventos), no los días.
+        self.sp_duracion.setRange(1, 2_000_000_000)
         fl.addLayout(self._fila_chips("Estrategia de rectificado", "sel", self.cb_sel))
         fl.addLayout(self._fila_chips("Estrategia de asignación", "asig", self.cb_asig))
         fl.addLayout(self._fila_chips("Estrategia de reposición", "repo", self.cb_repo))
