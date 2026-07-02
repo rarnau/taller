@@ -141,19 +141,24 @@ class MonteCarloPanel(QWidget):
         fl = card_f.content_layout()
         self.sel_estrategia = ChipSelector(
             "Estrategia de rectificado",
-            [(k, v.etiqueta) for k, v in ESTRATEGIAS_SELECCION.items()])
+            [(k, v.etiqueta) for k, v in ESTRATEGIAS_SELECCION.items()],
+            chip_object_name="McOptionChip")
         self.sel_asignacion = ChipSelector(
             "Estrategia de asignación",
-            [(k, v.etiqueta) for k, v in ESTRATEGIAS_ASIGNACION.items()])
+            [(k, v.etiqueta) for k, v in ESTRATEGIAS_ASIGNACION.items()],
+            chip_object_name="McOptionChip")
         self.sel_reposicion = ChipSelector(
             "Estrategia de reposición",
-            [(k, v.etiqueta) for k, v in ESTRATEGIAS_REPOSICION.items()])
+            [(k, v.etiqueta) for k, v in ESTRATEGIAS_REPOSICION.items()],
+            chip_object_name="McOptionChip")
         self.sel_generador = ChipSelector(
             "Generador de cambios",
-            [(k, g.etiqueta) for k, g in GENERADORES_CAMBIOS.items()])
+            [(k, g.etiqueta) for k, g in GENERADORES_CAMBIOS.items()],
+            chip_object_name="McOptionChip")
         self.sel_turnos_lam = ChipSelector(
             "Turnos laminador",
-            [(k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS])
+            [(k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS],
+            chip_object_name="McOptionChip")
         self.sp_duracion = QSpinBox()
         # Sin tope práctico de días: el máximo es el límite del propio QSpinBox
         # (2^31-1), no una restricción del motor. El único freno real de una
