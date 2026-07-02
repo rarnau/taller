@@ -109,8 +109,11 @@ class MonteCarloPanel(QWidget):
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setMinimumWidth(290)
-        scroll.setMaximumWidth(320)
+        # Panel más ancho para que el chip de estrategia más largo (p. ej.
+        # "Menor mm + jaula stock (desb) / más necesitada (prod)") entre completo
+        # sin recortarse contra el borde de la card.
+        scroll.setMinimumWidth(355)
+        scroll.setMaximumWidth(390)
         # Sin scroll horizontal: el contenido se ajusta al ancho y los valores
         # de los sliders (a la derecha) nunca quedan recortados.
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
