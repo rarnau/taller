@@ -191,6 +191,12 @@ def simular_montecarlo_worker(i: int) -> Dict[str, Any]:
     cambios_df = gencambios.generar_cambios(
         ws["modelo"], cfg, seed=seed_i, horizonte_dias=spec.fijos.get("duracion_dias"))
     taller = construir_taller_desde_dataframes(cfg, ws["stock_df"], cambios_df)
+    # Snapshot liviano: acá el taller se descarta tras extraer metricas_montecarlo,
+    # que solo lee de los snapshots los campos de CAMPOS_SNAPSHOT_KPI (tiempo /
+    # jaulas_paradas / cantidad_disponibles) — el detalle de playback sobra.
+    # EXCEPCIÓN dump_dir: el pickle por corrida se usa para drill-down/playback
+    # futuro en la GUI, que sí necesita los snapshots completos.
+    taller.snapshot_ligero = not ws.get("dump_dir")
     taller.simular(estrategia=spec.fijos.get("estrategia_seleccion", "mayor_diametro"),
                    callback_log=None, seed=seed_i)
 
