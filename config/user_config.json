@@ -11,156 +11,42 @@
       "prioridad": "produccion",
       "tasas": {
         "produccion": {
-          "mm": 0.5,
-          "tiempo_min": 60.0
+          "mm": 0.8,
+          "tiempo_min": 60
         },
         "desbaste": {
           "mm": 5.0,
-          "tiempo_min": 480.0
+          "tiempo_min": 480
         }
-      },
-      "turnos": {
-        "lun": [
-          true,
-          true,
-          true
-        ],
-        "mar": [
-          true,
-          true,
-          true
-        ],
-        "mie": [
-          true,
-          true,
-          true
-        ],
-        "jue": [
-          true,
-          true,
-          true
-        ],
-        "vie": [
-          true,
-          true,
-          true
-        ],
-        "sab": [
-          true,
-          true,
-          false
-        ],
-        "dom": [
-          false,
-          false,
-          false
-        ]
-      },
-      "tasa_falla": 0.1
+      }
     },
     {
       "nombre": "F36",
       "prioridad": "produccion",
       "tasas": {
         "produccion": {
-          "mm": 0.5,
-          "tiempo_min": 60.0
+          "mm": 0.8,
+          "tiempo_min": 60
         },
         "desbaste": {
           "mm": 5.0,
-          "tiempo_min": 480.0
+          "tiempo_min": 480
         }
-      },
-      "turnos": {
-        "lun": [
-          true,
-          true,
-          true
-        ],
-        "mar": [
-          true,
-          true,
-          true
-        ],
-        "mie": [
-          true,
-          true,
-          true
-        ],
-        "jue": [
-          true,
-          true,
-          true
-        ],
-        "vie": [
-          true,
-          true,
-          true
-        ],
-        "sab": [
-          true,
-          true,
-          false
-        ],
-        "dom": [
-          false,
-          false,
-          false
-        ]
-      },
-      "tasa_falla": 0.1
+      }
     },
     {
       "nombre": "F60",
       "prioridad": "desbaste",
       "tasas": {
         "produccion": {
-          "mm": 0.5,
-          "tiempo_min": 60.0
+          "mm": 0.8,
+          "tiempo_min": 60
         },
         "desbaste": {
           "mm": 5.0,
-          "tiempo_min": 480.0
+          "tiempo_min": 480
         }
-      },
-      "turnos": {
-        "lun": [
-          true,
-          true,
-          true
-        ],
-        "mar": [
-          true,
-          true,
-          true
-        ],
-        "mie": [
-          true,
-          true,
-          true
-        ],
-        "jue": [
-          true,
-          true,
-          true
-        ],
-        "vie": [
-          true,
-          true,
-          true
-        ],
-        "sab": [
-          true,
-          true,
-          false
-        ],
-        "dom": [
-          false,
-          false,
-          false
-        ]
-      },
-      "tasa_falla": 0.1
+      }
     }
   ],
   "rangos": [
@@ -189,33 +75,29 @@
       "perfil": "3"
     }
   ],
-  "tiempo_enfriado_h": 8.0,
-  "max_iteraciones": 30000,
-  "estrategia_seleccion": "menor_mm_desb_fifo_prod",
+  "tiempo_enfriado_h": 0.0,
+  "max_iteraciones": 10000,
+  "estrategia_seleccion": "mayor_diametro",
   "estrategia_asignacion": "jaula_mas_necesitada",
   "estrategia_reposicion": "ninguna",
   "generador_cambios": {
     "generador": "empirico",
     "umbral_desbaste_mm": 1.0,
-    "fecha_inicio": "2026-07-01",
-    "fecha_fin": "2026-10-08",
+    "fecha_inicio": null,
+    "fecha_fin": null,
     "horizonte_dias": 7
   },
   "montecarlo": {
-    "runs": 100,
+    "runs": 500,
     "master_seed": null,
-    "chunk": 5,
+    "chunk": 100,
     "fijos": {
-      "estrategia_seleccion": "menor_mm_desb_fifo_prod",
+      "estrategia_seleccion": "mayor_diametro",
       "estrategia_asignacion": "jaula_mas_necesitada",
       "generador": "empirico",
-      "duracion_dias": 120,
-      "turnos_por_maquina": {
-        "G36": "3escuadras",
-        "F36": "3escuadras",
-        "F60": "3escuadras"
-      },
-      "turnos_laminador_preset": "3escuadras"
+      "duracion_dias": 7,
+      "turnos_maquinas_preset": "24x7",
+      "turnos_laminador_preset": "24x7"
     },
     "rangos": {
       "tiempo_enfriado": [
@@ -224,89 +106,9 @@
       ],
       "tiempo_traslado_crc": [
         5.0,
-        18.0
+        60.0
       ],
-      "maquinas": {
-        "G36": {
-          "rate_prod": [
-            0.006,
-            0.011
-          ],
-          "rate_desb": [
-            0.0075,
-            0.0135
-          ],
-          "tasa_falla": [
-            0.0,
-            0.2
-          ]
-        },
-        "F36": {
-          "rate_prod": [
-            0.006,
-            0.006
-          ],
-          "rate_desb": [
-            0.0075,
-            0.0105
-          ],
-          "tasa_falla": [
-            0.0,
-            0.2
-          ]
-        },
-        "F60": {
-          "rate_prod": [
-            0.006,
-            0.011
-          ],
-          "rate_desb": [
-            0.0075,
-            0.0135
-          ],
-          "tasa_falla": [
-            0.0,
-            0.2
-          ]
-        }
-      }
+      "maquinas": {}
     }
-  },
-  "turnos_cambios": {
-    "lun": [
-      true,
-      true,
-      true
-    ],
-    "mar": [
-      true,
-      true,
-      true
-    ],
-    "mie": [
-      true,
-      true,
-      true
-    ],
-    "jue": [
-      true,
-      true,
-      true
-    ],
-    "vie": [
-      true,
-      true,
-      true
-    ],
-    "sab": [
-      true,
-      true,
-      false
-    ],
-    "dom": [
-      false,
-      false,
-      false
-    ]
   }
 }

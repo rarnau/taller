@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests
+        # Los tests actuales no levantan Qt (solo gui_qt.dashboard_data, sin
+        # PySide6), pero el runner de CI no tiene display: offscreen evita
+        # fallos si un test futuro llega a instanciar Qt.
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q

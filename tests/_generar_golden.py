@@ -7,8 +7,26 @@ revisado (no como parte de los tests). Uso::
 
 Los tests de regresión (``test_regresion.py``) NO regeneran el golden: lo leen
 y comparan, fallando si el motor cambió de comportamiento sin actualizarlo.
+
+IMPORTANTE: el golden debe regenerarse SIEMPRE con la config DEFAULT prístina,
+nunca con un ``config/user_config.json`` personalizado (turnos, tasa_falla,
+tiempo_enfriado_h, ...). La suite se aísla sola (fixture autouse en
+``conftest.py``), y este script fuerza lo mismo abajo apuntando
+``persistencia.CONFIG_PATH`` a una ruta inexistente, con lo que
+``cargar_config()`` devuelve ``DEFAULTS``.
 """
 import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import config.persistencia as persistencia
+
+# Forzar la config default prístina: con CONFIG_PATH inexistente,
+# cargar_config() (usada por _escenarios) devuelve una copia de DEFAULTS.
+persistencia.CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "_no_existe_user_config.json")
 
 from _escenarios import GOLDEN_PATH, fingerprint_de_todos
 

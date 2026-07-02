@@ -70,3 +70,22 @@ class Snapshot:
         self.detalle_maquinas_falla: Dict[str, bool] = {}               # {maq_id: caída por falla en este instante}
         self.detalle_cola_rectificado: List[Dict[str, Any]] = []        # [{"id", "d"}]
         self.detalle_enfriando: List[Dict[str, Any]] = []               # [{"id", "d"}]
+
+
+# Campos de Snapshot que consumen los KPIs (modelos/kpis.py) — ÚNICA declaración.
+#
+# El modo de snapshot liviano del motor (TallerCilindros.snapshot_ligero, pensado
+# para Monte Carlo, donde el taller se descarta tras extraer las métricas) computa
+# SOLO estos campos; el resto queda en su valor vacío de Snapshot.__init__.
+# Regla: si un KPI nuevo lee otro campo de los snapshots, hay que agregarlo acá
+# (y su bloque de cómputo en TallerCilindros._BLOQUES_SNAPSHOT_KPI, que un test
+# verifica que cubre exactamente este registro: tests/test_snapshot_ligero.py).
+# Vive acá (junto a Snapshot) y no en kpis.py porque taller.py no puede importar
+# kpis (kpis importa taller: habría ciclo).
+CAMPOS_SNAPSHOT_KPI: tuple = (
+    "tiempo",                # horizonte_simulacion_h, t0/t1 de utilización y duración
+                             # de tramos en _tiempo_y_pct_parada (calcular_kpis)
+    "jaulas_paradas",        # tiempo_parada_h / parada_pct (_tiempo_y_pct_parada) y
+                             # episodios "paradas" (_metricas_paradas)
+    "cantidad_disponibles",  # stock_min (_metricas_paradas)
+)

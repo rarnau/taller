@@ -13,7 +13,7 @@ from .cilindro import Cilindro
 from .substock import SubStock
 from .maquina import MaquinaRectificadora
 from .jaula import Jaula
-from .eventos import EventoCambio, Alerta, Snapshot
+from .eventos import EventoCambio, Alerta, Snapshot, CAMPOS_SNAPSHOT_KPI
 from .estrategias import (
     ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO,
     ESTRATEGIAS_ASIGNACION, ESTRATEGIA_ASIGNACION_DEFECTO,
@@ -140,6 +140,15 @@ class TallerCilindros:
         # reprogramar los cambios tras una PARADA en tiempo laborable (ver
         # _reanudar_linea); con None el desplazamiento es de reloj (histórico).
         self.grilla_cambios: Optional[List[List[bool]]] = None
+
+        # Modo de snapshot liviano: True ⇒ generar_snapshot computa SOLO los
+        # campos que consumen los KPIs (CAMPOS_SNAPSHOT_KPI en modelos/eventos.py);
+        # el resto queda en su vacío de Snapshot.__init__. Es una decisión del
+        # runner (Monte Carlo, donde el taller se descarta tras extraer métricas),
+        # NO del usuario: no se persiste en config/user_config.json. Default False
+        # ⇒ snapshots completos, byte-idénticos al comportamiento histórico (la
+        # GUI/CLI/batch_simular nunca lo activan). Es un bool: picklable sin más.
+        self.snapshot_ligero: bool = False
 
         # Tiempo de enfriado (horas) entre Trabajando y A rectificar. 0.0 = sin
         # estado de enfriado (comportamiento histórico). Máximo de iteraciones
@@ -836,6 +845,31 @@ class TallerCilindros:
 
     # ── Snapshot ────────────────────────────────────────────────────────────
 
+    # Bloques de cómputo del modo liviano: exactamente UN bloque por campo de
+    # CAMPOS_SNAPSHOT_KPI (modelos/eventos.py). generar_snapshot (liviano) itera
+    # el registro y ejecuta el bloque de cada campo, así la relación
+    # campo → cómputo es explícita y verificable: agregar un campo al registro
+    # sin su bloque acá rompe con KeyError en el primer snapshot liviano, y
+    # tests/test_snapshot_ligero.py exige que ambos conjuntos coincidan.
+
+    def _snap_kpi_tiempo(self, sn: Snapshot) -> None:
+        """`tiempo` lo estampa ya Snapshot.__init__(tiempo); nada que computar."""
+
+    def _snap_kpi_cantidad_disponibles(self, sn: Snapshot) -> None:
+        sn.cantidad_disponibles = sum(
+            1 for c in self.cilindros.values() if c.estado == EstadoCilindro.DISPONIBLE
+        )
+
+    def _snap_kpi_jaulas_paradas(self, sn: Snapshot) -> None:
+        # Mismo orden que el modo completo (iteración de self.jaulas).
+        sn.jaulas_paradas = [j_id for j_id, jaula in self.jaulas.items() if jaula.parada]
+
+    _BLOQUES_SNAPSHOT_KPI: Dict[str, Callable] = {
+        "tiempo": _snap_kpi_tiempo,
+        "cantidad_disponibles": _snap_kpi_cantidad_disponibles,
+        "jaulas_paradas": _snap_kpi_jaulas_paradas,
+    }
+
     def generar_snapshot(self, tiempo: datetime) -> None:
         """Captura el estado completo del taller para reproducción y gráficos.
 
@@ -843,7 +877,21 @@ class TallerCilindros:
         por estado, el detalle de la cola de rectificado y de enfriando, y los
         conteos por SubStock (antes eran ~9 pasadas completas sobre el dict por
         snapshot, y se genera un snapshot por evento). El resultado es idéntico.
+
+        Con ``snapshot_ligero`` (Monte Carlo) computa SOLO los campos que
+        consumen los KPIs — derivados de ``CAMPOS_SNAPSHOT_KPI``, no de una
+        lista propia — y omite todo el detalle de playback (conteos por
+        SubStock, detalle_jaulas/crc/máquinas, colas). Se genera igualmente un
+        snapshot por evento (mismo ``len(snapshots)``); los campos no computados
+        conservan el vacío de ``Snapshot.__init__``.
         """
+        if self.snapshot_ligero:
+            sn = Snapshot(tiempo)
+            for campo in CAMPOS_SNAPSHOT_KPI:
+                self._BLOQUES_SNAPSHOT_KPI[campo](self, sn)
+            self.snapshots.append(sn)
+            return
+
         sn = Snapshot(tiempo)
 
         # Todos los estados presentes como clave (incluso con valor 0), igual que
