@@ -179,7 +179,24 @@ def test_sin_reposicion_no_inyecta_nada():
 
 
 def test_registry_expone_ambas_estrategias():
-    assert set(ESTRATEGIAS_REPOSICION) == {"ninguna", "lote_4_mensual"}
+    assert set(ESTRATEGIAS_REPOSICION) == {"ninguna", "lote_4_mensual", "stock_constante"}
+
+
+def test_stock_constante_repone_uno_a_uno_en_ventana():
+    """Estrategia 1:1: por cada BAJA de runtime entra 1 NUEVO-* (dentro de ventana)."""
+    t = _taller_con_bajas("stock_constante", cambio_tardio=True)
+    bajas = [c for c in t.cilindros.values() if c.estado == EstadoCilindro.BAJA]
+    nuevos = [c for c in t.cilindros.values() if c.id.startswith("NUEVO-")]
+    assert len(bajas) >= 4
+    assert len(nuevos) == 4
+    assert t._repo_pendientes_fuera == 0
+
+
+def test_stock_constante_fuera_de_ventana_queda_pendiente():
+    """Si ya no quedan CAMBIO pendientes, la llegada 1:1 no se entrega y queda pendiente."""
+    t = _taller_con_bajas("stock_constante", cambio_tardio=False)
+    assert [c for c in t.cilindros.values() if c.id.startswith("NUEVO-")] == []
+    assert t._repo_pendientes_fuera == 4
 
 
 def test_reposicion_no_pisa_id_existente():
