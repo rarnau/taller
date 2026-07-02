@@ -56,6 +56,13 @@ class Snapshot:
         self.conteo_por_substock: Dict[str, Dict[str, int]] = {}
         self.disponibles_por_substock: Dict[str, int] = {}
 
+        # Cilindros activos (no BAJA) atribuidos a UNA única jaula cada uno
+        # (trabajando/CRC → su jaula; destinado → su destino; resto → banda por
+        # diámetro; 0 = sin banda). A diferencia de los conteos por SubStock,
+        # con bandas solapadas no repite cilindros: la suma de valores es el
+        # total de activos. Alimenta la evolución de stock por jaula (Análisis).
+        self.activos_por_jaula: Dict[int, int] = {}
+
         # Conteo de CRC por jaula
         self.crc_por_jaula: Dict[int, int] = {}
 

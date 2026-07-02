@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QGridLayout, QScrollArea, QVBoxLayout, QWidget
 
 from config import tema
-from gui_qt.analysis_data import EMPTY_ANALYSIS_DATA, extraer_datos_analisis
+from gui_qt.analysis_data import EMPTY_ANALYSIS_DATA, NOMBRE_SIN_BANDA, extraer_datos_analisis
 from gui_qt.widgets.analysis_charts_qt import (
     CylinderMapChart,
     DiameterDistributionChart,
@@ -52,7 +52,7 @@ class AnalysisPanel(QWidget):
         self.card_dist = DashboardCard("Distribucion de diametros (activos)")
         self.card_dist.add_content(self.chart_dist)
 
-        self.card_substock = DashboardCard("Evolucion de SubStock (disponibles)")
+        self.card_substock = DashboardCard("Evolucion de stock por jaula (activos)")
         self.card_substock.add_content(self.chart_substock)
         self.card_substock.set_legend([
             (tema.DASH_PARADA_BAND, "Jaula(s) parada(s)"),
@@ -80,6 +80,8 @@ class AnalysisPanel(QWidget):
             for nombre in [ss.nombre]
             if nombre in data.colores_substock
         ]
+        if NOMBRE_SIN_BANDA in data.colores_substock:
+            legend.append((data.colores_substock[NOMBRE_SIN_BANDA], NOMBRE_SIN_BANDA))
         legend.append((tema.DASH_PARADA_BAND, "Jaula(s) parada(s)"))
         self.card_substock.set_legend(legend)
         self.set_cursor(0, len(data.tiempos))

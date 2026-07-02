@@ -12,6 +12,11 @@ from config import tema
 from modelos.enums import EstadoCilindro
 
 
+# Serie extra de la evolución de stock: activos cuyo diámetro no cae en ninguna
+# banda (clave 0 de Snapshot.activos_por_jaula). Solo aparece si tiene valores.
+NOMBRE_SIN_BANDA = "Sin banda"
+
+
 @dataclass
 class HistogramBin:
     """Bin de histograma para distribución de diámetros."""
@@ -169,10 +174,19 @@ def extraer_datos_analisis(taller, stock_df: pd.DataFrame | None = None) -> Anal
         colores_substock[ss.nombre] = color
 
     tiempos = [s.tiempo for s in taller.snapshots]
+    # Evolución de stock por jaula con atribución ÚNICA (Snapshot.activos_por_jaula):
+    # cada cilindro activo cuenta en una sola serie aunque las bandas se solapen,
+    # así el total de las series es el total de activos (no BAJA). La clave 0
+    # agrupa los activos fuera de toda banda; la serie se agrega solo si aparece.
     evol = {
-        ss.nombre: [snap.disponibles_por_substock.get(ss.nombre, 0) for snap in taller.snapshots]
+        ss.nombre: [getattr(snap, "activos_por_jaula", {}).get(ss.jaula_asignada, 0)
+                    for snap in taller.snapshots]
         for ss in taller.lista_substocks
     }
+    sin_banda = [getattr(snap, "activos_por_jaula", {}).get(0, 0) for snap in taller.snapshots]
+    if any(sin_banda):
+        evol[NOMBRE_SIN_BANDA] = sin_banda
+        colores_substock[NOMBRE_SIN_BANDA] = tema.DASH_TICK_TEXT
     paradas = _tramos_parada(tiempos, taller.snapshots)
 
     return AnalysisData(

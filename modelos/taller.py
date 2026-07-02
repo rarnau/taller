@@ -752,6 +752,42 @@ class TallerCilindros:
         ss = self.obtener_substock_por_jaula(jaula_id)
         return ss.perfil if ss is not None else None
 
+    def _jaula_atribuida(self, cil: Cilindro) -> int:
+        """Jaula única a la que se atribuye un cilindro activo (0 = sin banda).
+
+        Regla de atribución (cada cilindro cuenta en UNA sola jaula, aun con
+        bandas solapadas): instalado o en CRC → su jaula física; con
+        ``jaula_destino`` → ese destino (stock comprometido); si no, la banda de
+        menor número de jaula que contiene su diámetro actual; si ninguna banda
+        lo contiene, 0.
+        """
+        if cil.estado in (EstadoCilindro.TRABAJANDO, EstadoCilindro.CRC) and cil.jaula:
+            return int(cil.jaula)
+        if cil.jaula_destino is not None:
+            return int(cil.jaula_destino)
+        for j in range(1, self.cantidad_jaulas + 1):
+            ss = self._substock_por_jaula.get(j)
+            if ss is not None and ss.contiene_diametro(cil.diametro):
+                return j
+        return 0
+
+    def stock_activos_por_jaula(self) -> Dict[int, int]:
+        """Cilindros activos (no BAJA) por jaula, con atribución única.
+
+        La suma de los valores es exactamente el total de cilindros activos
+        (nada se cuenta dos veces con bandas solapadas, a diferencia de los
+        conteos por SubStock). Es la métrica que balancean las estrategias de
+        asignación ponderadas y la que grafica la evolución de stock por jaula
+        en Análisis. La clave 0 agrupa los activos que no caen en ninguna banda.
+        """
+        stock: Dict[int, int] = {j: 0 for j in range(1, self.cantidad_jaulas + 1)}
+        for c in self.cilindros.values():
+            if c.estado == EstadoCilindro.BAJA:
+                continue
+            j = self._jaula_atribuida(c)
+            stock[j] = stock.get(j, 0) + 1
+        return stock
+
     @staticmethod
     def _perfil_compatible(perfil_cil: Optional[str], perfil_jaula: Optional[str]) -> bool:
         """True si un cilindro con ``perfil_cil`` puede ir a una jaula de ``perfil_jaula``.
@@ -899,6 +935,9 @@ class TallerCilindros:
         sn.conteo_por_estado = {est.value: 0 for est in EstadoCilindro}
         # Solo estados presentes por SubStock (no se siembran ceros), como antes.
         conteo_substock: Dict[str, Dict[str, int]] = {ss.nombre: {} for ss in self.lista_substocks}
+        # Activos por jaula (atribución única): todas las jaulas como clave; la
+        # clave 0 (sin banda) solo cuando aparece.
+        sn.activos_por_jaula = {j: 0 for j in range(1, self.cantidad_jaulas + 1)}
 
         for c in self.cilindros.values():
             estado_val = c.estado.value
@@ -914,6 +953,8 @@ class TallerCilindros:
                     if ss.contiene_diametro(c.diametro):
                         cs = conteo_substock[ss.nombre]
                         cs[estado_val] = cs.get(estado_val, 0) + 1
+                j_attr = self._jaula_atribuida(c)
+                sn.activos_por_jaula[j_attr] = sn.activos_por_jaula.get(j_attr, 0) + 1
 
         sn.cantidad_disponibles = sn.conteo_por_estado.get(EstadoCilindro.DISPONIBLE.value, 0)
         sn.cantidad_crc_total = sn.conteo_por_estado.get(EstadoCilindro.CRC.value, 0)
