@@ -69,12 +69,59 @@ class _MenorMmDesbasteFifoProduccion(EstrategiaSeleccion):
         return cola[0]
 
 
+class _MenorMmJaulaMenorStockDesbMasNecesitadaProd(EstrategiaSeleccion):
+    """Selección por tipo de pase:
+
+    - DESBASTE: menor mm a rectificar; empate por jaula destino con menor stock
+      comprometido (CRC + en camino), luego id para determinismo.
+    - PRODUCCION: prioriza cilindros destinados a la jaula más necesitada
+      (paradas primero y menor comprometido), luego menor mm, luego id.
+
+    Nota: esta estrategia usa ``jaula_destino`` (si está definido). Si no hay
+    destino en el cilindro, cae a menor mm + determinismo.
+    """
+
+    clave = "menor_mm_jaula_stock_desb_mas_nec_prod"
+    etiqueta = "Menor mm + jaula stock (desb) / más necesitada (prod)"
+
+    @staticmethod
+    def _en_camino_por_jaula(cola: List[Cilindro]) -> Dict[int, int]:
+        en_camino: Dict[int, int] = {}
+        for c in cola:
+            if c.jaula_destino is not None:
+                en_camino[c.jaula_destino] = en_camino.get(c.jaula_destino, 0) + 1
+        return en_camino
+
+    def seleccionar(self, cola: List[Cilindro], maquina: Optional[MaquinaRectificadora]) -> Cilindro:
+        if maquina is None:
+            return min(cola, key=lambda c: (c.mm_a_rectificar, c.id))
+
+        en_camino = self._en_camino_por_jaula(cola)
+
+        if maquina.prioridad_defecto == TipoRectificado.DESBASTE:
+            def _key_desb(c: Cilindro):
+                comprometidos = en_camino.get(c.jaula_destino, 0) if c.jaula_destino is not None else 10**6
+                return (c.mm_a_rectificar, comprometidos, c.id)
+
+            return min(cola, key=_key_desb)
+
+        # Producción: preferir jaulas más necesitadas; luego menor mm.
+        def _key_prod(c: Cilindro):
+            if c.jaula_destino is None:
+                return (1, 10**6, c.mm_a_rectificar, c.id)
+            comprometidos = en_camino.get(c.jaula_destino, 0)
+            return (0, comprometidos, c.mm_a_rectificar, c.id)
+
+        return min(cola, key=_key_prod)
+
+
 ESTRATEGIAS_SELECCION: Dict[str, EstrategiaSeleccion] = {
     e.clave: e for e in (
         _MayorDiametro(),
         _MenorDiametro(),
         _Fifo(),
         _MenorMmDesbasteFifoProduccion(),
+        _MenorMmJaulaMenorStockDesbMasNecesitadaProd(),
     )
 }
 ESTRATEGIA_DEFECTO = "fifo"
@@ -126,10 +173,7 @@ class _JaulaMasNecesitada(EstrategiaAsignacion):
         # equivale a mayor déficit (la más necesitada), sin depender del buffer.
         # Un solo pase cuenta los "en camino" por jaula destino (antes se
         # re-escaneaban todos los cilindros por cada candidata, O(candidatas×cil)).
-        en_camino_por_jaula: Dict[int, int] = {}
-        for c in taller.cilindros.values():
-            if c.jaula_destino is not None and c.estado in _ESTADOS_EN_CAMINO:
-                en_camino_por_jaula[c.jaula_destino] = en_camino_por_jaula.get(c.jaula_destino, 0) + 1
+        en_camino_por_jaula = _en_camino_por_jaula(taller)
 
         def _orden(j: int):
             jaula = taller.jaulas[j]
@@ -138,6 +182,15 @@ class _JaulaMasNecesitada(EstrategiaAsignacion):
             return (parada, comprometidos, j)  # menor tupla = más necesitada
 
         return min(jaulas_candidatas, key=_orden)
+
+
+def _en_camino_por_jaula(taller: "TallerCilindros") -> Dict[int, int]:
+    """Conteo de cilindros comprometidos por jaula destino (no instalados aún)."""
+    en_camino: Dict[int, int] = {}
+    for c in taller.cilindros.values():
+        if c.jaula_destino is not None and c.estado in _ESTADOS_EN_CAMINO:
+            en_camino[c.jaula_destino] = en_camino.get(c.jaula_destino, 0) + 1
+    return en_camino
 
 
 ESTRATEGIAS_ASIGNACION: Dict[str, EstrategiaAsignacion] = {
@@ -215,10 +268,21 @@ class _LoteMensual(EstrategiaReposicion):
         return pedidos
 
 
+class _StockConstante(EstrategiaReposicion):
+    """Reposición 1:1 inmediata: por cada BAJA entra 1 cilindro nuevo."""
+
+    clave, etiqueta = "stock_constante", "Stock constante (1 baja -> 1 alta)"
+
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo_baja: datetime) -> List[PedidoReposicion]:
+        return [PedidoReposicion(tiempo_baja, 1, taller.diametro_maximo)]
+
+
 ESTRATEGIAS_REPOSICION: Dict[str, EstrategiaReposicion] = {
     e.clave: e for e in (
         _SinReposicion(),
         _LoteMensual(),
+        _StockConstante(),
     )
 }
 ESTRATEGIA_REPOSICION_DEFECTO = "ninguna"
