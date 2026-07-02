@@ -7,6 +7,7 @@ desacoplada del modelo (y del CLI) para facilitar pruebas y evolucion incrementa
 from __future__ import annotations
 
 import queue
+import threading
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -100,21 +101,45 @@ class MonteCarloService:
     def __init__(self) -> None:
         self._executor: Optional[ThreadPoolExecutor] = None
         self.progress: "queue.Queue[Tuple[int, int]]" = queue.Queue()
+        # Pausa cooperativa: correr_montecarlo consulta este Event y corta limpio
+        # (las corridas completadas quedan en el CSV; reanudar completa el resto).
+        self._cancelar = threading.Event()
+        # Último parcial publicado por on_parcial (filas, hechos, total). Se pisa
+        # en cada chunk (la GUI solo grafica el más reciente) bajo lock: lo escribe
+        # el hilo del barrido y lo drena el QTimer de la GUI.
+        self._parcial_lock = threading.Lock()
+        self._parcial: Optional[Tuple[List[Dict[str, Any]], int, int]] = None
 
     def submit(self, request: MonteCarloRequest) -> Future:
         """Lanza el barrido y devuelve el future (resultado = lista de filas)."""
         self.shutdown()
-        # Cola nueva por corrida para no arrastrar avances viejos.
+        # Cola y estado nuevos por corrida para no arrastrar avances viejos.
         self.progress = queue.Queue()
+        self._cancelar = threading.Event()
+        with self._parcial_lock:
+            self._parcial = None
         self._executor = ThreadPoolExecutor(max_workers=1)
         return self._executor.submit(self._run, request)
+
+    def pausar(self) -> None:
+        """Pide la pausa del barrido en curso (corta al terminar la corrida en vuelo)."""
+        self._cancelar.set()
+
+    def fue_pausado(self) -> bool:
+        """True si el barrido terminó por pausa (y no por completar el set)."""
+        return self._cancelar.is_set()
 
     def _run(self, request: MonteCarloRequest) -> List[Dict[str, Any]]:
         return correr_montecarlo(
             request.base_cfg, request.stock_df, request.modelo, request.spec,
             csv_path=request.csv_path, dump_dir=request.dump_dir,
             resume=request.resume, max_workers=request.max_workers,
-            on_progress=lambda hechos, total: self.progress.put((hechos, total)))
+            on_progress=lambda hechos, total: self.progress.put((hechos, total)),
+            on_parcial=self._publicar_parcial, cancelar=self._cancelar)
+
+    def _publicar_parcial(self, filas: List[Dict[str, Any]], hechos: int, total: int) -> None:
+        with self._parcial_lock:
+            self._parcial = (filas, hechos, total)
 
     def drain_progress(self) -> Optional[Tuple[int, int]]:
         """Devuelve el último avance publicado (o None si no hubo novedades)."""
@@ -125,6 +150,12 @@ class MonteCarloService:
         except queue.Empty:
             pass
         return ultimo
+
+    def drain_parcial(self) -> Optional[Tuple[List[Dict[str, Any]], int, int]]:
+        """Devuelve (y consume) el último parcial publicado, o None si no hay nuevo."""
+        with self._parcial_lock:
+            parcial, self._parcial = self._parcial, None
+        return parcial
 
     def shutdown(self) -> None:
         """Libera el hilo de fondo si existe."""

@@ -199,6 +199,7 @@ class MainWindow(QMainWindow):
             self.user_cfg,
             on_run=self._run_montecarlo,
             on_cfg_saved=self._on_cfg_saved,
+            on_pause=self._pausar_montecarlo,
             parent=self,
         )
         self.console_panel = ConsolePanel(self)
@@ -431,6 +432,12 @@ class MainWindow(QMainWindow):
         self.top_state.setText("● monte carlo")
         self.mc_poll_timer.start()
 
+    def _pausar_montecarlo(self) -> None:
+        """Pide la pausa del barrido en curso (corta limpio; el set queda reanudable)."""
+        if self.mc_future is not None:
+            self.mc_service.pausar()
+            self.status_main_label.setText("Pausando Monte Carlo...")
+
     def _poll_montecarlo(self) -> None:
         """Sondea el future del barrido y refleja el avance sin bloquear la UI."""
         if self.mc_future is None:
@@ -439,6 +446,11 @@ class MainWindow(QMainWindow):
         avance = self.mc_service.drain_progress()
         if avance is not None:
             self.montecarlo_panel.set_progress(avance[0], avance[1])
+        # Resultados parciales (cada chunk): refrescan cards/histogramas/tabla
+        # con lo acumulado mientras el barrido sigue corriendo.
+        parcial = self.mc_service.drain_parcial()
+        if parcial is not None:
+            self.montecarlo_panel.mostrar_parciales(*parcial)
         if not self.mc_future.done():
             return
 
@@ -451,9 +463,15 @@ class MainWindow(QMainWindow):
             self.montecarlo_panel.set_error(str(exc))
             self.status_main_label.setText("Error en Monte Carlo")
             return
-        self.montecarlo_panel.mostrar_resultados(filas)
-        self.status_main_label.setText(f"Monte Carlo completado: {len(filas)} corridas")
-        self.top_state.setText("● monte carlo completo")
+        pausado = self.mc_service.fue_pausado()
+        self.montecarlo_panel.mostrar_resultados(filas, pausado=pausado)
+        if pausado:
+            self.status_main_label.setText(
+                f"Monte Carlo pausado: {len(filas)} corridas en el set")
+            self.top_state.setText("● monte carlo pausado")
+        else:
+            self.status_main_label.setText(f"Monte Carlo completado: {len(filas)} corridas")
+            self.top_state.setText("● monte carlo completo")
 
     def _on_seek(self, value: int) -> None:
         """Actualiza el resumen de Vista Real al mover el slider."""

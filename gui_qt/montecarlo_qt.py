@@ -15,9 +15,10 @@ from __future__ import annotations
 import copy
 import os
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+import pandas as pd
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
@@ -30,7 +31,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -52,12 +52,17 @@ from config.persistencia import (
     obtener_montecarlo,
     set_montecarlo,
 )
-from modelos.estrategias import ESTRATEGIAS_ASIGNACION, ESTRATEGIAS_SELECCION
+from modelos.estrategias import (ESTRATEGIAS_ASIGNACION, ESTRATEGIAS_REPOSICION,
+                                 ESTRATEGIAS_SELECCION)
 from modelos.generador_cambios import GENERADORES_CAMBIOS
 from modelos import turnos as turnos_mod
-from nucleo.montecarlo import EspecMonteCarlo, exportar_resumen_csv, resumir
+from nucleo.montecarlo import (EspecMonteCarlo, cargar_filas_csv, cargar_spec_sidecar,
+                               exportar_resumen_csv, resumir)
+from gui_qt.config_qt import TurnosDialog
 from gui_qt.services import MonteCarloRequest
 from gui_qt.widgets import SectionCard
+
+_ComboData = Optional[str]
 
 # KPIs destacados en cards + histogramas (clave, etiqueta, color).
 _KPI_DESTACADOS: List[Tuple[str, str, str]] = [
@@ -195,15 +200,21 @@ class MonteCarloPanel(QWidget):
         cfg: Dict[str, Any],
         on_run: Callable[[MonteCarloRequest], None],
         on_cfg_saved: Callable[[Dict[str, Any]], None] | None = None,
+        on_pause: Callable[[], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._cfg = copy.deepcopy(cfg)
         self._on_run = on_run
         self._on_cfg_saved = on_cfg_saved
-        self._stock_df = None
-        self._csv_path: Optional[str] = None
+        self._on_pause = on_pause
+        self._stock_df: Optional[pd.DataFrame] = None
+        # Set de resultados: CSV incremental + sidecar <csv>.spec.json con la
+        # spec (rangos/fijos/seed). Por defecto un archivo temporal; "cambiar…"
+        # permite fijar una ruta durable para pausar hoy y reanudar otro día.
+        self._csv_path: str = os.path.join(tempfile.gettempdir(), "montecarlo_resultados.csv")
         self._resumen: Dict[str, Dict[str, float]] = {}
+        self._corriendo = False  # el botón Ejecutar/Pausar alterna según esto
 
         # Widgets de rangos: clave -> (spin_min, spin_max).
         self._rangos: Dict[Tuple[str, ...], Tuple[_FloatSlider, _FloatSlider]] = {}
@@ -212,8 +223,13 @@ class MonteCarloPanel(QWidget):
         self._kpi_sub: Dict[str, QLabel] = {}
         self._chip_groups: Dict[str, List[Tuple[QPushButton, Any]]] = {}
         self._run_preset_buttons: List[Tuple[int, QPushButton]] = []
-        # {nombre_maquina: (combo_hidden, le_custom)} para turnos per-máquina
-        self._turnos_maq_widgets: Dict[str, Tuple[QComboBox, Any]] = {}
+        # {nombre_maquina: (combo_hidden, btn_editar, lbl_resumen)} para turnos
+        # per-máquina; la grilla personalizada vive en _turnos_custom (compacto).
+        self._turnos_maq_widgets: Dict[str, Tuple[QComboBox, QPushButton, QLabel]] = {}
+        self._turnos_custom: Dict[str, str] = {}
+        # {nombre_maquina: combo_hidden} para la prioridad de rectificado.
+        self._prio_maq_widgets: Dict[str, QComboBox] = {}
+        self._maq_cards: Dict[str, SectionCard] = {}
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -258,15 +274,17 @@ class MonteCarloPanel(QWidget):
         fl = card_f.content_layout()
         self.cb_sel = self._combo([(k, v.etiqueta) for k, v in ESTRATEGIAS_SELECCION.items()])
         self.cb_asig = self._combo([(k, v.etiqueta) for k, v in ESTRATEGIAS_ASIGNACION.items()])
+        self.cb_repo = self._combo([(k, v.etiqueta) for k, v in ESTRATEGIAS_REPOSICION.items()])
         self.cb_gen = self._combo([(k, g.etiqueta) for k, g in GENERADORES_CAMBIOS.items()])
         self.cb_turnos_lam = self._combo(
             [(k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS])
-        for cb in (self.cb_sel, self.cb_asig, self.cb_gen, self.cb_turnos_lam):
+        for cb in (self.cb_sel, self.cb_asig, self.cb_repo, self.cb_gen, self.cb_turnos_lam):
             cb.setVisible(False)
         self.sp_duracion = QSpinBox()
         self.sp_duracion.setRange(1, 120)
         fl.addLayout(self._fila_chips("Estrategia de rectificado", "sel", self.cb_sel))
         fl.addLayout(self._fila_chips("Estrategia de asignación", "asig", self.cb_asig))
+        fl.addLayout(self._fila_chips("Estrategia de reposición", "repo", self.cb_repo))
         fl.addLayout(self._fila_chips("Generador de cambios", "gen", self.cb_gen))
         fl.addLayout(self._fila_widget("Duración de corrida (días)", self.sp_duracion))
         fl.addLayout(self._fila_chips("Turnos laminador", "tlam", self.cb_turnos_lam))
@@ -298,10 +316,47 @@ class MonteCarloPanel(QWidget):
         nl.addWidget(self.chk_dump)
         col.addWidget(card_n)
 
+        # Set de resultados: CSV incremental (+ sidecar de spec) donde se
+        # acumulan inputs y KPIs de cada corrida. Permite pausar/reanudar y
+        # agregar corridas, incluso en otra sesión ("Abrir set…").
+        card_s = SectionCard(title="SET DE RESULTADOS", object_name="CardSoft")
+        sl = card_s.content_layout()
+        fila_set = QHBoxLayout()
+        fila_set.setSpacing(6)
+        self.lbl_set = QLabel("")
+        self.lbl_set.setObjectName("Muted")
+        self.lbl_set.setStyleSheet(f"color:{tema.FG2}; font-size:10px; font-family:monospace;")
+        fila_set.addWidget(self.lbl_set, 1)
+        self.btn_set_path = QPushButton("…")
+        self.btn_set_path.setObjectName("PlaybackButton")
+        self.btn_set_path.setMaximumWidth(34)
+        self.btn_set_path.setToolTip("Elegir el archivo CSV del set (para conservarlo entre sesiones)")
+        self.btn_set_path.clicked.connect(self._cambiar_destino_set)
+        fila_set.addWidget(self.btn_set_path, 0)
+        sl.addLayout(fila_set)
+        self.btn_abrir_set = QPushButton("📂 Abrir set (CSV)…")
+        self.btn_abrir_set.setObjectName("PlaybackButton")
+        self.btn_abrir_set.setToolTip(
+            "Carga un set existente: restaura los rangos de input desde su spec "
+            "y muestra los resultados acumulados. Después se puede reanudar o "
+            "agregar corridas.")
+        self.btn_abrir_set.clicked.connect(self._abrir_set)
+        sl.addWidget(self.btn_abrir_set)
+        col.addWidget(card_s)
+
         self.btn_run = QPushButton("▶ Ejecutar Monte Carlo")
         self.btn_run.setObjectName("RunButton")
-        self.btn_run.clicked.connect(self._ejecutar)
+        self.btn_run.clicked.connect(self._toggle_run)
         col.addWidget(self.btn_run)
+
+        self.btn_resume = QPushButton("↻ Reanudar / agregar corridas")
+        self.btn_resume.setObjectName("PlaybackButton")
+        self.btn_resume.setToolTip(
+            "Completa las corridas pendientes del set actual usando los rangos "
+            "de su spec (subí «Número de corridas» para agregar más al set).")
+        self.btn_resume.setEnabled(False)
+        self.btn_resume.clicked.connect(self._reanudar)
+        col.addWidget(self.btn_resume)
 
         self.progress = QProgressBar()
         self.progress.setVisible(False)
@@ -313,6 +368,7 @@ class MonteCarloPanel(QWidget):
         col.addStretch(1)
         scroll.setWidget(cont)
         self._sync_run_presets(self.sp_runs.value())
+        self._refrescar_set_ui()
         return scroll
 
     def _build_right(self) -> QWidget:
@@ -384,7 +440,7 @@ class MonteCarloPanel(QWidget):
 
     # ── Helpers de construcción ──────────────────────────────────────────────
 
-    def _combo(self, opciones: List[Tuple[str, str]]) -> QComboBox:
+    def _combo(self, opciones: Sequence[Tuple[_ComboData, str]]) -> QComboBox:
         cb = QComboBox()
         for clave, etiqueta in opciones:
             cb.addItem(etiqueta, clave)
@@ -446,15 +502,18 @@ class MonteCarloPanel(QWidget):
         combo_map = {
             "sel": self.cb_sel,
             "asig": self.cb_asig,
+            "repo": self.cb_repo,
             "gen": self.cb_gen,
             "tlam": self.cb_turnos_lam,
         }
         combo = combo_map.get(key)
-        # Claves dinámicas tmaq_<nombre>
+        # Claves dinámicas tmaq_<nombre> / pmaq_<nombre>
         if combo is None and key.startswith("tmaq_"):
             nombre = key[5:]
             t = self._turnos_maq_widgets.get(nombre)
             combo = t[0] if t else None
+        if combo is None and key.startswith("pmaq_"):
+            combo = self._prio_maq_widgets.get(key[5:])
         if combo is None:
             return
         cur = combo.currentData()
@@ -466,17 +525,30 @@ class MonteCarloPanel(QWidget):
             btn.setChecked(n == value)
 
     def _fila_turnos_maquina(self, nombre: str) -> QVBoxLayout:
-        """Fila de turnos para una máquina: chips de preset + campo Personalizado."""
-        opciones = [(k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS]
+        """Fila de turnos para una máquina: chips de preset + grilla Personalizada.
+
+        La opción «Personalizado» abre el mismo editor 7×3 de turnos que la
+        pestaña Configuración (``TurnosDialog``) en lugar de pedir un string
+        compacto; la grilla elegida se guarda en ``_turnos_custom[nombre]`` (en
+        formato compacto, que es lo que persiste la spec) y se muestra resumida.
+        """
+        opciones: List[Tuple[_ComboData, str]] = [
+            (k, turnos_mod.PRESET_LABELS.get(k, k)) for k in turnos_mod.PRESETS
+        ]
         # None = Personalizado
         opciones.append((None, "Personalizado"))
         cb_t = self._combo(opciones)
         cb_t.setVisible(False)
 
-        le_custom = QLineEdit()
-        le_custom.setPlaceholderText("ej: lv5|lv5|lv5|lv5|lv5|off|off")
-        le_custom.setVisible(False)
-        le_custom.setStyleSheet(f"font-size:10px; font-family:monospace; color:{tema.FG2};")
+        btn_editar = QPushButton("✎ Editar grilla…")
+        btn_editar.setObjectName("PlaybackButton")
+        btn_editar.setVisible(False)
+        btn_editar.clicked.connect(lambda _=False, n=nombre: self._editar_turnos_maquina(n))
+
+        lbl_resumen = QLabel("")
+        lbl_resumen.setVisible(False)
+        lbl_resumen.setWordWrap(True)
+        lbl_resumen.setStyleSheet(f"font-size:10px; color:{tema.FG2};")
 
         box = QVBoxLayout()
         box.setSpacing(4)
@@ -492,22 +564,105 @@ class MonteCarloPanel(QWidget):
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            def _on_click(_, cb=cb_t, d=data, le=le_custom):
+            def _on_click(_, cb=cb_t, d=data, n=nombre):
                 idx = cb.findData(d)
                 if idx >= 0:
                     cb.setCurrentIndex(idx)
-                le.setVisible(d is None)
+                self._mostrar_custom_maquina(n, d is None)
+                # Elegir «Personalizado» sin grilla previa abre el editor directo.
+                if d is None and n not in self._turnos_custom:
+                    self._editar_turnos_maquina(n)
             btn.clicked.connect(_on_click)
             box.addWidget(btn)
             chips.append((btn, data))
 
-        box.addWidget(le_custom)
+        box.addWidget(btn_editar)
+        box.addWidget(lbl_resumen)
 
         self._chip_groups[key] = chips
         cb_t.currentIndexChanged.connect(lambda _=0, k=key: self._refresh_chips(k))
-        self._turnos_maq_widgets[nombre] = (cb_t, le_custom)
+        self._turnos_maq_widgets[nombre] = (cb_t, btn_editar, lbl_resumen)
         self._refresh_chips(key)
         return box
+
+    def _mostrar_custom_maquina(self, nombre: str, visible: bool) -> None:
+        """Muestra/oculta el editor + resumen de la grilla personalizada."""
+        t = self._turnos_maq_widgets.get(nombre)
+        if not t:
+            return
+        _, btn_editar, lbl_resumen = t
+        btn_editar.setVisible(visible)
+        lbl_resumen.setVisible(visible and bool(self._turnos_custom.get(nombre)))
+
+    def _editar_turnos_maquina(self, nombre: str) -> None:
+        """Abre el editor 7×3 (pop-up) para la grilla personalizada de la máquina."""
+        actual = None
+        compacto = self._turnos_custom.get(nombre)
+        if compacto:
+            try:
+                actual = turnos_mod.parse_compacto(compacto)
+            except ValueError:
+                actual = None
+        ok, turnos = TurnosDialog.edit(actual, self)
+        if not ok or turnos is None:
+            return
+        self._turnos_custom[nombre] = turnos_mod.format_compacto(turnos)
+        self._refrescar_resumen_turnos(nombre)
+
+    def _refrescar_resumen_turnos(self, nombre: str) -> None:
+        t = self._turnos_maq_widgets.get(nombre)
+        compacto = self._turnos_custom.get(nombre)
+        if not t or not compacto:
+            return
+        _, _, lbl_resumen = t
+        try:
+            lbl_resumen.setText(turnos_mod.resumen(turnos_mod.parse_compacto(compacto)))
+            lbl_resumen.setVisible(True)
+        except ValueError:
+            lbl_resumen.setText("")
+
+    def _fila_prioridad_maquina(self, nombre: str) -> QVBoxLayout:
+        """Fila de prioridad de rectificado (producción/desbaste) de una máquina."""
+        cb_p = self._combo([("produccion", "Producción"), ("desbaste", "Desbaste")])
+        cb_p.setVisible(False)
+
+        box = QVBoxLayout()
+        box.setSpacing(4)
+        lab = QLabel("Prioridad")
+        lab.setStyleSheet(f"color:{tema.FG2}; font-size:11px;")
+        box.addWidget(lab)
+
+        key = f"pmaq_{nombre}"
+        fila = QHBoxLayout()
+        fila.setSpacing(6)
+        chips: List[Tuple[QPushButton, Any]] = []
+        for data, txt in (("produccion", "Producción"), ("desbaste", "Desbaste")):
+            btn = QPushButton(txt)
+            btn.setObjectName("McOptionChip")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.clicked.connect(lambda _=False, c=cb_p, d=data: self._select_chip(c, d))
+            fila.addWidget(btn)
+            chips.append((btn, data))
+        box.addLayout(fila)
+
+        self._chip_groups[key] = chips
+        cb_p.currentIndexChanged.connect(lambda _=0, k=key, n=nombre: (
+            self._refresh_chips(k), self._recolorear_titulo_maquina(n)))
+        self._prio_maq_widgets[nombre] = cb_p
+        self._refresh_chips(key)
+        return box
+
+    def _recolorear_titulo_maquina(self, nombre: str) -> None:
+        """Sincroniza el punto de color del título de la card con la prioridad elegida."""
+        card = self._maq_cards.get(nombre)
+        cb_p = self._prio_maq_widgets.get(nombre)
+        if card is None or card.title_label is None or cb_p is None:
+            return
+        dot = tema.DASH_ORANGE if cb_p.currentData() == "desbaste" else tema.DASH_ESTADO_DISPONIBLE
+        card.title_label.setText(
+            f'<span style="color:{dot};">●</span>&nbsp;&nbsp;MÁQUINA · {nombre}')
 
     def _fila_slider(self, etiqueta: str, slider: _FloatSlider) -> QHBoxLayout:
         fila = QHBoxLayout()
@@ -571,25 +726,28 @@ class MonteCarloPanel(QWidget):
         # Limpia las cards de máquina y los rangos por máquina previos.
         while self._maq_box.count():
             item = self._maq_box.takeAt(0)
+            if item is None:
+                continue
             w = item.widget()
             if w is not None:
                 w.deleteLater()
         for clave in [k for k in self._rangos if k[0] == "maq"]:
             self._rangos.pop(clave, None)
-        # Limpia widgets de turnos por máquina previos
-        for key in [k for k in self._chip_groups if k.startswith("tmaq_")]:
+        # Limpia widgets por máquina previos (turnos, prioridad, cards).
+        for key in [k for k in self._chip_groups
+                    if k.startswith("tmaq_") or k.startswith("pmaq_")]:
             self._chip_groups.pop(key, None)
         self._turnos_maq_widgets.clear()
+        self._turnos_custom.clear()
+        self._prio_maq_widgets.clear()
+        self._maq_cards.clear()
 
         for m in obtener_maquinas(self._cfg):
             nombre = m["nombre"]
             card = SectionCard(title=f"MÁQUINA · {nombre}", object_name="CardSoft")
-            prio = str(m.get("prioridad", "")).lower()
-            dot = tema.DASH_ORANGE if "desb" in prio else tema.DASH_ESTADO_DISPONIBLE
             if card.title_label is not None:
                 card.title_label.setTextFormat(Qt.TextFormat.RichText)
-                card.title_label.setText(
-                    f'<span style="color:{dot};">●</span>&nbsp;&nbsp;MÁQUINA · {nombre}')
+            self._maq_cards[nombre] = card
             cl = card.content_layout()
             cl.addLayout(self._fila_rango(("maq", nombre, "rate_prod"),
                                           "Rate producción", "mm/min", 0.0, 0.05, 0.0005, 4))
@@ -597,43 +755,67 @@ class MonteCarloPanel(QWidget):
                                           "Rate desbaste", "mm/min", 0.0, 0.06, 0.0005, 4))
             cl.addLayout(self._fila_rango(("maq", nombre, "tasa_falla"),
                                           "Tasa de falla", "frac", 0.0, 0.5, 0.005, 3))
+            cl.addLayout(self._fila_prioridad_maquina(nombre))
             cl.addLayout(self._fila_turnos_maquina(nombre))
+            # Prioridad inicial: la de la máquina en la config (el fijo del spec,
+            # si existe, la pisa en _reload_widgets_from_cfg).
+            prio = "desbaste" if "desb" in str(m.get("prioridad", "")).lower() else "produccion"
+            self._select_chip(self._prio_maq_widgets[nombre], prio)
+            self._recolorear_titulo_maquina(nombre)
             self._maq_box.addWidget(card)
 
     def _reload_widgets_from_cfg(self) -> None:
         """Carga los valores de los widgets desde el bloque montecarlo del cfg."""
         if not any(k[0] == "maq" for k in self._rangos):
             self._rebuild_machine_cards()
-        mc = obtener_montecarlo(self._cfg)
+        self._aplicar_mc_a_widgets(obtener_montecarlo(self._cfg))
+
+    def _aplicar_mc_a_widgets(self, mc: Dict[str, Any]) -> None:
+        """Vuelca un dict de spec MC (del cfg o del sidecar de un set) a los widgets.
+
+        Es la operación inversa de ``_mc_desde_widgets``; la usa también «Abrir
+        set…» para restaurar los rangos de input con que se generó un CSV.
+        """
         self.sp_runs.setValue(int(mc["runs"]))
         self.sp_seed.setValue(int(mc.get("master_seed") or 0))
-        fijos = mc["fijos"]
+        fijos = mc.get("fijos", {}) or {}
         self._set_combo(self.cb_sel, fijos.get("estrategia_seleccion"))
         self._set_combo(self.cb_asig, fijos.get("estrategia_asignacion"))
+        self._set_combo(self.cb_repo, fijos.get("estrategia_reposicion"))
         self._set_combo(self.cb_gen, fijos.get("generador"))
         self._set_combo(self.cb_turnos_lam, fijos.get("turnos_laminador_preset"))
         self.sp_duracion.setValue(int(fijos.get("duracion_dias", 7)))
 
-        r = mc["rangos"]
-        self._set_rango(("global", "tiempo_enfriado"), r["tiempo_enfriado"])
-        self._set_rango(("global", "tiempo_traslado_crc"), r["tiempo_traslado_crc"])
-        for nombre, rr in r.get("maquinas", {}).items():
+        r = mc.get("rangos", {}) or {}
+        self._set_rango(("global", "tiempo_enfriado"), r.get("tiempo_enfriado"))
+        self._set_rango(("global", "tiempo_traslado_crc"), r.get("tiempo_traslado_crc"))
+        for nombre, rr in (r.get("maquinas") or {}).items():
             for campo in ("rate_prod", "rate_desb", "tasa_falla"):
-                self._set_rango(("maq", nombre, campo), rr[campo])
+                if campo in rr:
+                    self._set_rango(("maq", nombre, campo), rr[campo])
 
-        # Turnos por máquina
+        # Prioridad por máquina (fijo del spec; si falta, queda la de la config).
+        prio_por_maq = fijos.get("prioridad_por_maquina") or {}
+        for nombre, cb_p in self._prio_maq_widgets.items():
+            prio = prio_por_maq.get(nombre)
+            if prio in ("produccion", "desbaste"):
+                self._select_chip(cb_p, prio)
+            self._recolorear_titulo_maquina(nombre)
+
+        # Turnos por máquina (preset o grilla compacta personalizada).
         turnos_por_maq = fijos.get("turnos_por_maquina") or {}
         for nombre, widgets in self._turnos_maq_widgets.items():
-            cb_t, le_custom = widgets
+            cb_t, _btn, _lbl = widgets
             val = turnos_por_maq.get(nombre, "24x7")
             idx = cb_t.findData(val)
             if idx >= 0:
                 cb_t.setCurrentIndex(idx)
-                le_custom.setVisible(False)
+                self._mostrar_custom_maquina(nombre, False)
             else:
                 cb_t.setCurrentIndex(cb_t.count() - 1)  # «Personalizado»
-                le_custom.setText(val)
-                le_custom.setVisible(True)
+                self._turnos_custom[nombre] = val
+                self._mostrar_custom_maquina(nombre, True)
+                self._refrescar_resumen_turnos(nombre)
             self._refresh_chips(f"tmaq_{nombre}")
 
     def _set_combo(self, cb: QComboBox, clave: Optional[str]) -> None:
@@ -642,6 +824,7 @@ class MonteCarloPanel(QWidget):
             cb.setCurrentIndex(idx)
         self._refresh_chips("sel")
         self._refresh_chips("asig")
+        self._refresh_chips("repo")
         self._refresh_chips("gen")
         self._refresh_chips("tlam")
 
@@ -660,24 +843,33 @@ class MonteCarloPanel(QWidget):
                 maquinas.setdefault(nombre, {})[campo] = [smin.value(), smax.value()]
 
         turnos_por_maquina: Dict[str, str] = {}
-        for nombre, (cb_t, le_custom) in self._turnos_maq_widgets.items():
+        for nombre, (cb_t, _btn, _lbl) in self._turnos_maq_widgets.items():
             data = cb_t.currentData()
-            if data is None:  # «Personalizado»
-                val = le_custom.text().strip() or "24x7"
+            if data is None:  # «Personalizado»: grilla del pop-up, en compacto
+                val = self._turnos_custom.get(nombre) or "24x7"
             else:
                 val = data
             turnos_por_maquina[nombre] = val
 
+        prioridad_por_maquina = {
+            nombre: cb_p.currentData()
+            for nombre, cb_p in self._prio_maq_widgets.items()
+            if cb_p.currentData() in ("produccion", "desbaste")
+        }
+
         return {
             "runs": self.sp_runs.value(),
             "master_seed": (self.sp_seed.value() or None),
-            "chunk": max(1, self.sp_runs.value() // 20),
+            # Cada chunk refresca progreso Y gráficos parciales ⇒ 10% del total.
+            "chunk": max(1, self.sp_runs.value() // 10),
             "fijos": {
                 "estrategia_seleccion": self.cb_sel.currentData(),
                 "estrategia_asignacion": self.cb_asig.currentData(),
+                "estrategia_reposicion": self.cb_repo.currentData(),
                 "generador": self.cb_gen.currentData(),
                 "duracion_dias": self.sp_duracion.value(),
                 "turnos_por_maquina": turnos_por_maquina,
+                "prioridad_por_maquina": prioridad_por_maquina,
                 "turnos_laminador_preset": self.cb_turnos_lam.currentData(),
             },
             "rangos": {
@@ -687,18 +879,42 @@ class MonteCarloPanel(QWidget):
             },
         }
 
-    # ── Ejecución ────────────────────────────────────────────────────────────
+    # ── Ejecución / set de resultados ────────────────────────────────────────
 
-    def _ejecutar(self) -> None:
+    def _validar_prerrequisitos(self) -> Optional[Dict[str, Any]]:
+        """Stock + modelo del generador listos; devuelve el modelo o None."""
         if self._stock_df is None:
             QMessageBox.warning(self, "Atención",
                                 "Primero cargue un Excel con Stock_Inicial.")
-            return
+            return None
         modelo = model_store.load_active_model()
         if not modelo:
             QMessageBox.warning(self, "Atención",
                                 "No hay modelo del generador. Ajustá uno en la pestaña Generación.")
+            return None
+        return modelo
+
+    def _pedir_dump_dir(self) -> Optional[str]:
+        """Carpeta de dump si el checkbox está activo ('' = canceló el diálogo)."""
+        if not self.chk_dump.isChecked():
+            return None
+        return QFileDialog.getExistingDirectory(self, "Carpeta para volcar tallers") or ""
+
+    def _ejecutar(self) -> None:
+        """Lanza un set NUEVO en el CSV destino (pisa un set previo, confirmando)."""
+        modelo = self._validar_prerrequisitos()
+        if modelo is None:
             return
+
+        if cargar_filas_csv(self._csv_path):
+            resp = QMessageBox.question(
+                self, "Set existente",
+                f"El set {os.path.basename(self._csv_path)} ya tiene corridas.\n"
+                "«Ejecutar» empieza un set nuevo y las descarta (usá «Reanudar / "
+                "agregar corridas» para conservarlas).\n\n¿Empezar de cero?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if resp != QMessageBox.StandardButton.Yes:
+                return
 
         mc = self._mc_desde_widgets()
         set_montecarlo(self._cfg, mc)
@@ -706,26 +922,136 @@ class MonteCarloPanel(QWidget):
         if self._on_cfg_saved:
             self._on_cfg_saved(self._cfg)
 
-        dump_dir = None
-        if self.chk_dump.isChecked():
-            dump_dir = QFileDialog.getExistingDirectory(self, "Carpeta para volcar tallers")
-            if not dump_dir:
-                return
+        dump_dir = self._pedir_dump_dir()
+        if dump_dir == "":
+            return
 
-        self._csv_path = os.path.join(tempfile.gettempdir(), "montecarlo_resultados.csv")
         spec = EspecMonteCarlo.desde_cfg(self._cfg)
+        self._lanzar(modelo, spec, resume=False, dump_dir=dump_dir)
+
+    def _reanudar(self) -> None:
+        """Completa las corridas pendientes del set actual (o agrega más).
+
+        La spec sale del sidecar del set — NO de los sliders — para que todas
+        las corridas del CSV compartan el mismo espacio de muestreo; los widgets
+        se re-sincronizan a esa spec para que la GUI muestre lo que corre. Solo
+        ``runs`` se toma del spinner (extender el set con más corridas es válido).
+        """
+        modelo = self._validar_prerrequisitos()
+        if modelo is None:
+            return
+        spec = cargar_spec_sidecar(self._csv_path)
+        if spec is None:
+            QMessageBox.warning(
+                self, "Atención",
+                "El set no tiene spec guardada (.spec.json); no se puede reanudar "
+                "con garantía de mismos rangos. Ejecutá un set nuevo.")
+            return
+
+        hechas = len(cargar_filas_csv(self._csv_path))
+        objetivo = max(self.sp_runs.value(), int(spec.runs))
+        if objetivo <= hechas:
+            QMessageBox.information(
+                self, "Set completo",
+                f"El set ya tiene {hechas} corridas. Subí «Número de corridas» "
+                "por encima de ese valor para agregar más.")
+            return
+
+        spec.runs = objetivo
+        spec.chunk = max(1, objetivo // 10)
+        # La GUI refleja la spec real del set (rangos/fijos del sidecar).
+        self._aplicar_mc_a_widgets(
+            {"runs": spec.runs, "master_seed": spec.master_seed,
+             "chunk": spec.chunk, "fijos": spec.fijos, "rangos": spec.rangos})
+
+        dump_dir = self._pedir_dump_dir()
+        if dump_dir == "":
+            return
+        self._lanzar(modelo, spec, resume=True, dump_dir=dump_dir)
+
+    def _lanzar(self, modelo: Dict[str, Any], spec: EspecMonteCarlo,
+                *, resume: bool, dump_dir: Optional[str]) -> None:
+        if self._stock_df is None:
+            return
         req = MonteCarloRequest(base_cfg=self._cfg, stock_df=self._stock_df,
                                 modelo=modelo, spec=spec, csv_path=self._csv_path,
-                                dump_dir=dump_dir or None)
+                                dump_dir=dump_dir or None, resume=resume)
         self.set_running(True)
         self._on_run(req)
 
+    def _toggle_run(self) -> None:
+        """El botón principal alterna entre ejecutar (parado) y pausar (corriendo)."""
+        if self._corriendo:
+            self._pausar()
+        else:
+            self._ejecutar()
+
+    def _pausar(self) -> None:
+        if self._on_pause:
+            self.btn_run.setEnabled(False)
+            self.btn_run.setText("|| Pausando...")
+            self.lbl_progress.setText("Pausando (termina la corrida en vuelo)…")
+            self._on_pause()
+
+    def _cambiar_destino_set(self) -> None:
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Archivo CSV del set de resultados",
+            os.path.basename(self._csv_path), "CSV (*.csv)",
+            options=QFileDialog.Option.DontConfirmOverwrite)
+        if ruta:
+            self._csv_path = ruta
+            self._refrescar_set_ui()
+
+    def _abrir_set(self) -> None:
+        """Abre un set existente: restaura los rangos de input desde su spec y
+        muestra los resultados acumulados; queda listo para reanudar/extender."""
+        ruta, _ = QFileDialog.getOpenFileName(self, "Abrir set de corridas (CSV)",
+                                              "", "CSV (*.csv)")
+        if not ruta:
+            return
+        filas = cargar_filas_csv(ruta)
+        spec = cargar_spec_sidecar(ruta)
+        self._csv_path = ruta
+        if spec is not None:
+            self._aplicar_mc_a_widgets(
+                {"runs": max(int(spec.runs), len(filas)), "master_seed": spec.master_seed,
+                 "chunk": spec.chunk, "fijos": spec.fijos, "rangos": spec.rangos})
+        else:
+            QMessageBox.warning(
+                self, "Set sin spec",
+                "El CSV no tiene su .spec.json al lado: se muestran los resultados "
+                "pero no se puede reanudar (rangos de input desconocidos).")
+        if filas:
+            self._render_filas(filas, f"RESUMEN ESTADÍSTICO · {len(filas)} corridas (set abierto)")
+            self.lbl_progress.setText(f"Set abierto: {len(filas)} corridas")
+            self._set_export_enabled(True)
+        self._refrescar_set_ui()
+
+    def _refrescar_set_ui(self) -> None:
+        """Actualiza etiqueta del set y habilitación de Reanudar según el disco."""
+        nombre = os.path.basename(self._csv_path)
+        en_temp = os.path.dirname(self._csv_path) == tempfile.gettempdir()
+        self.lbl_set.setText(f"Set: {nombre}{'  (temporal)' if en_temp else ''}")
+        self.lbl_set.setToolTip(self._csv_path)
+        puede_reanudar = cargar_spec_sidecar(self._csv_path) is not None
+        self.btn_resume.setEnabled(puede_reanudar and self.btn_run.isEnabled())
+
     def set_running(self, running: bool) -> None:
-        self.btn_run.setEnabled(not running)
+        self._corriendo = running
+        self.btn_run.setEnabled(True)
+        self.btn_run.setText("|| Pausar Monte Carlo" if running else "▶ Ejecutar Monte Carlo")
+        self.btn_run.setToolTip(
+            "Corta el barrido de forma limpia: las corridas completadas quedan "
+            "en el set (CSV) y se puede reanudar cuando quieras." if running else "")
+        self.btn_abrir_set.setEnabled(not running)
+        self.btn_set_path.setEnabled(not running)
         self.progress.setVisible(running)
         if running:
+            self.btn_resume.setEnabled(False)
             self.progress.setValue(0)
             self.lbl_progress.setText("Simulando...")
+        else:
+            self._refrescar_set_ui()
 
     def set_progress(self, hechos: int, total: int) -> None:
         pct = int(hechos / total * 100) if total else 0
@@ -733,12 +1059,24 @@ class MonteCarloPanel(QWidget):
         self.progress.setValue(pct)
         self.lbl_progress.setText(f"{hechos}/{total} corridas")
 
-    def mostrar_resultados(self, filas: List[Dict[str, Any]]) -> None:
+    def mostrar_parciales(self, filas: List[Dict[str, Any]], hechos: int, total: int) -> None:
+        """Refresca cards/histogramas/tabla con lo acumulado (cada ~10% del barrido)."""
+        self._render_filas(filas, f"RESUMEN PARCIAL · {hechos}/{total} corridas")
+
+    def mostrar_resultados(self, filas: List[Dict[str, Any]], pausado: bool = False) -> None:
         self.set_running(False)
-        self.lbl_progress.setText(f"{len(filas)} corridas completadas")
+        estado = "en el set (pausado)" if pausado else "completadas"
+        self.lbl_progress.setText(f"{len(filas)} corridas {estado}")
+        titulo = (f"RESUMEN PARCIAL · {len(filas)} corridas (set pausado)" if pausado
+                  else f"RESUMEN ESTADÍSTICO · {len(filas)} corridas")
+        self._render_filas(filas, titulo)
+        self._set_export_enabled(bool(filas))
+
+    def _render_filas(self, filas: List[Dict[str, Any]], titulo: str) -> None:
+        """Render común de resultados (finales o parciales) a cards/histos/tabla."""
         self._resumen = resumir(filas)
         if self.lbl_tabla is not None:
-            self.lbl_tabla.setText(f"RESUMEN ESTADÍSTICO · {len(filas)} corridas")
+            self.lbl_tabla.setText(titulo)
 
         for clave, _et, _c in _KPI_DESTACADOS:
             st = self._resumen.get(clave)
@@ -764,8 +1102,7 @@ class MonteCarloPanel(QWidget):
                 if j > 0:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(i, j, item)
-            self._ajustar_altura_tabla()
-        self._set_export_enabled(True)
+        self._ajustar_altura_tabla()
 
     def set_error(self, msg: str) -> None:
         self.set_running(False)

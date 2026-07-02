@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import copy
 import csv
+import json
 import logging
 import os
 import pickle
+import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -106,7 +108,8 @@ def aplicar_a_cfg(base_cfg: Dict[str, Any], overrides: Dict[str, Any],
 
     cfgmod.set_sim(cfg, tiempo_enfriado=overrides.get("tiempo_enfriado"),
                    estrategia_seleccion=fijos.get("estrategia_seleccion"),
-                   estrategia_asignacion=fijos.get("estrategia_asignacion"))
+                   estrategia_asignacion=fijos.get("estrategia_asignacion"),
+                   estrategia_reposicion=fijos.get("estrategia_reposicion"))
     if overrides.get("tiempo_traslado_crc") is not None:
         cfgmod.set_config_global(cfg, tiempo_traslado_crc_min=overrides["tiempo_traslado_crc"])
     if fijos.get("generador"):
@@ -114,8 +117,13 @@ def aplicar_a_cfg(base_cfg: Dict[str, Any], overrides: Dict[str, Any],
 
     preset_maq = fijos.get("turnos_maquinas_preset")
     turnos_por_maquina = fijos.get("turnos_por_maquina") or {}
+    prioridad_por_maquina = fijos.get("prioridad_por_maquina") or {}
     for m in cfgmod.obtener_maquinas(cfg):
         nombre_m = m["nombre"]
+        # Prioridad de rectificado per-máquina (selector fijo del barrido).
+        prio = prioridad_por_maquina.get(nombre_m)
+        if prio in ("produccion", "desbaste"):
+            cfgmod.set_maquina(cfg, nombre_m, prioridad=prio)
         # Turno per-máquina tiene prioridad; luego el preset global (legacy).
         preset_this = turnos_por_maquina.get(nombre_m, preset_maq)
         if preset_this and preset_this in turnos_mod.PRESETS:
@@ -216,6 +224,49 @@ def simular_montecarlo_worker(i: int) -> Dict[str, Any]:
     return fila
 
 
+# ── Sidecar de spec (el "set" de corridas: CSV + spec que lo generó) ─────────
+#
+# El CSV de corridas guarda inputs sorteados y KPIs pero no los RANGOS ni los
+# selectores fijos con que se sorteó. Para poder pausar hoy y reanudar (o
+# agregar corridas) otro día con el MISMO espacio de muestreo, la spec completa
+# se persiste en un JSON al lado del CSV (``<csv>.spec.json``). Reanudar con
+# rangos/fijos distintos mezclaría corridas de espacios diferentes en un mismo
+# set, así que ``correr_montecarlo`` lo valida además del ``master_seed``.
+
+def ruta_spec_sidecar(csv_path: str) -> str:
+    """Ruta del JSON de spec que acompaña a un CSV de corridas."""
+    return csv_path + ".spec.json"
+
+
+def guardar_spec_sidecar(spec: EspecMonteCarlo, csv_path: str) -> None:
+    """Persiste la spec completa (runs/seed/chunk/fijos/rangos) junto al CSV."""
+    with open(ruta_spec_sidecar(csv_path), "w", encoding="utf-8") as f:
+        json.dump(asdict(spec), f, indent=2, ensure_ascii=False)
+
+
+def cargar_spec_sidecar(csv_path: str) -> Optional[EspecMonteCarlo]:
+    """Carga la spec persistida junto a un CSV (None si no hay sidecar)."""
+    ruta = ruta_spec_sidecar(csv_path)
+    if not os.path.exists(ruta):
+        return None
+    with open(ruta, "r", encoding="utf-8") as f:
+        d = json.load(f)
+    return EspecMonteCarlo(runs=int(d.get("runs", 0)), master_seed=d.get("master_seed"),
+                           chunk=int(d.get("chunk", 100)), fijos=d.get("fijos", {}) or {},
+                           rangos=d.get("rangos", {}) or {})
+
+
+def _mismo_espacio(a: EspecMonteCarlo, b: EspecMonteCarlo) -> bool:
+    """True si dos specs comparten el espacio de muestreo (rangos y fijos).
+
+    Compara vía round-trip JSON para normalizar tipos (tuplas↔listas, ints↔floats
+    del JSON); ``runs``/``chunk`` quedan afuera a propósito (extender un set con
+    más corridas es válido, cambiarle los rangos no).
+    """
+    norm = lambda x: json.loads(json.dumps(x))  # noqa: E731
+    return norm(a.rangos) == norm(b.rangos) and norm(a.fijos) == norm(b.fijos)
+
+
 # ── Orquestador (paralelo, chunked, reanudable) ──────────────────────────────
 
 def _num(v: Any) -> Any:
@@ -240,6 +291,18 @@ def _leer_filas_csv(path: str) -> Tuple[List[Dict[str, Any]], Optional[List[str]
     return filas, columnas, master
 
 
+def cargar_filas_csv(path: str) -> List[Dict[str, Any]]:
+    """Filas de un CSV de corridas ya existente, ordenadas por ``run``.
+
+    Entrada pública para consumidores (GUI "abrir set") que quieren mostrar los
+    resultados acumulados de un set sin correr nada.
+    """
+    if not os.path.exists(path):
+        return []
+    filas, _, _ = _leer_filas_csv(path)
+    return sorted(filas, key=lambda r: int(r.get("run", 0)))
+
+
 def _ordenar_columnas(fila: Dict[str, Any]) -> List[str]:
     """Ordena las columnas: identificadores, luego inputs ``in_*``, luego KPIs."""
     ident = [c for c in ("run", "seed", "master_seed") if c in fila]
@@ -253,14 +316,27 @@ def correr_montecarlo(base_cfg: Dict[str, Any], stock_df: "pd.DataFrame",
                       csv_path: str, dump_dir: Optional[str] = None,
                       resume: bool = False,
                       on_progress: Optional[Callable[[int, int], None]] = None,
+                      on_parcial: Optional[Callable[[List[Dict[str, Any]], int, int], None]] = None,
+                      cancelar: Optional[threading.Event] = None,
                       max_workers: Optional[int] = None) -> List[Dict[str, Any]]:
     """Corre ``spec.runs`` simulaciones en paralelo y escribe el CSV incremental.
 
     Devuelve **todas** las filas (las reanudadas + las nuevas) ordenadas por
-    ``run``. Con ``resume`` lee el CSV existente, valida el ``master_seed`` y
-    saltea los índices ya hechos. ``on_progress(hechos, total)`` se llama cada
-    ``spec.chunk`` corridas. ``dump_dir`` (si se indica) recibe un pickle del
-    taller por corrida.
+    ``run``. Con ``resume`` lee el CSV existente, valida el ``master_seed`` **y el
+    espacio de muestreo** (rangos/fijos contra el sidecar ``<csv>.spec.json``) y
+    saltea los índices ya hechos — extender ``spec.runs`` sobre el mismo CSV
+    agrega corridas nuevas al set. La spec (con el master seed ya resuelto) se
+    persiste siempre en el sidecar, así un set pausado puede reanudarse en otra
+    sesión con los mismos rangos de input.
+
+    ``on_progress(hechos, total)`` se llama cada ``spec.chunk`` corridas;
+    ``on_parcial(filas_acumuladas, hechos, total)`` idem, con una copia de todas
+    las filas disponibles hasta el momento (para graficar resultados parciales).
+    ``cancelar`` (``threading.Event``) pausa el barrido de forma limpia: al
+    detectarse seteado se cancelan las corridas no iniciadas y se devuelven las
+    completas (ya escritas en el CSV); reanudar después completa el resto con
+    resultados idénticos (seeds derivadas por índice). ``dump_dir`` (si se
+    indica) recibe un pickle del taller por corrida.
     """
     master = gencambios.resolver_seed(spec.master_seed)
     spec = replace(spec, master_seed=master)
@@ -275,6 +351,17 @@ def correr_montecarlo(base_cfg: Dict[str, Any], stock_df: "pd.DataFrame",
             raise ValueError(
                 f"El CSV {csv_path} fue generado con master_seed={prev_master}, "
                 f"distinto del pedido ({master}). Use otra ruta o el mismo seed.")
+        # Mismo espacio de muestreo: reanudar con otros rangos/selectores fijos
+        # mezclaría en un CSV corridas sorteadas de espacios distintos.
+        spec_previa = cargar_spec_sidecar(csv_path)
+        if spec_previa is not None and not _mismo_espacio(spec, spec_previa):
+            raise ValueError(
+                f"El set {csv_path} fue generado con otros rangos/selectores "
+                f"(ver {ruta_spec_sidecar(csv_path)}). Reanude con la misma spec "
+                f"o use otra ruta de CSV.")
+
+    # La spec del set (runs puede crecer al extender; el espacio no cambia).
+    guardar_spec_sidecar(spec, csv_path)
 
     hechos = {int(r["run"]) for r in filas_previas if "run" in r}
     pendientes = [i for i in range(total) if i not in hechos]
@@ -295,6 +382,13 @@ def correr_montecarlo(base_cfg: Dict[str, Any], stock_df: "pd.DataFrame",
                                  initargs=(base_cfg, stock_df, modelo, spec, dump_dir)) as ex:
             futuros = [ex.submit(simular_montecarlo_worker, i) for i in pendientes]
             for fut in as_completed(futuros):
+                # Pausa limpia: cancela lo no iniciado y corta. Las corridas ya
+                # completadas quedaron en el CSV; las en vuelo terminan y se
+                # descartan (reanudar las recomputa idénticas por seed derivada).
+                if cancelar is not None and cancelar.is_set():
+                    for pend in futuros:
+                        pend.cancel()
+                    break
                 fila = fut.result()
                 nuevas.append(fila)
                 if writer is None:
@@ -306,9 +400,13 @@ def correr_montecarlo(base_cfg: Dict[str, Any], stock_df: "pd.DataFrame",
                         writer.writeheader()
                 writer.writerow(fila)
                 completados += 1
-                if on_progress and (completados % spec.chunk == 0 or completados == len(pendientes)):
+                if completados % spec.chunk == 0 or completados == len(pendientes):
                     f.flush()
-                    on_progress(len(hechos) + completados, total)
+                    if on_progress:
+                        on_progress(len(hechos) + completados, total)
+                    if on_parcial:
+                        on_parcial(list(filas_previas) + list(nuevas),
+                                   len(hechos) + completados, total)
     finally:
         if f is not None:
             f.close()
