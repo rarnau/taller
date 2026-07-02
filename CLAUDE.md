@@ -33,6 +33,8 @@ python -m pytest                       # runs tests/
 
 `tests/_escenarios.py` defines scenarios (PARADA, cooling, the 140-cylinder week, several strategies) and a deterministic `fingerprint()` (KPIs + snapshot count + alerts + final per-cylinder state). `tests/test_regresion.py` compares each run against `tests/golden_master.json`. When a behavior change is **intended**, regenerate the baseline on purpose with `python tests/_generar_golden.py`; otherwise a failing test means the engine changed behavior. There are no linters configured.
 
+> **The suite is isolated from the live `config/user_config.json`.** Every golden scenario (and several unit tests) builds its config with `cargar_config()`; a session-scoped autouse fixture in `tests/conftest.py` patches `persistencia.CONFIG_PATH` to a temp JSON written from `DEFAULTS`, so the suite always runs against the pristine defaults even if the repo's user config was personalized (machine `turnos`, `tasa_falla > 0`, `tiempo_enfriado_h > 0`, …), and any accidental `guardar_config()` from a test lands in the tmp dir. `tests/_generar_golden.py` enforces the same isolation itself (it runs outside pytest): **the golden master must always be regenerated with the pristine default config.** CI (`.github/workflows/ci.yml`) runs `pytest` on every push to `main` and every pull request.
+
 ## Architecture Overview
 
 **Simulador de Cilindros Pro v4** — a discrete-event simulation (DES) tool for a rolling mill (taller de laminación). Operators load an Excel file describing cylinder inventory and a change schedule; the engine simulates cylinder lifecycle transitions and the GUI replays them.
@@ -131,11 +133,11 @@ At startup, `MainWindow.__init__` (`gui_qt/main_window.py`) calls `taller.config
 - `modelo ajustar <historia>|show|reset` and `generar-cambios [<historia>] [--seed --inicio --fin --horizonte-dias --umbral-desbaste --salida --ajustar]` — fit/inspect the persisted learned model and emit a reproducible `Programa_Cambios`
 - `montecarlo <stock.xlsx> [--runs --seed --chunk --csv --resume --dump-dir --max-workers --resumen-csv --generador --historia --ajustar]` — Monte Carlo study (see "Monte Carlo runner" below); reads the persisted `montecarlo` spec, runs N sims with sampled params, writes a per-run CSV + prints the stats summary
 
-`construir_taller(cfg, excel)` and `ejecutar_simulacion(...)` in `cli.py` are GUI-free entry points; `construir_taller` (configurar + cargar_datos) is the intended base for a future batch runner of many independent parallel simulations.
+`construir_taller(cfg, excel)` and `ejecutar_simulacion(...)` in `nucleo/runner.py` are GUI-free entry points (re-consumed by `cli.py`); `construir_taller` (configurar + cargar_datos) is the intended base for a future batch runner of many independent parallel simulations.
 
-**Parallel execution (process pool + per-worker initializer).** `simular()` is CPU-bound pure Python, so it runs in **separate processes**, not threads (the GIL serializes threads). `cli.py` exposes the picklable, GUI-free building blocks:
+**Parallel execution (process pool + per-worker initializer).** `simular()` is CPU-bound pure Python, so it runs in **separate processes**, not threads (the GIL serializes threads). `nucleo/runner.py` exposes the picklable, GUI-free building blocks:
 - `simular_desde_dataframes(cfg, stock_df, cambios_df, estrategia)` — build + simulate + return the taller (one run).
-- `ctx_paralelo()` — the preferred multiprocessing context: **`fork`** when available (the worker inherits already-imported modules, no re-import; key when the parent is the GUI), else `spawn` (which only re-imports `cli`, never the GUI, since the worker callables live in `cli`).
+- `ctx_paralelo()` — the preferred multiprocessing context: **`fork`** when available (the worker inherits already-imported modules, no re-import; key when the parent is the GUI), else `spawn` (which only re-imports `nucleo.runner`, never the GUI, since the worker callables live in `nucleo/runner.py`).
 - `init_worker_simulacion(cfg, stock_df, estrategia)` + `simular_cambios_worker(cambios_df)` — the **per-worker initializer pattern**: a `ProcessPoolExecutor(initializer=init_worker_simulacion, initargs=(cfg, stock_df, estrategia))` loads the shared **stock + config + estrategia once per worker** (stored in the module-level `_WORKER_STATE`, a private copy per process — *not* shared state across processes) and each task sends only its `cambios_df` (the lightest thing to pickle).
 - `batch_simular(cfg, stock_df, lista_cambios, estrategia, max_workers)` — runs **N simulations in parallel** sharing stock+config+estrategia and varying only the `Programa_Cambios` (e.g. a seed sweep of the generator: pair with `gencambios.generar_cambios`). Returns the tallers **in the same order** as `lista_cambios` (empty list ⇒ `[]`).
 
@@ -146,7 +148,7 @@ A Monte Carlo study: **thousands of sims where each run samples numeric taller p
 - **Reproducible + resumable via derived seeds:** `seed_i = SeedSequence([master_seed, i]).generate_state(1)[0]`. Run `i` samples its params, generates its `Programa_Cambios` and realizes its failures with `seed_i`, so re-running `i` is identical ⇒ resuming = running only the indices missing from the CSV. The worker task is **just the index `i`**; everything else is rebuilt from the shared initializer state (`init_worker_montecarlo`). Reuses `runner.ctx_paralelo` + `construir_taller_desde_dataframes`.
 - `EspecMonteCarlo` (ranges + fixed selectors + `runs`/`master_seed`/`chunk`); `muestrear_overrides` (uniform draw) → `aplicar_a_cfg` (deep-copies the base cfg and applies overrides via the **existing `config/persistencia` mutators**; *rates* convert to `mm = rate × tiempo_min`, keeping `tiempo_min`).
 - `correr_montecarlo(...)` runs the pool, writes the **incremental per-run CSV** (one row = flat metrics + sampled inputs `in_*`), calls `on_progress(done, total)` every `chunk`, and on `resume` reads the CSV (validating `master_seed`) to skip done indices; `resumir(filas)` → `{kpi: {mean,std,p10,p50,p90,…}}`; optional `dump_dir` pickles each taller.
-- **Golden stays intact:** `calcular_kpis` is **not** touched; the MC metrics live in `modelos/kpis.py::metricas_montecarlo` (flattens the per-machine util dicts to `util_disp_<maq>`/`util_neta_<maq>`/`falla_<maq>` and adds `paradas`/`stock_min`/`nivel_servicio_pct`, derived from snapshots). The spec is persisted in `config/user_config.json::montecarlo` (`obtener_montecarlo` synthesizes per-machine ranges from the current cfg; `set_montecarlo`). Surfaced in the CLI (`montecarlo` subcommand) and the GUI (Monte Carlo tab, run in a background **thread** via `MonteCarloService` since `correr_montecarlo` already uses processes). Guarded by `tests/test_montecarlo.py`.
+- **KPIs:** the MC metrics live in `modelos/kpis.py::metricas_montecarlo`, built on `calcular_kpis` (single source of truth): it flattens the per-machine util dicts to `util_disp_<maq>`/`util_neta_<maq>`/`falla_<maq>` and adds the snapshot-derived service metrics `paradas` (PARADA episodes, rising edges per jaula), `stock_min` (min Disponibles over the run) and `parada_pct` (share of the horizon with some jaula stopped). `calcular_kpis` itself also exposes `tiempo_parada_h` (total PARADA hours, with a `metric_meta` detail "% del horizonte") and `metric_order`/`metric_meta` (scalar keys + labels seeded from `tema.KPI_META_BASE`) that the KPIs tab and CLI iterate to render cards. The spec is persisted in `config/user_config.json::montecarlo` (`obtener_montecarlo` synthesizes per-machine ranges from the current cfg — persisted range if present, else ±30% around the current rates / 0..2× the falla; `set_montecarlo`). The **Configuración** tab invalidates a machine's persisted MC range when its tasas/`tasa_falla` change (`_invalidar_rangos_montecarlo`), so the range re-derives from the new rates. Fixed selectors support **per-machine shift presets** via `fijos["turnos_por_maquina"]` (`{nombre: preset|compact-string}`, taking precedence over the legacy global `turnos_maquinas_preset`). Surfaced in the CLI (`montecarlo` subcommand; `--quiet` now silences progress **and** the final summary) and the GUI (Monte Carlo tab, run in a background **thread** via `MonteCarloService` since `correr_montecarlo` already uses processes). Guarded by `tests/test_montecarlo.py`.
 
 **Picklability of the result.** Workers return the whole `TallerCilindros` back to the parent by pickle, so the engine must be picklable. The only non-picklable attribute is `self._seq_cola = itertools.count()` (the event-queue sequence counter, valid only mid-`simular()`); `TallerCilindros.__getstate__`/`__setstate__` **drop it from the pickle and recreate it on unpickle**. Everything else (snapshots, cilindros, maquinas, alertas, `log_simulacion`) is picklable. If you add another non-picklable transient to the engine, exclude it the same way.
 
@@ -169,9 +171,11 @@ controls) and a `QTabWidget` main area. Reusable Qt building blocks live in
 | Inventario | `gui_qt/inventory_qt.py` (`InventoryPanel`) | Stock table (initial vs final view), per-column filtering, Excel export |
 | KPIs | `gui_qt/tab_kpis_qt.py` (`KpisPanel`) | Key performance indicators (disponible/neta utilization, etc.) |
 | Generación | `gui_qt/generation_qt.py` (`GenerationPanel`) | Synthetic-change generator config + adaptation + reproducible generation + timeline |
-| Monte Carlo | `gui_qt/montecarlo_qt.py` (`MonteCarloPanel`) | Param-range sliders + fixed selectors + N runs; runs the sweep in background (`MonteCarloService`) and shows KPI cards / histograms / stats table + CSV export (see "Monte Carlo runner") |
 | Configuración | `gui_qt/config_qt.py` (`ConfigPanel`) | Global params, SubStock ranges, machine park CRUD, sim params; saves to `user_config.json` and applies via `taller.configurar()` |
 | Consola | `gui_qt/console_qt.py` (`ConsolePanel`) | Simulation log and alerts |
+| Monte Carlo | `gui_qt/montecarlo_qt.py` (`MonteCarloPanel`) | Param-range sliders + option chips (strategies/generator/laminador shifts) + per-machine shift selectors + N runs; runs the sweep in background (`MonteCarloService`) and shows KPI cards / histograms / stats table + CSV export (see "Monte Carlo runner") |
+
+(Tab order matches `MainWindow.TAB_NAMES`; Monte Carlo is the last tab.)
 
 **The Dashboard/Análisis panels use native Qt charts** (`gui_qt/widgets/dashboard_charts_qt.py`
 and `analysis_charts_qt.py`), fed by the data adapters `gui_qt/dashboard_data.py` /
@@ -183,7 +187,7 @@ CPU-bound pure Python, so a thread would freeze the Qt event loop (GIL).
 `gui_qt/services.py::SimulationService.submit(SimulationRequest)` builds a
 `ProcessPoolExecutor(max_workers=1, mp_context=ctx_paralelo(), initializer=init_worker_simulacion, initargs=(cfg, stock_df, estrategia))`
 and submits `simular_cambios_worker(cambios_df)` — **the exact same initializer
-path as the parallel `cli.batch_simular`** (see the parallel-execution note
+path as the parallel `nucleo.runner.batch_simular`** (see the parallel-execution note
 above), so it's a drop-in for a future parallel runner. `MainWindow` polls the
 `Future` with a `QTimer`; the GUI stays responsive. On completion the returned
 taller (pickled back: snapshots/cilindros/maquinas/alertas) **replaces the current
@@ -193,11 +197,7 @@ The live `callback_log` can't cross the process boundary, so `simular()`
 of each run); that list travels back via pickle and restores the change/PARADA/BAJA
 log in the console (the CLI still streams live via `callback_log=print`).
 `ctx_paralelo()` prefers the **fork** context so the child inherits already-imported
-modules (and the worker callables live in `cli`, so even spawn never re-imports the GUI).
-
-Dashboards are Matplotlib `Figure` objects embedded via `FigureCanvasQTAgg`
-(`gui_qt/dashboard_qt.py`/`analysis_qt.py`); always clear/close the old canvas and
-figure before creating a new one to avoid memory leaks.
+modules (and the worker callables live in `nucleo/runner.py`, so even spawn never re-imports the GUI).
 
 ### Key constants (in `modelos/taller.py`)
 
