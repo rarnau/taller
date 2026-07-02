@@ -109,10 +109,8 @@ class MonteCarloPanel(QWidget):
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        # Panel algo más ancho: los chips fluyen al ancho de su texto (FlowLayout)
-        # y este ancho deja entrar varios por línea sin recortarse contra el borde.
-        scroll.setMinimumWidth(355)
-        scroll.setMaximumWidth(390)
+        scroll.setMinimumWidth(290)
+        scroll.setMaximumWidth(320)
         # Sin scroll horizontal: el contenido se ajusta al ancho y los valores
         # de los sliders (a la derecha) nunca quedan recortados.
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
