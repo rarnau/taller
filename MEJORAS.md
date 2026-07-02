@@ -244,13 +244,13 @@ Para cada uno: agregar la clave al dict `kpis`, el label a `KPI_META_BASE`
   (getters/mutadores en `persistencia.py`), combo + botones guardar/borrar en el
   panel MC. `obtener_montecarlo` no cambia (el preset se aplica encima al elegirlo).
 
-### C8. Cancelación de un barrido en curso
-- **Qué**: botón "Detener" en el panel MC.
-- **Implementación**: `MonteCarloService` (`gui_qt/services.py`) corre
-  `correr_montecarlo` en un thread; agregar un `threading.Event` que
-  `correr_montecarlo` acepte (`cancelar: Optional[Event]`) y consulte por chunk
-  (mismo punto que C5): si está seteado, cancelar futures y salir devolviendo lo
-  hecho. El CSV incremental + resume ya permiten retomar después.
+### C8. Cancelación de un barrido en curso — ✅ HECHO
+Implementado como **pausa/reanudación de sets**: `correr_montecarlo` acepta
+`cancelar: threading.Event` (corte limpio), persiste la spec en el sidecar
+`<csv>.spec.json`, valida el espacio de muestreo al reanudar y publica
+parciales (`on_parcial`) cada chunk; la GUI tiene Pausar / Reanudar-agregar /
+Abrir set y gráficos progresivos (~10%). Ver `tests/test_montecarlo_sets.py`.
+Esto también cubre la mitad de C7 (sets durables por archivo, aún sin nombre).
 
 ---
 
@@ -383,7 +383,7 @@ Para cada uno: agregar la clave al dict `kpis`, el label a `KPI_META_BASE`
 | Prioridad | Ítems | Motivo |
 |---|---|---|
 | 1 | C1 (tornado), B4 (vida útil), B1 (retraso programa) | Máximo valor de decisión, bajo riesgo |
-| 2 | A1 (bisect), D1 (progreso), C8 (cancelar MC) | Rendimiento + UX básica |
+| 2 | A1 (bisect), D1 (progreso) | Rendimiento + UX básica (C8 ya hecho) |
 | 3 | B3/B5/B6/B7, D3, D4, D5, E2 | KPIs y GUI incrementales |
 | 4 | C3, C6, C7, D2, D6–D9, E1, E3, E5 | Funcionalidad ampliada |
 | 5 | A2, A3, A4, C4, C5, E4, E6, B8 | Requieren medición previa o decisiones de producto |
