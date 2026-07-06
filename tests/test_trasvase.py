@@ -205,7 +205,96 @@ def test_jaula_superior_no_roba_de_inferiores():
     assert all(t.cilindros[f"DA{i}"].perfil == "A" for i in (1, 2, 3))
 
 
-# ── 5. KPI y configuración ───────────────────────────────────────────────────
+# ── 5. Donantes reservados y reasignación sin pase ──────────────────────────
+#
+# Tras un rectificado, TODO cilindro queda Disponible con jaula_destino
+# reservado (solo se limpia al instalarse). El trasvase debe poder donar
+# también ese stock reservado — su "dueña" es la jaula de la reserva — o el
+# pool de candidatos queda vacío a mitad de corrida.
+
+
+def _simular_con_reservas(cfg, stock_rows, cambios_rows, reservas):
+    """Como _simular pero estampando jaula_destino antes de correr (estado
+    idéntico al de un Disponible recién salido del rectificado)."""
+    t = TallerCilindros()
+    t.configurar(cfg)
+    t.cargar_datos_desde_dataframes(pd.DataFrame(stock_rows), _df_cambios(cambios_rows))
+    for cid, j in reservas.items():
+        t.cilindros[cid].jaula_destino = j
+    t.simular(callback_log=None)
+    return t
+
+
+def test_donante_reservado_se_reperfila():
+    """Disponibles B reservados a J2 (caso normal post-rectificado) siguen
+    siendo donables hacia J1: la reserva no los saca del pool del trasvase."""
+    t = _simular_con_reservas(
+        _cfg_base(_RANGOS_2J, 2), _stock_2j(),
+        [_cambio(1)], reservas={f"D{i}": 2 for i in range(4)})
+    assert t._trasvases == 3  # el 4º violaría el piso del donante (J2)
+    trasvasados = [c for c in t.cilindros.values()
+                   if any("Trasvase" in h["evento"] for h in c.historial)]
+    assert all(c.perfil == "A" for c in trasvasados)
+    assert not t.jaulas[1].parada
+
+
+def test_reasignacion_sin_pase_cuando_perfil_y_banda_coinciden():
+    """Solape con MISMO perfil: el trasvase reasigna la reserva (0 mm, sin
+    rectificado) y la jaula se reactiva en el mismo instante del cambio."""
+    rangos = [
+        {"jaula": 1, "desde": 552.0, "hasta": 520.0, "perfil": "A"},
+        {"jaula": 2, "desde": 575.0, "hasta": 548.0, "perfil": "A"},  # solape 548-552
+    ]
+    stock = [
+        _fila("W1", 530.0, "Trabajando", 1, 1), _fila("W2", 530.0, "Trabajando", 1, 2),
+        _fila("W3", 565.0, "Trabajando", 2, 1), _fila("W4", 565.0, "Trabajando", 2, 2),
+        # En la zona de solape, perfil A: entran en J1 tal cual, pero la
+        # reserva a J2 los retiene.
+        _fila("DR1", 550.0, perfil="A"), _fila("DR2", 550.1, perfil="A"),
+        _fila("DR3", 550.2, perfil="A"), _fila("DR4", 550.3, perfil="A"),
+    ]
+    t = _simular_con_reservas(
+        _cfg_base(rangos, 2, umbral=2, objetivo=3), stock,
+        [_cambio(1)], reservas={f"DR{i}": 2 for i in (1, 2, 3, 4)})
+
+    assert t._trasvases == 3  # déficit 3 (objetivo 3, usable 0); piso J2 ok
+    reasignados = [c for c in t.cilindros.values()
+                   if any("reasignado" in h["evento"] for h in c.historial)]
+    assert len(reasignados) == 3
+    # Sin pase: el diámetro NO cambió en la reasignación (pudo cambiar después
+    # solo si la jaula lo retiró en otro cambio — acá no hay más cambios de J1).
+    assert all(c.diametro in (550.0, 550.1, 550.2, 550.3) for c in reasignados)
+    assert any("sin pase" in a.mensaje for a in t.alertas)
+    # La jaula se reactivó en el instante del cambio (reactivación inmediata
+    # tras la reasignación, sin esperar a un FIN_RECT).
+    assert not t.jaulas[1].parada
+    assert any("reactivada tras 0" in a.mensaje for a in t.alertas)
+
+
+def test_barras_disponibles_sin_duplicados_con_solape():
+    """Con bandas solapadas (incl. dos jaulas con banda idéntica), la suma de
+    disponibles_por_substock coincide con el total de Disponibles en TODOS los
+    snapshots (atribución única: reserva o banda de menor jaula)."""
+    rangos = [
+        {"jaula": 1, "desde": 547.0, "hasta": 520.0, "perfil": "4"},
+        {"jaula": 2, "desde": 563.0, "hasta": 539.0, "perfil": "2"},
+        {"jaula": 3, "desde": 575.0, "hasta": 551.0, "perfil": "2"},
+        {"jaula": 4, "desde": 575.0, "hasta": 551.0, "perfil": "3"},  # = banda J3
+    ]
+    stock = [_fila(f"W{j}{p}", d, "Trabajando", j, p)
+             for j, d in ((1, 545.0), (2, 555.0), (3, 570.0), (4, 570.0))
+             for p in (1, 2)] + [
+        _fila("DA", 545.0, perfil="4"), _fila("DB", 545.0, perfil="2"),  # solape J1/J2
+        _fila("DC", 555.0, perfil="2"), _fila("DD", 555.0, perfil="3"),  # solape J2/J3/J4
+        _fila("DE", 570.0, perfil="2"), _fila("DF", 570.0, perfil="3"),  # banda J3=J4
+    ]
+    t = _simular(_cfg_base(rangos, 4, umbral=1, objetivo=2), stock, [_cambio(1)])
+    for i, sn in enumerate(t.snapshots):
+        assert sum(sn.disponibles_por_substock.values()) == sn.cantidad_disponibles, \
+            f"snapshot {i}: las barras duplican Disponibles"
+
+
+# ── 6. KPI y configuración ───────────────────────────────────────────────────
 
 def test_kpi_trasvases_expuesto():
     from modelos.kpis import calcular_kpis

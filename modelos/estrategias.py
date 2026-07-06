@@ -387,11 +387,16 @@ class _CascadaUmbral(EstrategiaTrasvase):
 
     - **Dirección**: el flujo es siempre de rangos superiores a inferiores
       (rectificar solo reduce diámetro). Un candidato solo puede donarse si
-      todas las jaulas donde hoy es admisible son estrictamente superiores a
-      la receptora en el orden de bandas (stock sin jaula admisible = stock
-      muerto, se permite siempre).
-    - **Un pase por cilindro**: solo es candidato si su diámetro proyectado
-      (``d − MM_REPERFILADO``) cae en la banda receptora y no baja del mínimo.
+      todas sus jaulas "dueñas" son estrictamente superiores a la receptora en
+      el orden de bandas (stock sin dueña = stock muerto, se permite siempre).
+      Dueñas de un candidato: su ``jaula_destino`` si está reservado (el caso
+      normal — todo cilindro rectificado queda Disponible con la reserva de su
+      jaula hasta instalarse), o las jaulas donde es admisible si está libre.
+    - **Dos costos de trasvase**: si el candidato ya entra en la receptora por
+      diámetro y perfil (solo lo retiene una reserva a otra jaula), se
+      **reasigna sin pase** (0 mm, disponible al instante). Si no, se
+      re-perfila con **un pase** de ``MM_REPERFILADO`` mm: solo es candidato si
+      el diámetro proyectado cae en la banda receptora y no baja del mínimo.
       El descenso multi-banda lo cubre la **cascada** de jaulas, no pases
       encadenados de un mismo cilindro.
     - **Piso del donante = el umbral**: ninguna donación deja a una jaula
@@ -399,8 +404,9 @@ class _CascadaUmbral(EstrategiaTrasvase):
       objetivo: como las jaulas se procesan de inferior a superior, al llegar
       su turno se rellena desde SUS superiores hasta el objetivo (efecto
       cascada dentro de la misma ronda).
-    - **Determinismo**: candidatos ordenados por mayor holgura del donante,
-      luego mayor diámetro, luego id; jaulas por banda (desde asc, nº asc).
+    - **Determinismo**: candidatos ordenados por costo (reasignación antes que
+      re-perfilado), luego mayor holgura del donante, mayor diámetro y por
+      último id; jaulas por banda (desde asc, nº asc).
     """
 
     clave, etiqueta = "cascada_umbral", "Cascada sup→inf por umbral"
@@ -424,13 +430,20 @@ class _CascadaUmbral(EstrategiaTrasvase):
 
         usable = dict(taller.stock_util_por_jaula())
 
-        # Candidatos: Disponibles sin reserva, con el set de jaulas donde son
-        # admisibles HOY (sus "dueñas": las que pierden 1 útil si se dona).
-        candidatos: List[Tuple[Cilindro, FrozenSet[int]]] = [
-            (c, frozenset(j for j in orden if taller._admisible_en_jaula(c, j)))
-            for c in taller.cilindros.values()
-            if c.estado == EstadoCilindro.DISPONIBLE and c.jaula_destino is None
-        ]
+        # Candidatos: TODOS los Disponibles, con su set de jaulas "dueñas" (las
+        # que pierden 1 útil si se dona). Un reservado (jaula_destino, el caso
+        # normal tras un rectificado) tiene una única dueña: su reserva; un
+        # libre, las jaulas donde es admisible hoy.
+        candidatos: List[Tuple[Cilindro, FrozenSet[int]]] = []
+        for c in taller.cilindros.values():
+            if c.estado != EstadoCilindro.DISPONIBLE:
+                continue
+            if c.jaula_destino is not None:
+                duenas = (frozenset({int(c.jaula_destino)})
+                          if c.jaula_destino in pos else frozenset())
+            else:
+                duenas = frozenset(j for j in orden if taller._admisible_en_jaula(c, j))
+            candidatos.append((c, duenas))
 
         plan: List[Tuple[Cilindro, int]] = []
         elegidos: Set[str] = set()
@@ -447,17 +460,22 @@ class _CascadaUmbral(EstrategiaTrasvase):
                 mejor_orden = None
                 for c, duenas in candidatos:
                     if c.id in elegidos or j in duenas:
-                        continue  # ya elegido / ya es útil para j (no hace falta pase)
-                    d_fin = round(c.diametro - MM_REPERFILADO, 2)
-                    if d_fin < taller.diametro_minimo or not ss_j.contiene_diametro(d_fin):
-                        continue  # el pase no lo deja dentro de la banda receptora
+                        continue  # ya elegido / ya es útil para j (no hace falta nada)
+                    # Reasignación pura: ya entra en j por diámetro y perfil,
+                    # solo lo retiene una reserva a otra jaula (0 mm de costo).
+                    reasignable = (ss_j.contiene_diametro(c.diametro)
+                                   and taller._perfil_compatible(c.perfil, ss_j.perfil))
+                    if not reasignable:
+                        d_fin = round(c.diametro - MM_REPERFILADO, 2)
+                        if d_fin < taller.diametro_minimo or not ss_j.contiene_diametro(d_fin):
+                            continue  # el pase no lo deja dentro de la banda receptora
                     if any(pos[k] <= pos[j] for k in duenas):
                         continue  # dirección: solo desde bandas superiores
                     if any(usable.get(k, 0) - 1 < umbral for k in duenas):
                         continue  # piso del donante: nunca dejarlo bajo el umbral
                     holgura = min((usable.get(k, 0) - umbral for k in duenas),
                                   default=10 ** 9)  # stock muerto: holgura infinita
-                    orden_cand = (-holgura, -c.diametro, c.id)
+                    orden_cand = (0 if reasignable else 1, -holgura, -c.diametro, c.id)
                     if mejor is None or orden_cand < mejor_orden:
                         mejor, mejor_orden = (c, duenas), orden_cand
                 if mejor is None:

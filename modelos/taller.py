@@ -982,6 +982,8 @@ class TallerCilindros:
         # Activos por jaula (atribución única): todas las jaulas como clave; la
         # clave 0 (sin banda) solo cuando aparece.
         sn.activos_por_jaula = {j: 0 for j in range(1, self.cantidad_jaulas + 1)}
+        # Disponibles por jaula atribuida (única): base de disponibles_por_substock.
+        disp_por_jaula: Dict[int, int] = {}
 
         for c in self.cilindros.values():
             estado_val = c.estado.value
@@ -999,6 +1001,12 @@ class TallerCilindros:
                         cs[estado_val] = cs.get(estado_val, 0) + 1
                 j_attr = self._jaula_atribuida(c)
                 sn.activos_por_jaula[j_attr] = sn.activos_por_jaula.get(j_attr, 0) + 1
+                # Disponibles con atribución única (reserva primero, si no la
+                # banda de menor jaula): alimenta disponibles_por_substock sin
+                # contar dos veces con bandas solapadas (la suma de las barras
+                # de Vista Real es exactamente cantidad_disponibles).
+                if c.estado == EstadoCilindro.DISPONIBLE:
+                    disp_por_jaula[j_attr] = disp_por_jaula.get(j_attr, 0) + 1
 
         sn.cantidad_disponibles = sn.conteo_por_estado.get(EstadoCilindro.DISPONIBLE.value, 0)
         sn.cantidad_crc_total = sn.conteo_por_estado.get(EstadoCilindro.CRC.value, 0)
@@ -1030,9 +1038,14 @@ class TallerCilindros:
                 sn.detalle_maquinas[m_nombre] = None
 
         for ss in self.lista_substocks:
-            conteo = conteo_substock[ss.nombre]
-            sn.conteo_por_substock[ss.nombre] = conteo
-            sn.disponibles_por_substock[ss.nombre] = conteo.get(EstadoCilindro.DISPONIBLE.value, 0)
+            sn.conteo_por_substock[ss.nombre] = conteo_substock[ss.nombre]
+            # Atribución ÚNICA (no el conteo por banda, que duplica cilindros
+            # cuando las bandas se solapan): cada Disponible cuenta en UNA sola
+            # jaula — su reserva (jaula_destino) o la banda de menor número que
+            # contiene su diámetro — así la suma de las barras "Stock disponible
+            # por jaula" de Vista Real coincide con el total de Disponibles.
+            # Con bandas disjuntas es idéntico al conteo por banda histórico.
+            sn.disponibles_por_substock[ss.nombre] = disp_por_jaula.get(ss.jaula_asignada, 0)
 
         self.snapshots.append(sn)
 
@@ -1213,32 +1226,59 @@ class TallerCilindros:
             self._repo_ultima_llegada = pedido.tiempo_llegada
             self._push_evento(cola, _EventoSim("REPOSICION", pedido.tiempo_llegada, pedido))
 
-    def _planificar_trasvases(self, tiempo: datetime, log: Callable[[str], None]) -> None:
+    def _planificar_trasvases(self, tiempo: datetime, cola: List[_ItemCola],
+                              log: Callable[[str], None]) -> None:
         """Trasvase proactivo entre jaulas (ver ESTRATEGIAS_TRASVASE).
 
-        Consulta la estrategia configurada y re-encola cada cilindro elegido
-        como re-perfilado: DISPONIBLE → A_RECTIFICAR con pase de producción de
-        ``_MM_REPERFILADO`` mm y ``jaula_destino`` reservado a la jaula
-        receptora (el próximo ``iniciar_rectificado`` honra la reserva y le
-        talla el perfil de esa jaula, ver ``_asignar_jaula_destino``). No
-        empuja eventos: los llamadores (CAMBIO y fin de rectificado) reasignan
-        trabajo a las máquinas justo después, así el pase puede arrancar en el
-        mismo instante. Con la estrategia por defecto ("ninguno") la
-        planificación devuelve ``[]`` y no se toca nada (camino histórico).
+        Consulta la estrategia configurada y ejecuta cada par (cilindro, jaula
+        receptora) según su costo:
+
+        - **Reasignación (0 mm)**: si el cilindro ya entra en la receptora por
+          diámetro y perfil (solo lo retenía una reserva a otra jaula), se le
+          cambia la reserva y queda Disponible al instante; si hubo alguna, se
+          reintenta reactivar jaulas paradas de inmediato.
+        - **Re-perfilado (1 pase)**: DISPONIBLE → A_RECTIFICAR con pase de
+          producción de ``_MM_REPERFILADO`` mm y ``jaula_destino`` reservado a
+          la receptora (el próximo ``iniciar_rectificado`` honra la reserva y
+          le talla el perfil de esa jaula, ver ``_asignar_jaula_destino``).
+
+        No empuja eventos propios: los llamadores (CAMBIO y fin de rectificado)
+        reasignan trabajo a las máquinas justo después, así un pase puede
+        arrancar en el mismo instante. Con la estrategia por defecto
+        ("ninguno") la planificación devuelve ``[]`` y no se toca nada (camino
+        histórico, golden intacto).
         """
+        hubo_reasignacion = False
         for cil, j_dest in self._estrategia_trasv_obj.planificar(self, tiempo):
-            cil.estado = EstadoCilindro.A_RECTIFICAR
-            cil.tipo_rectificado_actual = TipoRectificado.PRODUCCION
-            cil.mm_a_rectificar = _MM_REPERFILADO
-            cil.jaula_destino = j_dest
-            cil.registrar_evento(tiempo, f"Trasvase: re-perfilado hacia Jaula {j_dest}")
             self._trasvases += 1
-            self.alertas.append(Alerta(
-                tiempo, "INFO",
-                f"TRASVASE: cilindro {cil.id} (Ø {cil.diametro:.1f}) re-perfilado "
-                f"hacia Jaula {j_dest}", jaula=j_dest))
-            log(f"  {tiempo.strftime('%m-%d %H:%M')} | Trasvase | Cilindro {cil.id} "
-                f"→ Jaula {j_dest} (re-perfilado {_MM_REPERFILADO} mm)")
+            ss_dest = self.obtener_substock_por_jaula(j_dest)
+            if (ss_dest is not None and ss_dest.contiene_diametro(cil.diametro)
+                    and self._perfil_compatible(cil.perfil, ss_dest.perfil)):
+                cil.jaula_destino = j_dest
+                hubo_reasignacion = True
+                cil.registrar_evento(tiempo, f"Trasvase: reasignado a Jaula {j_dest}")
+                self.alertas.append(Alerta(
+                    tiempo, "INFO",
+                    f"TRASVASE: cilindro {cil.id} (Ø {cil.diametro:.1f}) reasignado "
+                    f"a Jaula {j_dest} (sin pase)", jaula=j_dest))
+                log(f"  {tiempo.strftime('%m-%d %H:%M')} | Trasvase | Cilindro {cil.id} "
+                    f"→ Jaula {j_dest} (reasignado, sin pase)")
+            else:
+                cil.estado = EstadoCilindro.A_RECTIFICAR
+                cil.tipo_rectificado_actual = TipoRectificado.PRODUCCION
+                cil.mm_a_rectificar = _MM_REPERFILADO
+                cil.jaula_destino = j_dest
+                cil.registrar_evento(tiempo, f"Trasvase: re-perfilado hacia Jaula {j_dest}")
+                self.alertas.append(Alerta(
+                    tiempo, "INFO",
+                    f"TRASVASE: cilindro {cil.id} (Ø {cil.diametro:.1f}) re-perfilado "
+                    f"hacia Jaula {j_dest}", jaula=j_dest))
+                log(f"  {tiempo.strftime('%m-%d %H:%M')} | Trasvase | Cilindro {cil.id} "
+                    f"→ Jaula {j_dest} (re-perfilado {_MM_REPERFILADO} mm)")
+        # Una reasignación produce stock utilizable en este mismo instante:
+        # reintentar el rearme de jaulas paradas sin esperar al próximo evento.
+        if hubo_reasignacion:
+            self._intentar_reactivar_jaulas(tiempo, log, cola)
 
     def _finalizar_y_continuar(self, maquina: MaquinaRectificadora, tiempo: datetime,
                                cola: List[_ItemCola], log: Callable[[str], None]) -> None:
@@ -1286,7 +1326,7 @@ class TallerCilindros:
         # nuevo Disponible ya asentados), la estrategia puede re-perfilar
         # Disponibles de bandas superiores hacia jaulas bajo umbral. Antes de
         # asignar trabajo, para que un pase pueda arrancar en este instante.
-        self._planificar_trasvases(tiempo, log)
+        self._planificar_trasvases(tiempo, cola, log)
         for ev in self.asignar_trabajo_maquinas(tiempo):
             self._push_evento(cola, ev)
         self.generar_snapshot(tiempo)
@@ -1467,7 +1507,7 @@ class TallerCilindros:
         # 2.b Trasvase proactivo: con el stock recién consumido por el cambio,
         #     la estrategia puede re-perfilar Disponibles de bandas superiores
         #     hacia jaulas bajo umbral (default "ninguno": no hace nada).
-        self._planificar_trasvases(t_proc, log)
+        self._planificar_trasvases(t_proc, cola, log)
 
         # 3. Asignar trabajo a máquinas y 4. programar reposición del CRC con el
         #    CRC ya vaciado; luego snapshot. El orden de inserción (asignaciones

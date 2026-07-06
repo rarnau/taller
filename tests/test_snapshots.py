@@ -57,12 +57,19 @@ def test_snapshots_consistentes(nombre):
         assert sn.cantidad_crc_total == sn.conteo_por_estado[EstadoCilindro.CRC.value], f"{ctx}: cantidad_crc_total incoherente"
         assert sn.cantidad_bajas == sn.conteo_por_estado[EstadoCilindro.BAJA.value], f"{ctx}: cantidad_bajas incoherente"
 
-        # 6. conteo_por_substock: solo estados conocidos, sin ceros colados, y
-        #    disponibles_por_substock derivado de forma coherente.
+        # 6. conteo_por_substock: solo estados conocidos y sin ceros colados.
+        #    disponibles_por_substock usa atribución ÚNICA (reserva o banda de
+        #    menor jaula): cada Disponible cuenta en una sola barra, así que
+        #    nunca supera el conteo por banda... salvo que la reserva lo
+        #    atribuya a una banda que su diámetro ya dejó; el invariante firme
+        #    es global: la suma de las barras NUNCA supera el total de
+        #    Disponibles (sin duplicados con bandas solapadas) y coincide con
+        #    él cuando todo Disponible cae en alguna banda.
         for ss, conteo in sn.conteo_por_substock.items():
             assert set(conteo).issubset(_ESTADOS), f"{ctx}: estado desconocido en SubStock {ss}"
             assert all(v > 0 for v in conteo.values()), f"{ctx}: SubStock {ss} tiene un estado con conteo 0"
-            assert sn.disponibles_por_substock[ss] == conteo.get(EstadoCilindro.DISPONIBLE.value, 0), f"{ctx}: disponibles_por_substock incoherente en SubStock {ss}"
+        assert sum(sn.disponibles_por_substock.values()) <= sn.cantidad_disponibles, \
+            f"{ctx}: disponibles_por_substock duplica cilindros (suma > total Disponibles)"
 
         # 7. El detalle de máquinas cubre exactamente el parque de máquinas.
         assert set(sn.detalle_maquinas) == set(taller.maquinas), f"{ctx}: detalle_maquinas no cubre el parque de máquinas"
