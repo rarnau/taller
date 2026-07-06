@@ -63,6 +63,13 @@ DEFAULTS: Dict[str, Any] = {
     "estrategia_seleccion": "mayor_diametro",
     "estrategia_asignacion": "jaula_mas_necesitada",
     "estrategia_reposicion": "ninguna",
+    "estrategia_trasvase": "ninguno",
+    # Trasvase proactivo (solo con estrategia_trasvase != "ninguno"): una jaula
+    # bajo 'umbral' de stock útil se rellena hasta 'objetivo' (mejor esfuerzo)
+    # re-perfilando Disponibles de bandas superiores; ningún donante queda bajo
+    # el umbral (la cascada lo repone desde SUS superiores).
+    "trasvase_umbral": 8,
+    "trasvase_objetivo": 12,
     # Generador sintético del Programa_Cambios a partir de la historia real.
     # ``turnos_cambios`` (régimen propio del laminador) se omite ⇒ 24/7; sólo se
     # persiste el dict compacto cuando no es 24/7 (igual que los turnos de máquina).
@@ -214,6 +221,21 @@ def obtener_estrategia_seleccion(cfg: Dict[str, Any]) -> str:
 def obtener_estrategia_reposicion(cfg: Dict[str, Any]) -> str:
     """Devuelve la clave de la estrategia de reposición de cilindros nuevos."""
     return str(cfg.get("estrategia_reposicion", DEFAULTS["estrategia_reposicion"]))
+
+
+def obtener_estrategia_trasvase(cfg: Dict[str, Any]) -> str:
+    """Devuelve la clave de la estrategia de trasvase entre jaulas."""
+    return str(cfg.get("estrategia_trasvase", DEFAULTS["estrategia_trasvase"]))
+
+
+def obtener_trasvase_umbral(cfg: Dict[str, Any]) -> int:
+    """Devuelve el umbral de stock útil que dispara el trasvase proactivo."""
+    return int(cfg.get("trasvase_umbral", DEFAULTS["trasvase_umbral"]))
+
+
+def obtener_trasvase_objetivo(cfg: Dict[str, Any]) -> int:
+    """Devuelve el stock útil objetivo por jaula del trasvase proactivo."""
+    return int(cfg.get("trasvase_objetivo", DEFAULTS["trasvase_objetivo"]))
 
 
 def obtener_generador_cambios(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -499,12 +521,17 @@ def verificar_coherencia(cfg: Dict[str, Any]) -> None:
 
 def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado: Optional[float] = None,
             max_iteraciones: Optional[int] = None,
+            trasvase_umbral: Optional[int] = None,
+            trasvase_objetivo: Optional[int] = None,
             **estrategias: Optional[str]) -> Dict[str, Any]:
     """Actualiza los parámetros de simulación indicados.
 
     Las estrategias se pasan como kwargs ``estrategia_*`` (clave_cfg de cada
     familia, ver ``FAMILIAS_ESTRATEGIA``): se escribe en ``cfg`` cada una no None.
     Esto evita enumerar cada familia aquí — agregar una nueva no toca ``set_sim``.
+    Nota: umbral y objetivo de trasvase se editan de forma incremental (como el
+    resto de mutadores); si umbral > objetivo, la estrategia usa el menor de
+    ambos como umbral efectivo en runtime.
     """
     if tiempo_enfriado is not None:
         t = round(float(tiempo_enfriado), 1)
@@ -516,6 +543,16 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado: Optional[float] = None,
         if n <= 0:
             raise ValueError("El máximo de iteraciones debe ser mayor que 0.")
         cfg["max_iteraciones"] = n
+    if trasvase_umbral is not None:
+        n = int(trasvase_umbral)
+        if n <= 0:
+            raise ValueError("El umbral de trasvase debe ser mayor que 0.")
+        cfg["trasvase_umbral"] = n
+    if trasvase_objetivo is not None:
+        n = int(trasvase_objetivo)
+        if n <= 0:
+            raise ValueError("El objetivo de trasvase debe ser mayor que 0.")
+        cfg["trasvase_objetivo"] = n
     for clave, valor in estrategias.items():
         if valor is not None:
             cfg[clave] = str(valor)

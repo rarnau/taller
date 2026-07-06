@@ -37,6 +37,8 @@ from config.persistencia import (
     obtener_rangos,
     obtener_tasa_falla,
     obtener_tiempo_enfriado,
+    obtener_trasvase_objetivo,
+    obtener_trasvase_umbral,
     problemas_coherencia,
     set_config_global,
     set_rango,
@@ -241,11 +243,20 @@ class ConfigPanel(QWidget):
 
         self.sp_cooling = self._make_float(min_v=0.0, max_v=240.0, decimals=1, step=0.1)
 
+        # Trasvase proactivo entre jaulas (solo actúa con una estrategia de
+        # trasvase distinta de "Sin trasvase" en el combo de más abajo).
+        self.sp_trasvase_umbral = QSpinBox()
+        self.sp_trasvase_umbral.setRange(1, 999)
+        self.sp_trasvase_objetivo = QSpinBox()
+        self.sp_trasvase_objetivo.setRange(1, 999)
+
         form.addRow("Diametro maximo (mm)", self.sp_diam_max)
         form.addRow("Diametro minimo (mm)", self.sp_diam_min)
         form.addRow("Traslado CRC por pareja (min)", self.sp_crc_min)
         form.addRow("Cantidad de jaulas", self.sp_jaulas)
         form.addRow("Tiempo enfriado (h)", self.sp_cooling)
+        form.addRow("Trasvase: umbral disparo", self.sp_trasvase_umbral)
+        form.addRow("Trasvase: objetivo por jaula", self.sp_trasvase_objetivo)
 
         # Un combo por familia de estrategia, derivado de la tabla (agregar una
         # familia nueva no requiere tocar la GUI).
@@ -408,6 +419,8 @@ class ConfigPanel(QWidget):
 
         self.sp_cooling.setValue(obtener_tiempo_enfriado(self._cfg))
         self.sp_iter.setValue(obtener_max_iteraciones(self._cfg))
+        self.sp_trasvase_umbral.setValue(obtener_trasvase_umbral(self._cfg))
+        self.sp_trasvase_objetivo.setValue(obtener_trasvase_objetivo(self._cfg))
 
         for fam in FAMILIAS_ESTRATEGIA:
             self._set_combo_by_data(
@@ -454,6 +467,8 @@ class ConfigPanel(QWidget):
             new_cfg,
             tiempo_enfriado=self.sp_cooling.value(),
             max_iteraciones=self.sp_iter.value(),
+            trasvase_umbral=self.sp_trasvase_umbral.value(),
+            trasvase_objetivo=self.sp_trasvase_objetivo.value(),
             **{fam.clave_cfg: self.cb_estrategias[fam.clave_cfg].currentData()
                for fam in FAMILIAS_ESTRATEGIA},
         )

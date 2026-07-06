@@ -18,6 +18,7 @@ from .estrategias import (
     ESTRATEGIAS_SELECCION, ESTRATEGIA_DEFECTO,
     ESTRATEGIAS_ASIGNACION, ESTRATEGIA_ASIGNACION_DEFECTO,
     ESTRATEGIAS_REPOSICION, ESTRATEGIA_REPOSICION_DEFECTO, PedidoReposicion,
+    ESTRATEGIAS_TRASVASE, ESTRATEGIA_TRASVASE_DEFECTO, MM_REPERFILADO,
     FAMILIAS_ESTRATEGIA, resolver as _resolver_estrategia,
 )
 from . import turnos as turnos_mod
@@ -30,7 +31,9 @@ _TIPO_RECTIFICADO_DEFECTO: str = "produccion"
 # mm que se rebajan (rectificado de producción) cuando un cilindro queda
 # Disponible pero su (perfil, diámetro) no es colocable en ninguna jaula: se lo
 # re-encola a rectificado para re-perfilarlo hasta que entre en una banda.
-_MM_REPERFILADO: float = 0.8
+# El valor vive en estrategias.MM_REPERFILADO (fuente única: las estrategias de
+# trasvase también proyectan el diámetro post-pase con él); acá solo el alias.
+_MM_REPERFILADO: float = MM_REPERFILADO
 _BUFFER_CRC_SIZE: int = 2
 _MAX_ITERACIONES_SIM: int = 10_000
 _MAX_ITER_FINALIZACION: int = 500
@@ -131,10 +134,18 @@ class TallerCilindros:
         self.estrategia_seleccion: str = "mayor_diametro"
         self.estrategia_asignacion: str = ESTRATEGIA_ASIGNACION_DEFECTO
         self.estrategia_reposicion: str = ESTRATEGIA_REPOSICION_DEFECTO
+        self.estrategia_trasvase: str = ESTRATEGIA_TRASVASE_DEFECTO
         # Objetos de estrategia resueltos (los reasigna simular() por corrida).
         self._estrategia_sel_obj = ESTRATEGIAS_SELECCION[ESTRATEGIA_DEFECTO]
         self._estrategia_asig_obj = ESTRATEGIAS_ASIGNACION[ESTRATEGIA_ASIGNACION_DEFECTO]
         self._estrategia_repo_obj = ESTRATEGIAS_REPOSICION[ESTRATEGIA_REPOSICION_DEFECTO]
+        self._estrategia_trasv_obj = ESTRATEGIAS_TRASVASE[ESTRATEGIA_TRASVASE_DEFECTO]
+        # Parámetros del trasvase proactivo (solo tienen efecto con una
+        # estrategia de trasvase distinta de "ninguno"): una jaula bajo
+        # 'umbral' de stock útil se rellena hasta 'objetivo' (mejor esfuerzo)
+        # desde bandas superiores; ningún donante queda bajo el umbral.
+        self.trasvase_umbral: int = 8
+        self.trasvase_objetivo: int = 12
 
         # Régimen de turnos de la LÍNEA (laminador). None ⇒ 24/7. Solo se usa para
         # reprogramar los cambios tras una PARADA en tiempo laborable (ver
@@ -181,6 +192,7 @@ class TallerCilindros:
         self._repo_contador_id: int = 0
         self._repo_pendientes_fuera: int = 0
         self._cambios_pendientes: int = 0
+        self._trasvases: int = 0
 
     # ── Pickling (paso a procesos: worker GUI y batch_simular) ───────────────
 
@@ -255,6 +267,10 @@ class TallerCilindros:
             self.tiempo_enfriado_h = float(cfg["tiempo_enfriado_h"])
         if "max_iteraciones" in cfg:
             self.max_iteraciones = int(cfg["max_iteraciones"])
+        if "trasvase_umbral" in cfg:
+            self.trasvase_umbral = int(cfg["trasvase_umbral"])
+        if "trasvase_objetivo" in cfg:
+            self.trasvase_objetivo = int(cfg["trasvase_objetivo"])
         for fam in FAMILIAS_ESTRATEGIA:
             if fam.clave_cfg in cfg:
                 setattr(self, fam.clave_cfg, str(cfg[fam.clave_cfg]))
@@ -788,6 +804,34 @@ class TallerCilindros:
             stock[j] = stock.get(j, 0) + 1
         return stock
 
+    def stock_util_por_jaula(self) -> Dict[int, int]:
+        """Stock útil (perfil incluido) por jaula: cilindros que HOY pueden servirla.
+
+        Cuenta por jaula j: los instalados (TRABAJANDO) y en CRC de j, los
+        DISPONIBLE admisibles en j (diámetro + perfil + reserva, vía
+        ``_admisible_en_jaula``) y los "en camino" hacia j (ENFRIANDO /
+        A_RECTIFICAR / RECTIFICANDO con ``jaula_destino == j``, que llegarán
+        con el perfil de j). A diferencia de ``stock_activos_por_jaula`` (una
+        PARTICIÓN por atribución única, ciega al perfil), esto es una medida de
+        COBERTURA: con bandas solapadas un Disponible admisible en varias
+        jaulas cuenta en todas. Es la métrica de escasez del trasvase proactivo
+        (ver ESTRATEGIAS_TRASVASE en modelos/estrategias.py).
+        """
+        stock: Dict[int, int] = {j: 0 for j in range(1, self.cantidad_jaulas + 1)}
+        en_camino = (EstadoCilindro.ENFRIANDO, EstadoCilindro.A_RECTIFICAR,
+                     EstadoCilindro.RECTIFICANDO)
+        for c in self.cilindros.values():
+            if c.estado in (EstadoCilindro.TRABAJANDO, EstadoCilindro.CRC):
+                if c.jaula in stock:
+                    stock[c.jaula] += 1
+            elif c.estado == EstadoCilindro.DISPONIBLE:
+                for j in stock:
+                    if self._admisible_en_jaula(c, j):
+                        stock[j] += 1
+            elif c.estado in en_camino and c.jaula_destino in stock:
+                stock[c.jaula_destino] += 1
+        return stock
+
     @staticmethod
     def _perfil_compatible(perfil_cil: Optional[str], perfil_jaula: Optional[str]) -> bool:
         """True si un cilindro con ``perfil_cil`` puede ir a una jaula de ``perfil_jaula``.
@@ -1071,6 +1115,16 @@ class TallerCilindros:
         admite el diámetro, devuelve ``(None, perfil_actual)`` y deja
         ``jaula_destino=None`` (stock no colocable, se re-perfila al finalizar).
         """
+        # Un destino ya reservado (trasvase) se honra mientras su banda admita
+        # el diámetro proyectado; si dejó de admitirlo, se re-decide como
+        # siempre. En el flujo histórico el destino es siempre None al iniciar
+        # un rectificado (el CAMBIO lo resetea y el re-perfilado lo anula), así
+        # que este atajo no altera el camino por defecto (golden intacto).
+        if cil.jaula_destino is not None:
+            ss_dest = self.obtener_substock_por_jaula(cil.jaula_destino)
+            if ss_dest is not None and ss_dest.contiene_diametro(diametro_final):
+                return cil.jaula_destino, ss_dest.perfil
+
         candidatas = [
             j for j in range(1, self.cantidad_jaulas + 1)
             if (ss := self.obtener_substock_por_jaula(j)) is not None
@@ -1159,6 +1213,33 @@ class TallerCilindros:
             self._repo_ultima_llegada = pedido.tiempo_llegada
             self._push_evento(cola, _EventoSim("REPOSICION", pedido.tiempo_llegada, pedido))
 
+    def _planificar_trasvases(self, tiempo: datetime, log: Callable[[str], None]) -> None:
+        """Trasvase proactivo entre jaulas (ver ESTRATEGIAS_TRASVASE).
+
+        Consulta la estrategia configurada y re-encola cada cilindro elegido
+        como re-perfilado: DISPONIBLE → A_RECTIFICAR con pase de producción de
+        ``_MM_REPERFILADO`` mm y ``jaula_destino`` reservado a la jaula
+        receptora (el próximo ``iniciar_rectificado`` honra la reserva y le
+        talla el perfil de esa jaula, ver ``_asignar_jaula_destino``). No
+        empuja eventos: los llamadores (CAMBIO y fin de rectificado) reasignan
+        trabajo a las máquinas justo después, así el pase puede arrancar en el
+        mismo instante. Con la estrategia por defecto ("ninguno") la
+        planificación devuelve ``[]`` y no se toca nada (camino histórico).
+        """
+        for cil, j_dest in self._estrategia_trasv_obj.planificar(self, tiempo):
+            cil.estado = EstadoCilindro.A_RECTIFICAR
+            cil.tipo_rectificado_actual = TipoRectificado.PRODUCCION
+            cil.mm_a_rectificar = _MM_REPERFILADO
+            cil.jaula_destino = j_dest
+            cil.registrar_evento(tiempo, f"Trasvase: re-perfilado hacia Jaula {j_dest}")
+            self._trasvases += 1
+            self.alertas.append(Alerta(
+                tiempo, "INFO",
+                f"TRASVASE: cilindro {cil.id} (Ø {cil.diametro:.1f}) re-perfilado "
+                f"hacia Jaula {j_dest}", jaula=j_dest))
+            log(f"  {tiempo.strftime('%m-%d %H:%M')} | Trasvase | Cilindro {cil.id} "
+                f"→ Jaula {j_dest} (re-perfilado {_MM_REPERFILADO} mm)")
+
     def _finalizar_y_continuar(self, maquina: MaquinaRectificadora, tiempo: datetime,
                                cola: List[_ItemCola], log: Callable[[str], None]) -> None:
         """Cierra un rectificado y reactiva el flujo dependiente.
@@ -1201,6 +1282,11 @@ class TallerCilindros:
             self._intentar_reactivar_jaulas(tiempo, log, cola)
             for j_id in range(1, self.cantidad_jaulas + 1):
                 self._programar_reposicion_crc(j_id, tiempo, cola)
+        # Trasvase proactivo: con el stock resultante (BAJA, re-perfilado o
+        # nuevo Disponible ya asentados), la estrategia puede re-perfilar
+        # Disponibles de bandas superiores hacia jaulas bajo umbral. Antes de
+        # asignar trabajo, para que un pase pueda arrancar en este instante.
+        self._planificar_trasvases(tiempo, log)
         for ev in self.asignar_trabajo_maquinas(tiempo):
             self._push_evento(cola, ev)
         self.generar_snapshot(tiempo)
@@ -1378,6 +1464,11 @@ class TallerCilindros:
         else:
             self._parar_jaula(ev.jaula, t_proc, log)
 
+        # 2.b Trasvase proactivo: con el stock recién consumido por el cambio,
+        #     la estrategia puede re-perfilar Disponibles de bandas superiores
+        #     hacia jaulas bajo umbral (default "ninguno": no hace nada).
+        self._planificar_trasvases(t_proc, log)
+
         # 3. Asignar trabajo a máquinas y 4. programar reposición del CRC con el
         #    CRC ya vaciado; luego snapshot. El orden de inserción (asignaciones
         #    antes que la reposición) fija el desempate ante igual tiempo.
@@ -1409,6 +1500,8 @@ class TallerCilindros:
             ESTRATEGIAS_ASIGNACION, self.estrategia_asignacion, ESTRATEGIA_ASIGNACION_DEFECTO)
         self._estrategia_repo_obj = _resolver_estrategia(
             ESTRATEGIAS_REPOSICION, self.estrategia_reposicion, ESTRATEGIA_REPOSICION_DEFECTO)
+        self._estrategia_trasv_obj = _resolver_estrategia(
+            ESTRATEGIAS_TRASVASE, self.estrategia_trasvase, ESTRATEGIA_TRASVASE_DEFECTO)
         self.alertas.clear()
         self.snapshots.clear()
         self.log_simulacion.clear()
@@ -1449,6 +1542,7 @@ class TallerCilindros:
         self._repo_ultima_llegada = None
         self._repo_contador_id = 0
         self._repo_pendientes_fuera = 0
+        self._trasvases = 0
         # Cambios aún sin ejecutar (en cola o diferidos por PARADA). Define la
         # ventana [A, B] de la simulación: una entrega de reposición que se
         # procesa cuando ya no quedan cambios pendientes cae fuera de B (el

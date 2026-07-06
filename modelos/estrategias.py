@@ -8,7 +8,7 @@ en ESTRATEGIAS_SELECCION; la GUI y el CLI la toman de ahí.
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, List, Optional, TypeVar
+from typing import TYPE_CHECKING, Dict, FrozenSet, List, Optional, Set, Tuple, TypeVar
 
 from . import turnos
 from .cilindro import Cilindro
@@ -333,6 +333,155 @@ ESTRATEGIAS_REPOSICION: Dict[str, EstrategiaReposicion] = {
 ESTRATEGIA_REPOSICION_DEFECTO = "ninguna"
 
 
+# ── Estrategias de trasvase de cilindros entre jaulas ────────────────────────
+#
+# Con bandas solapadas y perfiles, una jaula puede quedarse sin cilindros
+# UTILIZABLES (perfil propio) mientras una banda superior tiene excedente
+# diámetro-admisible de otro perfil. La estrategia de trasvase decide,
+# proactivamente, qué cilindros Disponibles re-perfilar (pase de producción de
+# MM_REPERFILADO mm hacia una jaula receptora) para nivelar el stock útil.
+# Se invoca tras cada CAMBIO y tras cada fin de rectificado (ver
+# TallerCilindros._planificar_trasvases); es STATELESS (singleton compartido
+# entre procesos): el contador de la corrida vive en el taller (_trasvases) y
+# los parámetros en la config (taller.trasvase_umbral / trasvase_objetivo).
+# Para agregar una estrategia nueva: subclasar EstrategiaTrasvase y registrarla
+# en ESTRATEGIAS_TRASVASE; la GUI y el CLI la toman de ahí.
+
+# mm del pase de producción de un re-perfilado (cambio de perfil fuera de un
+# cambio programado). Fuente única del valor: el motor lo consume como
+# taller._MM_REPERFILADO (alias) y las estrategias de trasvase lo usan para
+# proyectar el diámetro post-pase de los candidatos.
+MM_REPERFILADO: float = 0.8
+
+
+class EstrategiaTrasvase:
+    """Estrategia de trasvase proactivo de cilindros entre jaulas."""
+
+    clave: str = ""
+    etiqueta: str = ""
+
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo: datetime) -> List[Tuple[Cilindro, int]]:
+        """Devuelve pares (cilindro, jaula receptora) a re-perfilar (puede ser [])."""
+        raise NotImplementedError
+
+
+class _SinTrasvase(EstrategiaTrasvase):
+    """Por defecto: el taller nunca trasvasa (comportamiento histórico)."""
+
+    clave, etiqueta = "ninguno", "Sin trasvase"
+
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo: datetime) -> List[Tuple[Cilindro, int]]:
+        return []
+
+
+class _CascadaUmbral(EstrategiaTrasvase):
+    """Cascada superior → inferior por umbral/objetivo de stock útil.
+
+    Cuando el stock útil de una jaula (``taller.stock_util_por_jaula``: los
+    cilindros que HOY pueden servirla, perfil incluido) cae bajo
+    ``taller.trasvase_umbral``, se re-perfilan Disponibles de bandas
+    **superiores** hacia ella hasta dejarla en ``taller.trasvase_objetivo`` —
+    o lo que se pueda (mejor esfuerzo). Reglas:
+
+    - **Dirección**: el flujo es siempre de rangos superiores a inferiores
+      (rectificar solo reduce diámetro). Un candidato solo puede donarse si
+      todas las jaulas donde hoy es admisible son estrictamente superiores a
+      la receptora en el orden de bandas (stock sin jaula admisible = stock
+      muerto, se permite siempre).
+    - **Un pase por cilindro**: solo es candidato si su diámetro proyectado
+      (``d − MM_REPERFILADO``) cae en la banda receptora y no baja del mínimo.
+      El descenso multi-banda lo cubre la **cascada** de jaulas, no pases
+      encadenados de un mismo cilindro.
+    - **Piso del donante = el umbral**: ninguna donación deja a una jaula
+      donante por debajo del umbral. Un donante puede quedar entre umbral y
+      objetivo: como las jaulas se procesan de inferior a superior, al llegar
+      su turno se rellena desde SUS superiores hasta el objetivo (efecto
+      cascada dentro de la misma ronda).
+    - **Determinismo**: candidatos ordenados por mayor holgura del donante,
+      luego mayor diámetro, luego id; jaulas por banda (desde asc, nº asc).
+    """
+
+    clave, etiqueta = "cascada_umbral", "Cascada sup→inf por umbral"
+
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo: datetime) -> List[Tuple[Cilindro, int]]:
+        objetivo = int(getattr(taller, "trasvase_objetivo", 12))
+        umbral = min(int(getattr(taller, "trasvase_umbral", 8)), objetivo)
+
+        # Orden de bandas: inferior primero (por límite superior 'desde'
+        # ascendente; desempate por nº de jaula). Jaulas sin SubStock no juegan.
+        con_banda = [
+            (ss.desde, j)
+            for j in range(1, taller.cantidad_jaulas + 1)
+            if (ss := taller.obtener_substock_por_jaula(j)) is not None
+        ]
+        orden = [j for _, j in sorted(con_banda)]
+        if len(orden) < 2:
+            return []
+        pos = {j: i for i, j in enumerate(orden)}
+
+        usable = dict(taller.stock_util_por_jaula())
+
+        # Candidatos: Disponibles sin reserva, con el set de jaulas donde son
+        # admisibles HOY (sus "dueñas": las que pierden 1 útil si se dona).
+        candidatos: List[Tuple[Cilindro, FrozenSet[int]]] = [
+            (c, frozenset(j for j in orden if taller._admisible_en_jaula(c, j)))
+            for c in taller.cilindros.values()
+            if c.estado == EstadoCilindro.DISPONIBLE and c.jaula_destino is None
+        ]
+
+        plan: List[Tuple[Cilindro, int]] = []
+        elegidos: Set[str] = set()
+        donaron: Set[int] = set()
+
+        for j in orden:  # de inferior a superior: la cascada se resuelve en 1 ronda
+            stock_j = usable.get(j, 0)
+            if not (stock_j < umbral or (j in donaron and stock_j < objetivo)):
+                continue
+            ss_j = taller.obtener_substock_por_jaula(j)
+            deficit = objetivo - stock_j
+            while deficit > 0:
+                mejor: Optional[Tuple[Cilindro, FrozenSet[int]]] = None
+                mejor_orden = None
+                for c, duenas in candidatos:
+                    if c.id in elegidos or j in duenas:
+                        continue  # ya elegido / ya es útil para j (no hace falta pase)
+                    d_fin = round(c.diametro - MM_REPERFILADO, 2)
+                    if d_fin < taller.diametro_minimo or not ss_j.contiene_diametro(d_fin):
+                        continue  # el pase no lo deja dentro de la banda receptora
+                    if any(pos[k] <= pos[j] for k in duenas):
+                        continue  # dirección: solo desde bandas superiores
+                    if any(usable.get(k, 0) - 1 < umbral for k in duenas):
+                        continue  # piso del donante: nunca dejarlo bajo el umbral
+                    holgura = min((usable.get(k, 0) - umbral for k in duenas),
+                                  default=10 ** 9)  # stock muerto: holgura infinita
+                    orden_cand = (-holgura, -c.diametro, c.id)
+                    if mejor is None or orden_cand < mejor_orden:
+                        mejor, mejor_orden = (c, duenas), orden_cand
+                if mejor is None:
+                    break  # sin candidatos: mejor esfuerzo ("o intentarlo")
+                c, duenas = mejor
+                elegidos.add(c.id)
+                for k in duenas:
+                    usable[k] = usable.get(k, 0) - 1
+                    donaron.add(k)
+                usable[j] = usable.get(j, 0) + 1
+                plan.append((c, j))
+                deficit -= 1
+        return plan
+
+
+ESTRATEGIAS_TRASVASE: Dict[str, EstrategiaTrasvase] = {
+    e.clave: e for e in (
+        _SinTrasvase(),
+        _CascadaUmbral(),
+    )
+}
+ESTRATEGIA_TRASVASE_DEFECTO = "ninguno"
+
+
 # ── Tabla de familias de estrategia ──────────────────────────────────────────
 #
 # Las tres familias (selección / asignación / reposición) se cablean igual en
@@ -363,4 +512,7 @@ FAMILIAS_ESTRATEGIA = (
     FamiliaEstrategia("estrategia_reposicion", "--estrategia-reposicion",
                       "estrategia_reposicion", "Estrategia de reposicion",
                       ESTRATEGIAS_REPOSICION, ESTRATEGIA_REPOSICION_DEFECTO),
+    FamiliaEstrategia("estrategia_trasvase", "--estrategia-trasvase",
+                      "estrategia_trasvase", "Estrategia de trasvase",
+                      ESTRATEGIAS_TRASVASE, ESTRATEGIA_TRASVASE_DEFECTO),
 )
