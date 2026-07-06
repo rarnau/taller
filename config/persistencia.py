@@ -285,11 +285,25 @@ def obtener_montecarlo(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if "master_seed" in user:
         base["master_seed"] = user["master_seed"]
     base["fijos"].update(user.get("fijos", {}) or {})
+    # Selector fijo del trasvase: si el spec no lo trae, arranca en la
+    # estrategia vigente de la config (no en el primer valor del registro).
+    base["fijos"].setdefault("estrategia_trasvase", obtener_estrategia_trasvase(cfg))
 
     rangos_user = user.get("rangos", {}) or {}
     for clave in ("tiempo_enfriado", "tiempo_traslado_crc"):
         if clave in rangos_user:
             base["rangos"][clave] = [float(x) for x in rangos_user[clave]]
+
+    # Rangos del trasvase proactivo: el persistido si existe, si no uno
+    # degenerado [actual, actual] desde la config vigente (equivale a "fijo en
+    # el valor actual": el sorteo devuelve el extremo con rango nulo). El
+    # usuario los abre desde la GUI para barrer umbral/objetivo.
+    for clave, actual in (("trasvase_umbral", obtener_trasvase_umbral(cfg)),
+                          ("trasvase_objetivo", obtener_trasvase_objetivo(cfg))):
+        if clave in rangos_user:
+            base["rangos"][clave] = [float(x) for x in rangos_user[clave]]
+        else:
+            base["rangos"][clave] = [float(actual), float(actual)]
 
     maq_user = rangos_user.get("maquinas", {}) or {}
     maq_out: Dict[str, Any] = {}

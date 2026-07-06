@@ -52,8 +52,12 @@ class EspecMonteCarlo:
     """Configuración de un barrido: rangos numéricos + selectores fijos + N.
 
     ``rangos`` = ``{"tiempo_enfriado": [min,max], "tiempo_traslado_crc": [min,max],
-    "maquinas": {nombre: {"rate_prod":[..], "rate_desb":[..], "tasa_falla":[..]}}}``.
-    ``fijos`` = estrategias, generador, ``duracion_dias`` y presets de turnos.
+    "trasvase_umbral": [min,max], "trasvase_objetivo": [min,max],
+    "maquinas": {nombre: {"rate_prod":[..], "rate_desb":[..], "tasa_falla":[..]}}}``
+    (los rangos de trasvase son opcionales: los sidecars de sets viejos no los
+    tienen y el muestreo los saltea, ver ``muestrear_overrides``).
+    ``fijos`` = estrategias (incl. ``estrategia_trasvase``), generador,
+    ``duracion_dias`` y presets de turnos.
     """
 
     runs: int = 500
@@ -92,6 +96,13 @@ def muestrear_overrides(spec: EspecMonteCarlo, rng: "np.random.Generator") -> Di
             "rate_desb": _u(rng, rr["rate_desb"]),
             "tasa_falla": _u(rng, rr["tasa_falla"]),
         }
+    # Umbral/objetivo del trasvase proactivo (enteros ≥ 1). Se sortean SOLO si
+    # la spec trae el rango: los sidecars de sets anteriores no lo tienen, y
+    # saltearlos mantiene la secuencia de sorteos idéntica ⇒ reanudarlos sigue
+    # reproduciendo filas byte-idénticas.
+    for clave in ("trasvase_umbral", "trasvase_objetivo"):
+        if clave in r:
+            ov[clave] = max(1, int(round(_u(rng, r[clave]))))
     return ov
 
 
@@ -107,9 +118,12 @@ def aplicar_a_cfg(base_cfg: Dict[str, Any], overrides: Dict[str, Any],
     fijos = spec.fijos
 
     cfgmod.set_sim(cfg, tiempo_enfriado=overrides.get("tiempo_enfriado"),
+                   trasvase_umbral=overrides.get("trasvase_umbral"),
+                   trasvase_objetivo=overrides.get("trasvase_objetivo"),
                    estrategia_seleccion=fijos.get("estrategia_seleccion"),
                    estrategia_asignacion=fijos.get("estrategia_asignacion"),
-                   estrategia_reposicion=fijos.get("estrategia_reposicion"))
+                   estrategia_reposicion=fijos.get("estrategia_reposicion"),
+                   estrategia_trasvase=fijos.get("estrategia_trasvase"))
     if overrides.get("tiempo_traslado_crc") is not None:
         cfgmod.set_config_global(cfg, tiempo_traslado_crc_min=overrides["tiempo_traslado_crc"])
     if fijos.get("generador"):
@@ -212,6 +226,11 @@ def simular_montecarlo_worker(i: int) -> Dict[str, Any]:
                             "master_seed": int(spec.master_seed)}
     fila["in_tiempo_enfriado"] = overrides["tiempo_enfriado"]
     fila["in_tiempo_traslado_crc"] = overrides["tiempo_traslado_crc"]
+    # Presentes solo si la spec trae los rangos (sets nuevos): en un set viejo
+    # reanudado las columnas del CSV quedan como estaban.
+    for clave in ("trasvase_umbral", "trasvase_objetivo"):
+        if clave in overrides:
+            fila[f"in_{clave}"] = overrides[clave]
     for nombre, o in overrides["maquinas"].items():
         fila[f"in_rate_prod_{nombre}"] = o["rate_prod"]
         fila[f"in_rate_desb_{nombre}"] = o["rate_desb"]

@@ -50,7 +50,7 @@ from config.persistencia import (
     set_montecarlo,
 )
 from modelos.estrategias import (ESTRATEGIAS_ASIGNACION, ESTRATEGIAS_REPOSICION,
-                                 ESTRATEGIAS_SELECCION)
+                                 ESTRATEGIAS_SELECCION, ESTRATEGIAS_TRASVASE)
 from modelos.generador_cambios import GENERADORES_CAMBIOS
 from modelos import turnos as turnos_mod
 from nucleo.montecarlo import (EspecMonteCarlo, cargar_filas_csv, cargar_spec_sidecar,
@@ -130,10 +130,18 @@ class MonteCarloPanel(QWidget):
         gl = card_g.content_layout()
         rr_enf = RangeRow("Tiempo de enfriamiento", "h", 24.0, 0.5, 1)
         rr_crc = RangeRow("Tiempo traslado CRC", "min", 120.0, 1.0, 0)
+        # Umbral/objetivo del trasvase proactivo (solo actúan con la estrategia
+        # de trasvase distinta de "Sin trasvase" en la configuración fija).
+        rr_tu = RangeRow("Trasvase: umbral disparo", "cil", 99.0, 1.0, 0)
+        rr_to = RangeRow("Trasvase: objetivo por jaula", "cil", 99.0, 1.0, 0)
         self._rangos_global["tiempo_enfriado"] = rr_enf
         self._rangos_global["tiempo_traslado_crc"] = rr_crc
+        self._rangos_global["trasvase_umbral"] = rr_tu
+        self._rangos_global["trasvase_objetivo"] = rr_to
         gl.addWidget(rr_enf)
         gl.addWidget(rr_crc)
+        gl.addWidget(rr_tu)
+        gl.addWidget(rr_to)
         col.addWidget(card_g)
 
         # Selectores fijos.
@@ -151,6 +159,10 @@ class MonteCarloPanel(QWidget):
             "Estrategia de reposición",
             [(k, v.etiqueta) for k, v in ESTRATEGIAS_REPOSICION.items()],
             orientation="flow", chip_object_name="McOptionChip")
+        self.sel_trasvase = ChipSelector(
+            "Estrategia de trasvase",
+            [(k, v.etiqueta) for k, v in ESTRATEGIAS_TRASVASE.items()],
+            orientation="flow", chip_object_name="McOptionChip")
         self.sel_generador = ChipSelector(
             "Generador de cambios",
             [(k, g.etiqueta) for k, g in GENERADORES_CAMBIOS.items()],
@@ -167,6 +179,7 @@ class MonteCarloPanel(QWidget):
         fl.addWidget(self.sel_estrategia)
         fl.addWidget(self.sel_asignacion)
         fl.addWidget(self.sel_reposicion)
+        fl.addWidget(self.sel_trasvase)
         fl.addWidget(self.sel_generador)
         fl.addLayout(self._fila_widget("Duración de corrida (días)", self.sp_duracion))
         fl.addWidget(self.sel_turnos_lam)
@@ -319,6 +332,7 @@ class MonteCarloPanel(QWidget):
         self.sel_estrategia.set_current_data(fijos.get("estrategia_seleccion"))
         self.sel_asignacion.set_current_data(fijos.get("estrategia_asignacion"))
         self.sel_reposicion.set_current_data(fijos.get("estrategia_reposicion"))
+        self.sel_trasvase.set_current_data(fijos.get("estrategia_trasvase"))
         self.sel_generador.set_current_data(fijos.get("generador"))
         self.sel_turnos_lam.set_current_data(fijos.get("turnos_laminador_preset"))
         self.sp_duracion.setValue(int(fijos.get("duracion_dias", 7)))
@@ -326,6 +340,10 @@ class MonteCarloPanel(QWidget):
         r = mc.get("rangos", {}) or {}
         self._rangos_global["tiempo_enfriado"].set_values(r.get("tiempo_enfriado"))
         self._rangos_global["tiempo_traslado_crc"].set_values(r.get("tiempo_traslado_crc"))
+        # Sets viejos sin rangos de trasvase: set_values(None) es no-op y los
+        # sliders quedan como estaban (el sidecar manda igual al reanudar).
+        self._rangos_global["trasvase_umbral"].set_values(r.get("trasvase_umbral"))
+        self._rangos_global["trasvase_objetivo"].set_values(r.get("trasvase_objetivo"))
         for nombre, rr in (r.get("maquinas") or {}).items():
             card = self._maq_cards.get(nombre)
             if card is None:
@@ -366,6 +384,7 @@ class MonteCarloPanel(QWidget):
                 "estrategia_seleccion": self.sel_estrategia.current_data(),
                 "estrategia_asignacion": self.sel_asignacion.current_data(),
                 "estrategia_reposicion": self.sel_reposicion.current_data(),
+                "estrategia_trasvase": self.sel_trasvase.current_data(),
                 "generador": self.sel_generador.current_data(),
                 "duracion_dias": self.sp_duracion.value(),
                 "turnos_por_maquina": turnos_por_maquina,
@@ -375,6 +394,8 @@ class MonteCarloPanel(QWidget):
             "rangos": {
                 "tiempo_enfriado": list(self._rangos_global["tiempo_enfriado"].values()),
                 "tiempo_traslado_crc": list(self._rangos_global["tiempo_traslado_crc"].values()),
+                "trasvase_umbral": list(self._rangos_global["trasvase_umbral"].values()),
+                "trasvase_objetivo": list(self._rangos_global["trasvase_objetivo"].values()),
                 "maquinas": maquinas,
             },
         }

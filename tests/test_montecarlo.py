@@ -100,6 +100,35 @@ def test_muestrear_en_rango():
     mo = ov["maquinas"]["G"]
     assert mr["rate_prod"][0] <= mo["rate_prod"] <= mr["rate_prod"][1]
     assert mr["tasa_falla"][0] <= mo["tasa_falla"] <= mr["tasa_falla"][1]
+    # Trasvase: sin rango persistido, obtener_montecarlo sintetiza el rango
+    # degenerado [actual, actual] ⇒ el sorteo devuelve exactamente el valor
+    # vigente de la config (defaults 8/12), como entero.
+    assert ov["trasvase_umbral"] == 8
+    assert ov["trasvase_objetivo"] == 12
+
+
+def test_muestrear_trasvase_rango_abierto_y_retrocompat():
+    """Con rango abierto sortea enteros ≥ 1 dentro del rango; una spec vieja
+    (sidecar sin claves de trasvase) no sortea ni agrega las claves — así la
+    secuencia de sorteos y las filas de un set viejo reanudado no cambian."""
+    cfg = _cfg()
+    spec = _spec(cfg, runs=1)
+    spec.rangos["trasvase_umbral"] = [4, 10]
+    spec.rangos["trasvase_objetivo"] = [8, 14]
+    rng = np.random.default_rng(11)
+    ov = muestrear_overrides(spec, rng)
+    assert isinstance(ov["trasvase_umbral"], int) and 4 <= ov["trasvase_umbral"] <= 10
+    assert isinstance(ov["trasvase_objetivo"], int) and 8 <= ov["trasvase_objetivo"] <= 14
+
+    # Spec vieja: mismas claves base que antes del feature ⇒ mismos sorteos.
+    spec_vieja = _spec(cfg, runs=1)
+    del spec_vieja.rangos["trasvase_umbral"]
+    del spec_vieja.rangos["trasvase_objetivo"]
+    ov_v = muestrear_overrides(spec_vieja, np.random.default_rng(7))
+    assert "trasvase_umbral" not in ov_v and "trasvase_objetivo" not in ov_v
+    ov_hoy = muestrear_overrides(_spec(cfg, runs=1), np.random.default_rng(7))
+    assert ov_v["tiempo_enfriado"] == ov_hoy["tiempo_enfriado"]
+    assert ov_v["maquinas"] == ov_hoy["maquinas"]
 
 
 def test_aplicar_a_cfg_traduce_rate_a_mm():
@@ -120,6 +149,44 @@ def test_aplicar_a_cfg_traduce_rate_a_mm():
     assert maq["tasas"]["desbaste"]["mm"] == pytest.approx(0.02 * 480.0)
     # el cfg base no se muta
     assert cfg["maquinas"][0]["tasas"]["produccion"]["mm"] == 0.8
+
+
+def test_aplicar_a_cfg_trasvase():
+    """El selector fijo y los valores sorteados del trasvase llegan al cfg."""
+    cfg = _cfg()
+    spec = _spec(cfg, runs=1)
+    spec.fijos["estrategia_trasvase"] = "cascada_umbral"
+    overrides = {"tiempo_enfriado": 0.0, "tiempo_traslado_crc": 10.0,
+                 "maquinas": {}, "trasvase_umbral": 5, "trasvase_objetivo": 9}
+    out = aplicar_a_cfg(cfg, overrides, spec)
+    assert out["estrategia_trasvase"] == "cascada_umbral"
+    assert out["trasvase_umbral"] == 5
+    assert out["trasvase_objetivo"] == 9
+    # Spec por defecto: el fijo arranca en la estrategia vigente de la config
+    # (_cfg() no define ninguna ⇒ default "ninguno") y sin overrides el
+    # umbral/objetivo del base no se tocan.
+    out2 = aplicar_a_cfg(cfg, {"tiempo_enfriado": 0.0, "tiempo_traslado_crc": 10.0,
+                               "maquinas": {}}, _spec(cfg, runs=1))
+    assert out2["estrategia_trasvase"] == "ninguno"
+    assert "trasvase_umbral" not in out2  # base sin clave y sin override ⇒ intacto
+
+
+def test_correr_con_trasvase_expone_columnas(tmp_path):
+    """Barrido con trasvase activo: cada fila lleva in_trasvase_* (dentro del
+    rango sorteado) y el KPI `trasvases` fluye al CSV vía metricas_montecarlo."""
+    cfg = _cfg()
+    modelo = _modelo(cfg)
+    spec = _spec(cfg, runs=2)
+    spec.fijos["estrategia_trasvase"] = "cascada_umbral"
+    spec.rangos["trasvase_umbral"] = [4, 10]
+    spec.rangos["trasvase_objetivo"] = [8, 14]
+    filas = correr_montecarlo(cfg, _stock(), modelo, spec,
+                              csv_path=str(tmp_path / "mc_trasvase.csv"))
+    assert len(filas) == 2
+    for r in filas:
+        assert 4 <= int(r["in_trasvase_umbral"]) <= 10
+        assert 8 <= int(r["in_trasvase_objetivo"]) <= 14
+        assert "trasvases" in r
 
 
 # ── 3. Determinismo en paralelo ──────────────────────────────────────────────
