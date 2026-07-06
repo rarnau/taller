@@ -78,6 +78,13 @@ class GenerationPanel(QWidget):
         self._generated_df: pd.DataFrame | None = None
         self._generated_seed: int | None = None
         self._sim_snapshots: list[Any] = []
+        # La ventana [inicio, fin) se fija UNA vez (al abrir el panel) desde la
+        # config persistida o el período del modelo; luego la posee el usuario.
+        # Recargas por set_cfg (guardar config en otra pestaña) ya NO la pisan.
+        self._dates_initialized = False
+        # True en cuanto el usuario edita una fecha a mano: bloquea que un
+        # ajuste de modelo re-derive la ventana por debajo.
+        self._dates_user_edited = False
 
         # === SCROLL AREA: evita que el contenido se solape ===
         outer = QVBoxLayout(self)
@@ -234,14 +241,18 @@ class GenerationPanel(QWidget):
         self.sp_seed.setValue(-1)
         self.sp_seed.setToolTip("Use -1 para semilla aleatoria en cada generacion")
 
-        # Fechas sin checkboxes - siempre usadas
+        # Fechas sin checkboxes - siempre usadas. dateChanged marca que la
+        # ventana la editó el usuario (los sets programáticos bloquean señales,
+        # ver _aplicar_ventana), para no re-derivarla desde el modelo por debajo.
         self.dt_start = QDateEdit()
         self.dt_start.setCalendarPopup(True)
         self.dt_start.setDisplayFormat("yyyy-MM-dd")
-        
+        self.dt_start.dateChanged.connect(self._mark_dates_edited)
+
         self.dt_end = QDateEdit()
         self.dt_end.setCalendarPopup(True)
         self.dt_end.setDisplayFormat("yyyy-MM-dd")
+        self.dt_end.dateChanged.connect(self._mark_dates_edited)
 
         form.addRow("Algoritmo", self.cb_generator)
         form.addRow("Umbral desbaste (mm)", self.sp_umbral)
@@ -359,27 +370,59 @@ class GenerationPanel(QWidget):
         self._sim_snapshots = list(snapshots or [])
         self._render_timeline(self._generated_df)
 
+    def _mark_dates_edited(self, *_args) -> None:
+        """El usuario tocó una fecha: la ventana pasa a ser suya."""
+        self._dates_user_edited = True
+
+    def _aplicar_ventana(self, d_start: QDate, d_end: QDate) -> None:
+        """Fija ambas fechas SIN marcarlas como editadas por el usuario
+        (bloquea dateChanged): se usa para los defaults/persistencia."""
+        for widget, valor in ((self.dt_start, d_start), (self.dt_end, d_end)):
+            widget.blockSignals(True)
+            widget.setDate(valor)
+            widget.blockSignals(False)
+
+    def _ventana_por_defecto(self) -> "tuple[QDate, QDate]":
+        """Ventana base cuando la config no trae fechas: período del modelo
+        ajustado (fecha_min..fecha_max de la historia) o, si no hay, +7 días
+        desde hoy. Es solo el default inicial; el usuario puede ampliarla."""
+        hoy = QDate.currentDate()
+        d_start, d_end = hoy, hoy.addDays(7)
+        modelo = self._modelo if isinstance(self._modelo, dict) else None
+        if modelo:
+            dmin = QDate.fromString(str(modelo.get("fecha_min") or "")[:10], "yyyy-MM-dd")
+            dmax = QDate.fromString(str(modelo.get("fecha_max") or "")[:10], "yyyy-MM-dd")
+            if dmin.isValid() and dmax.isValid() and dmin < dmax:
+                d_start, d_end = dmin, dmax
+        return d_start, d_end
+
     def _load_cfg_controls(self) -> None:
-        """Sincroniza widgets desde la config persistida del generador."""
+        """Sincroniza widgets desde la config persistida del generador.
+
+        Las fechas se resuelven UNA sola vez (al abrir el panel): fechas
+        persistidas en la config → período del modelo → +7 días. En recargas
+        posteriores (``set_cfg`` tras guardar cualquier config en otra pestaña)
+        NO se tocan las fechas: las posee el usuario, así una edición no se
+        pierde ni se revierte al default de 7 días (el bug de "generar 2 veces").
+        """
         gc = obtener_generador_cambios(self._cfg)
         idx = self.cb_generator.findData(gc.get("generador"))
         self.cb_generator.setCurrentIndex(idx if idx >= 0 else 0)
         self.sp_umbral.setValue(float(gc.get("umbral_desbaste_mm", 1.0)))
 
-        today = QDate.currentDate()
-        self.dt_start.setDate(today)
-        self.dt_end.setDate(today.addDays(7))  # Por defecto +7 días
+        if not self._dates_initialized:
+            d_start, d_end = self._ventana_por_defecto()
+            if gc.get("fecha_inicio"):
+                d = QDate.fromString(str(gc.get("fecha_inicio")), "yyyy-MM-dd")
+                if d.isValid():
+                    d_start = d
+            if gc.get("fecha_fin"):
+                d = QDate.fromString(str(gc.get("fecha_fin")), "yyyy-MM-dd")
+                if d.isValid():
+                    d_end = d
+            self._aplicar_ventana(d_start, d_end)
+            self._dates_initialized = True
 
-        # Si existen fechas guardadas, usarlas
-        if gc.get("fecha_inicio"):
-            d = QDate.fromString(str(gc.get("fecha_inicio")), "yyyy-MM-dd")
-            if d.isValid():
-                self.dt_start.setDate(d)
-
-        if gc.get("fecha_fin"):
-            d = QDate.fromString(str(gc.get("fecha_fin")), "yyyy-MM-dd")
-            if d.isValid():
-                self.dt_end.setDate(d)
         # Cargar turnos
         from config.persistencia import obtener_turnos_cambios
         self._turnos_custom = obtener_turnos_cambios(self._cfg)
@@ -619,7 +662,19 @@ class GenerationPanel(QWidget):
 
         self._refresh_model_summary()
         self._update_adapt_preview()
+        self._maybe_refresh_window_from_model()
         QMessageBox.information(self, "Generacion", "Modelo ajustado y guardado.")
+
+    def _maybe_refresh_window_from_model(self) -> None:
+        """Alinea la ventana por defecto al período del modelo recién ajustado,
+        salvo que el usuario ya la haya editado a mano o haya fechas persistidas
+        en la config (en esos casos manda lo elegido, no se pisa)."""
+        gc = obtener_generador_cambios(self._cfg)
+        if self._dates_user_edited or gc.get("fecha_inicio") or gc.get("fecha_fin"):
+            return
+        d_start, d_end = self._ventana_por_defecto()
+        self._aplicar_ventana(d_start, d_end)
+        self._update_param_cards()
 
     def _reset_model(self) -> None:
         clave_sel = self.cb_adapt_model.currentData()
@@ -677,12 +732,37 @@ class GenerationPanel(QWidget):
             QMessageBox.warning(self, "Atencion", "No se generaron cambios para la ventana/configuracion actual.")
             return
 
+        # Persiste la ventana usada para que sobreviva reinicios y no se pierda
+        # al reaplicar la config desde otra pestaña (fix del "generar 2 veces").
+        self._persistir_ventana(inicio, fin)
         self._render_timeline(self._generated_df)
         self._update_param_cards()
         # Notifica al MainWindow (activa "Generación" en verde) y pasa la seed
         # concreta para que la simulación realice las fallas con esa misma seed.
         if self._on_cambios_generated is not None:
             self._on_cambios_generated(self._generated_df.copy(), self._generated_seed)
+
+    def _persistir_ventana(self, inicio: datetime, fin: datetime) -> None:
+        """Guarda la ventana [inicio, fin) en la config compartida.
+
+        Persiste ``fecha_inicio``/``fecha_fin`` a disco y propaga la cfg (vía
+        ``on_cfg_saved``) para que la ventana sobreviva reinicios y no la pise
+        un guardado de config desde otra pestaña. No hace nada si ya coincide
+        con lo persistido (así solo notifica cuando la ventana cambió)."""
+        ini_str = inicio.strftime("%Y-%m-%d")
+        fin_str = fin.strftime("%Y-%m-%d")
+        gc = obtener_generador_cambios(self._cfg)
+        if gc.get("fecha_inicio") == ini_str and gc.get("fecha_fin") == fin_str:
+            return
+        cfg = copy.deepcopy(self._cfg)
+        try:
+            set_generador_cambios(cfg, fecha_inicio=ini_str, fecha_fin=fin_str)
+            guardar_config(cfg)
+        except Exception:
+            return  # no bloquear la generación por un fallo al persistir
+        self._cfg = cfg
+        if self._on_cfg_saved is not None:
+            self._on_cfg_saved(copy.deepcopy(cfg))
 
     def _load_changes_excel(self) -> None:
         """Carga Programa_Cambios desde un archivo Excel."""
