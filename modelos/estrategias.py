@@ -193,9 +193,54 @@ def _en_camino_por_jaula(taller: "TallerCilindros") -> Dict[int, int]:
     return en_camino
 
 
+class _PrioridadJ1J4ConPiso(EstrategiaAsignacion):
+    """Estrategia DEFINIDA de balance de stock: prioriza J1/J4 con piso mínimo.
+
+    Los pesos y el piso viven en la estrategia (no hay configuración por
+    jaula). Entre las candidatas (ya admisibles por diámetro) elige con esta
+    precedencia:
+
+    1. Jaulas paradas primero (precedente de "jaula más necesitada").
+    2. **Piso de seguridad** (``PISO_STOCK`` = 10): toda candidata cuyo stock
+       activo esté por debajo del piso va antes que las que lo superan; entre
+       varias bajo el piso gana la más vacía (menor stock absoluto).
+    3. Sobre el piso, **balance ponderado**: menor ``stock/peso`` con los
+       ``PESOS`` fijos J1=1.44, J2=1.2, J3=1.0, J4=1.2 (jaulas fuera del dict
+       pesan 1.0) — J1 apunta a un 20% más de stock que J2, y J2/J4 a un 20%
+       más que J3, antes de perder la preferencia.
+    4. Desempate por número de jaula (determinista).
+
+    El stock comparado es ``TallerCilindros.stock_activos_por_jaula()``:
+    cilindros no BAJA con atribución única (sin repetidos con bandas
+    solapadas), la misma métrica del gráfico de evolución de Análisis. Como
+    toda estrategia de asignación, solo tiene efecto cuando las bandas se
+    solapan (bandas disjuntas ⇒ una única candidata).
+    """
+
+    clave, etiqueta = "prioridad_j1_j4_piso10", "Prioridad J1/J4 +20% (piso 10)"
+    PISO_STOCK = 10
+    PESOS = {1: 1.44, 2: 1.2, 3: 1.0, 4: 1.2}
+
+    def asignar(self, cilindro: Cilindro, jaulas_candidatas: List[int],
+                taller: "TallerCilindros") -> int:
+        stock = taller.stock_activos_por_jaula()
+
+        def _orden(j: int):
+            jaula = taller.jaulas[j]
+            parada = 0 if getattr(jaula, "parada", False) else 1  # paradas primero
+            s = stock.get(j, 0)
+            if s < self.PISO_STOCK:
+                return (parada, 0, float(s), j)   # bajo el piso: la más vacía primero
+            peso = self.PESOS.get(j, 1.0)
+            return (parada, 1, s / peso, j)       # sobre el piso: balance ponderado
+
+        return min(jaulas_candidatas, key=_orden)
+
+
 ESTRATEGIAS_ASIGNACION: Dict[str, EstrategiaAsignacion] = {
     e.clave: e for e in (
         _JaulaMasNecesitada(),
+        _PrioridadJ1J4ConPiso(),
     )
 }
 ESTRATEGIA_ASIGNACION_DEFECTO = "jaula_mas_necesitada"
