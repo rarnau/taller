@@ -52,34 +52,37 @@
   "rangos": [
     {
       "jaula": 1,
-      "desde": 533.0,
+      "desde": 547.0,
       "hasta": 520.0,
       "perfil": "4"
     },
     {
       "jaula": 2,
-      "desde": 547.0,
-      "hasta": 533.0,
+      "desde": 563.0,
+      "hasta": 539.0,
       "perfil": "2"
     },
     {
       "jaula": 3,
-      "desde": 561.0,
-      "hasta": 547.0,
+      "desde": 575.0,
+      "hasta": 551.0,
       "perfil": "2"
     },
     {
       "jaula": 4,
       "desde": 575.0,
-      "hasta": 561.0,
+      "hasta": 551.0,
       "perfil": "3"
     }
   ],
-  "tiempo_enfriado_h": 0.0,
-  "max_iteraciones": 10000,
-  "estrategia_seleccion": "mayor_diametro",
-  "estrategia_asignacion": "jaula_mas_necesitada",
-  "estrategia_reposicion": "ninguna",
+  "tiempo_enfriado_h": 8.0,
+  "max_iteraciones": 100000,
+  "estrategia_seleccion": "menor_mm_jaula_stock_desb_mas_nec_prod",
+  "estrategia_asignacion": "prioridad_j1_j4_piso10",
+  "estrategia_reposicion": "stock_constante",
+  "estrategia_trasvase": "cascada_umbral",
+  "trasvase_umbral": 6,
+  "trasvase_objetivo": 12,
   "generador_cambios": {
     "generador": "empirico",
     "umbral_desbaste_mm": 1.0,
