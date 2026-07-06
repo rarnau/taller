@@ -78,6 +78,11 @@ class GenerationPanel(QWidget):
         self._generated_df: pd.DataFrame | None = None
         self._generated_seed: int | None = None
         self._sim_snapshots: list[Any] = []
+        # La ventana de fechas se fija una sola vez (al abrir el panel). Las
+        # recargas por set_cfg —que dispara guardar cualquier config en
+        # cualquier pestaña— ya no la pisan, así una ventana ampliada no vuelve
+        # sola a 7 días (el bug de "se me cambia por un lote de 7 días").
+        self._dates_initialized = False
 
         # === SCROLL AREA: evita que el contenido se solape ===
         outer = QVBoxLayout(self)
@@ -366,20 +371,25 @@ class GenerationPanel(QWidget):
         self.cb_generator.setCurrentIndex(idx if idx >= 0 else 0)
         self.sp_umbral.setValue(float(gc.get("umbral_desbaste_mm", 1.0)))
 
-        today = QDate.currentDate()
-        self.dt_start.setDate(today)
-        self.dt_end.setDate(today.addDays(7))  # Por defecto +7 días
+        # Las fechas se fijan solo la PRIMERA vez (al abrir el panel): default
+        # +7 días, o las fechas persistidas en la config si existen. En recargas
+        # posteriores (set_cfg tras guardar config en otra pestaña) NO se tocan,
+        # para no revertir una ventana que el usuario amplió.
+        if not self._dates_initialized:
+            today = QDate.currentDate()
+            self.dt_start.setDate(today)
+            self.dt_end.setDate(today.addDays(7))  # Por defecto +7 días
 
-        # Si existen fechas guardadas, usarlas
-        if gc.get("fecha_inicio"):
-            d = QDate.fromString(str(gc.get("fecha_inicio")), "yyyy-MM-dd")
-            if d.isValid():
-                self.dt_start.setDate(d)
+            if gc.get("fecha_inicio"):
+                d = QDate.fromString(str(gc.get("fecha_inicio")), "yyyy-MM-dd")
+                if d.isValid():
+                    self.dt_start.setDate(d)
 
-        if gc.get("fecha_fin"):
-            d = QDate.fromString(str(gc.get("fecha_fin")), "yyyy-MM-dd")
-            if d.isValid():
-                self.dt_end.setDate(d)
+            if gc.get("fecha_fin"):
+                d = QDate.fromString(str(gc.get("fecha_fin")), "yyyy-MM-dd")
+                if d.isValid():
+                    self.dt_end.setDate(d)
+            self._dates_initialized = True
         # Cargar turnos
         from config.persistencia import obtener_turnos_cambios
         self._turnos_custom = obtener_turnos_cambios(self._cfg)
