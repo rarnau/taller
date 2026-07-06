@@ -100,6 +100,7 @@ class MainWindow(QMainWindow):
         self.btn_next: QPushButton
         self.slider: PlaybackTimelineSlider
         self.snapshot_label: QLabel
+        self.snapshot_time_label: QLabel
         self.lbl_export: QLabel
         self.dot_flow_inv: QLabel
         self.dot_flow_gen: QLabel
@@ -485,6 +486,7 @@ class MainWindow(QMainWindow):
         """Actualiza etiquetas globales y la Vista Real del snapshot activo."""
         if self.taller is None or not self.taller.snapshots:
             self.snapshot_label.setText("snapshot 0 / 0")
+            self.snapshot_time_label.setText("")
             self.slider.set_markers([], 0)
             self.realtime_view.set_placeholder(
                 "VISTA REAL - Cargue un Excel con Stock_Inicial y Programa_Cambios"
@@ -496,6 +498,7 @@ class MainWindow(QMainWindow):
         snap = self.taller.snapshots[idx]
 
         self.snapshot_label.setText(f"snapshot {idx + 1} / {total}")
+        self.snapshot_time_label.setText(snap.tiempo.strftime("%d/%m/%Y %H:%M"))
         self.status_snap.setText(f"Snapshot {idx + 1}/{total}")
         now_txt = datetime.now().strftime("%Y-%m-%d %H:%M")
         self.status_clock.setText(now_txt)

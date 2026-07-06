@@ -157,6 +157,13 @@ def build_sidebar(window: Any, slider_cls: type[QSlider]) -> QFrame:
     window.snapshot_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
     col.addWidget(window.snapshot_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
+    window.snapshot_time_label = QLabel("")
+    window.snapshot_time_label.setObjectName("Muted")
+    window.snapshot_time_label.setProperty("mono", "true")
+    window.snapshot_time_label.setProperty("small", "true")
+    window.snapshot_time_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    col.addWidget(window.snapshot_time_label, 0, Qt.AlignmentFlag.AlignHCenter)
+
     col.addStretch(1)
 
     window.lbl_export = QLabel("Exportar resultados →")
