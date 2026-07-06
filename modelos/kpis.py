@@ -4,7 +4,7 @@ from typing import Any, Dict, Tuple
 import numpy as np
 
 from config import tema
-from modelos.enums import EstadoCilindro
+from modelos.enums import EstadoCilindro, TipoRectificado
 from modelos.taller import TallerCilindros
 
 
@@ -60,6 +60,22 @@ def calcular_kpis(taller: TallerCilindros) -> Dict[str, Any]:
     desgaste_medio = float(np.mean(desgastes)) if desgastes else 0.0
     tiempo_parada_h, parada_pct = _tiempo_y_pct_parada(taller)
 
+    # mm medios rectificados por tipo de pase (desbaste / producción): promedio de
+    # los mm removidos en cada pase registrado en el historial de las máquinas
+    # (cada entrada de historial_trabajo lleva su "tipo" y "mm"). 0.0 si no hubo
+    # pases de ese tipo. Es independiente de los snapshots (sale del historial),
+    # por lo que coincide en modo full y ligero.
+    mm_desbaste = []
+    mm_produccion = []
+    for mq in taller.maquinas.values():
+        for h in mq.historial_trabajo:
+            if h["tipo"] == TipoRectificado.DESBASTE.value:
+                mm_desbaste.append(h["mm"])
+            elif h["tipo"] == TipoRectificado.PRODUCCION.value:
+                mm_produccion.append(h["mm"])
+    mm_medio_desbaste = float(np.mean(mm_desbaste)) if mm_desbaste else 0.0
+    mm_medio_produccion = float(np.mean(mm_produccion)) if mm_produccion else 0.0
+
     # Reposición de cilindros: entregados dentro de la ventana vs pedidos que
     # cayeron fuera de [A, B] (ver "Cylinder replenishment" en CLAUDE.md). Con
     # estrategia "ninguna" ambos son 0. getattr cubre un taller sin simular aún.
@@ -103,6 +119,8 @@ def calcular_kpis(taller: TallerCilindros) -> Dict[str, Any]:
         "horizonte_simulacion_h": horizonte_h,
         "diametro_promedio_mm": diam_prom,
         "desgaste_medio_mm": desgaste_medio,
+        "mm_medio_desbaste_mm": mm_medio_desbaste,
+        "mm_medio_produccion_mm": mm_medio_produccion,
         "tiempo_parada_h": tiempo_parada_h,
         "reposicion_entregados": reposicion_entregados,
         "reposicion_pendientes": reposicion_pendientes,

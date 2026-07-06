@@ -82,7 +82,7 @@ class _MenorMmJaulaMenorStockDesbMasNecesitadaProd(EstrategiaSeleccion):
     """
 
     clave = "menor_mm_jaula_stock_desb_mas_nec_prod"
-    etiqueta = "Menor mm + jaula stock (desb) / más necesitada (prod)"
+    etiqueta = "desb menor mm + jaula / prod jaula"
 
     @staticmethod
     def _en_camino_por_jaula(cola: List[Cilindro]) -> Dict[int, int]:

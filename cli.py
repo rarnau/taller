@@ -76,6 +76,8 @@ def _formatear_resumen(kpis: Dict[str, Any]) -> str:
         f"  Horizonte simulación   : {kpis['horizonte_simulacion_h']:.1f} h",
         f"  Diámetro promedio      : {kpis['diametro_promedio_mm']:.1f} mm",
         f"  Desgaste medio         : {kpis['desgaste_medio_mm']:.2f} mm",
+        f"  mm medios desbaste     : {kpis['mm_medio_desbaste_mm']:.2f} mm",
+        f"  mm medios producción   : {kpis['mm_medio_produccion_mm']:.2f} mm",
     ]
     if kpis.get("reposicion_entregados") or kpis.get("reposicion_pendientes"):
         lineas.append(f"  Repuestos (entregados) : {kpis['reposicion_entregados']}")
