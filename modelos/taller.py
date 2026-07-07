@@ -194,6 +194,10 @@ class TallerCilindros:
         self._repo_pendientes_fuera: int = 0
         self._cambios_pendientes: int = 0
         self._trasvases: int = 0
+        # Contador incremental de cilindros DISPONIBLE (para el snapshot liviano,
+        # que si no re-escanea todo el stock por evento). Se recalcula por scan
+        # al inicio de simular() y lo mantiene _set_estado en cada transición.
+        self._n_disponibles: int = 0
 
     # ── Pickling (paso a procesos: worker GUI y batch_simular) ───────────────
 
@@ -582,7 +586,7 @@ class TallerCilindros:
     def _instalar_en_jaula(self, cil: Cilindro, jaula_id: int, tiempo: datetime, motivo: str) -> None:
         """Mueve un cilindro al estado TRABAJANDO en la jaula indicada."""
         jaula = self.jaulas[jaula_id]
-        cil.estado = EstadoCilindro.TRABAJANDO
+        self._set_estado(cil, EstadoCilindro.TRABAJANDO)
         cil.jaula = jaula_id
         if cil in jaula.cilindros_crc:
             jaula.cilindros_crc.remove(cil)
@@ -804,6 +808,21 @@ class TallerCilindros:
             stock[j] = stock.get(j, 0) + 1
         return stock
 
+    def _set_estado(self, cil: Cilindro, nuevo: EstadoCilindro) -> None:
+        """Único punto de cambio de estado en el motor (fuera de la máquina).
+
+        Mantiene ``self._n_disponibles`` leyendo el estado anterior antes de
+        escribir, de modo que el contador es correcto sin importar la transición.
+        La máquina cambia el estado por su cuenta (``finalizar_rectificado``
+        → DISPONIBLE); ese +1 se aplica explícito en ``_finalizar_y_continuar``.
+        """
+        if cil.estado is not nuevo:
+            if cil.estado == EstadoCilindro.DISPONIBLE:
+                self._n_disponibles -= 1
+            if nuevo == EstadoCilindro.DISPONIBLE:
+                self._n_disponibles += 1
+        cil.estado = nuevo
+
     def stock_util_por_jaula(self) -> Dict[int, int]:
         """Stock útil (perfil incluido) por jaula: cilindros que HOY pueden servirla.
 
@@ -959,9 +978,13 @@ class TallerCilindros:
         """`tiempo` lo estampa ya Snapshot.__init__(tiempo); nada que computar."""
 
     def _snap_kpi_cantidad_disponibles(self, sn: Snapshot) -> None:
-        sn.cantidad_disponibles = sum(
-            1 for c in self.cilindros.values() if c.estado == EstadoCilindro.DISPONIBLE
-        )
+        # Contador incremental (mantenido por _set_estado + el +1 de
+        # finalizar_rectificado) en vez de re-escanear los N cilindros en cada
+        # uno de los miles de snapshots livianos. El modo completo NO lo usa
+        # (toma cantidad_disponibles del pase por conteo_por_estado), así que el
+        # golden no depende de esto; la equivalencia full⇄liviano
+        # (tests/test_snapshot_ligero.py) valida que el contador es correcto.
+        sn.cantidad_disponibles = self._n_disponibles
 
     def _snap_kpi_jaulas_paradas(self, sn: Snapshot) -> None:
         # Mismo orden que el modo completo (iteración de self.jaulas).
@@ -1198,7 +1221,7 @@ class TallerCilindros:
             return False  # pareja incompleta: no se coloca un cilindro suelto en el CRC
 
         for cil in disponibles[:necesarios]:
-            cil.estado = EstadoCilindro.CRC
+            self._set_estado(cil, EstadoCilindro.CRC)
             cil.jaula = jaula_id
             jaula.cilindros_crc.append(cil)
             cil.registrar_evento(tiempo, f"Traslado a CRC Jaula {jaula_id}")
@@ -1290,7 +1313,7 @@ class TallerCilindros:
                 log(f"  {tiempo.strftime('%m-%d %H:%M')} | Trasvase | Cilindro {cil.id} "
                     f"→ Jaula {j_dest} (reasignado, sin pase)")
             else:
-                cil.estado = EstadoCilindro.A_RECTIFICAR
+                self._set_estado(cil, EstadoCilindro.A_RECTIFICAR)
                 cil.tipo_rectificado_actual = TipoRectificado.PRODUCCION
                 cil.mm_a_rectificar = _MM_REPERFILADO
                 cil.jaula_destino = j_dest
@@ -1316,10 +1339,16 @@ class TallerCilindros:
         simulación (ambos cierran rectificados en curso de idéntica forma).
         """
         cil_terminado = maquina.finalizar_rectificado(tiempo)
+        if cil_terminado is not None:
+            # finalizar_rectificado dejó el cilindro en DISPONIBLE por su cuenta
+            # (RECTIFICANDO→DISPONIBLE): contabilizamos ese +1 acá; las
+            # transiciones posteriores (BAJA / re-perfilado / instalación) pasan
+            # por _set_estado y ajustan el contador desde DISPONIBLE.
+            self._n_disponibles += 1
         if cil_terminado and cil_terminado.diametro < self.diametro_minimo:
             # El pase ya se aplicó (diámetro real reducido): ahora que quedó por
             # debajo del mínimo, recién se da de BAJA ("rectificar y luego BAJA").
-            cil_terminado.estado = EstadoCilindro.BAJA
+            self._set_estado(cil_terminado, EstadoCilindro.BAJA)
             cil_terminado.registrar_evento(
                 tiempo, "BAJA",
                 f"Diámetro {cil_terminado.diametro:.2f} < {self.diametro_minimo}")
@@ -1337,7 +1366,7 @@ class TallerCilindros:
                 tiempo, "INFO",
                 f"Cilindro {cil_terminado.id} no colocable; re-perfilado "
                 f"producción {_MM_REPERFILADO} mm"))
-            cil_terminado.estado = EstadoCilindro.A_RECTIFICAR
+            self._set_estado(cil_terminado, EstadoCilindro.A_RECTIFICAR)
             cil_terminado.tipo_rectificado_actual = TipoRectificado.PRODUCCION
             cil_terminado.mm_a_rectificar = _MM_REPERFILADO
             cil_terminado.jaula_destino = None
@@ -1614,6 +1643,10 @@ class TallerCilindros:
         # procesa cuando ya no quedan cambios pendientes cae fuera de B (el
         # último cambio, ya desplazado por las PARADAs) y no se entrega.
         self._cambios_pendientes = len(self.eventos_programados)
+        # Baseline del contador de Disponibles tras la carga (lo mantiene
+        # _set_estado en cada transición runtime a partir de acá).
+        self._n_disponibles = sum(
+            1 for c in self.cilindros.values() if c.estado == EstadoCilindro.DISPONIBLE)
         self.generar_snapshot(t_actual)
 
         # Cola de prioridad (heap) por (tiempo, secuencia): push/pop en O(log n)
