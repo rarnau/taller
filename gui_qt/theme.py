@@ -179,7 +179,7 @@ def build_qss() -> str:
         background-color: #232A33;
         border: 1px solid #313A45;
         border-radius: 7px;
-        color: #CFD5DC;
+        color: #E9ECEF;
         min-height: 30px;
         min-width: 0px;
         padding: 2px 2px;

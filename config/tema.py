@@ -141,6 +141,7 @@ KPI_META_BASE = {
     "tiempo_parada_h": {"label": "Tiempo de Parada", "color": KPI_COLOR_ALERT},
     "reposicion_entregados": {"label": "Repuestos (entregados)", "color": KPI_COLOR_OK},
     "reposicion_pendientes": {"label": "Reposición Pendiente", "color": KPI_COLOR_ALERT},
+    "trasvases": {"label": "Trasvases entre Jaulas", "color": KPI_COLOR_RECTIFICADOS},
 }
 
 # Ajustes del mapa de cilindros (Análisis).

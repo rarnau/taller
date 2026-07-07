@@ -8,7 +8,7 @@ en ESTRATEGIAS_SELECCION; la GUI y el CLI la toman de ahí.
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, List, Optional, TypeVar
+from typing import TYPE_CHECKING, Dict, FrozenSet, List, Optional, Set, Tuple, TypeVar
 
 from . import turnos
 from .cilindro import Cilindro
@@ -333,6 +333,227 @@ ESTRATEGIAS_REPOSICION: Dict[str, EstrategiaReposicion] = {
 ESTRATEGIA_REPOSICION_DEFECTO = "ninguna"
 
 
+# ── Estrategias de trasvase de cilindros entre jaulas ────────────────────────
+#
+# Con bandas solapadas y perfiles, una jaula puede quedarse sin cilindros
+# UTILIZABLES (perfil propio) mientras una banda superior tiene excedente
+# diámetro-admisible de otro perfil. La estrategia de trasvase decide,
+# proactivamente, qué cilindros Disponibles re-perfilar (pase de producción de
+# MM_REPERFILADO mm hacia una jaula receptora) para nivelar el stock útil.
+# Se invoca tras cada CAMBIO y tras cada fin de rectificado (ver
+# TallerCilindros._planificar_trasvases); es STATELESS (singleton compartido
+# entre procesos): el contador de la corrida vive en el taller (_trasvases) y
+# los parámetros en la config (taller.trasvase_umbral / trasvase_objetivo).
+# Para agregar una estrategia nueva: subclasar EstrategiaTrasvase y registrarla
+# en ESTRATEGIAS_TRASVASE; la GUI y el CLI la toman de ahí.
+
+# mm del pase de producción de un re-perfilado (cambio de perfil fuera de un
+# cambio programado). Fuente única del valor: el motor lo consume como
+# taller._MM_REPERFILADO (alias) y las estrategias de trasvase lo usan para
+# proyectar el diámetro post-pase de los candidatos.
+MM_REPERFILADO: float = 0.8
+
+
+class EstrategiaTrasvase:
+    """Estrategia de trasvase proactivo de cilindros entre jaulas."""
+
+    clave: str = ""
+    etiqueta: str = ""
+
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo: datetime) -> List[Tuple[Cilindro, int]]:
+        """Devuelve pares (cilindro, jaula receptora) a re-perfilar (puede ser [])."""
+        raise NotImplementedError
+
+
+class _SinTrasvase(EstrategiaTrasvase):
+    """Por defecto: el taller nunca trasvasa (comportamiento histórico)."""
+
+    clave, etiqueta = "ninguno", "Sin trasvase"
+
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo: datetime) -> List[Tuple[Cilindro, int]]:
+        return []
+
+
+class _CascadaUmbral(EstrategiaTrasvase):
+    """Cascada superior → inferior por umbral/objetivo de stock útil.
+
+    Cuando el stock útil de una jaula (``taller.stock_util_por_jaula``: los
+    cilindros que HOY pueden servirla, perfil incluido) cae bajo
+    ``taller.trasvase_umbral``, se re-perfilan Disponibles de bandas
+    **superiores** hacia ella hasta dejarla en ``taller.trasvase_objetivo`` —
+    o lo que se pueda (mejor esfuerzo). Reglas:
+
+    - **Dirección**: el flujo es siempre de rangos superiores a inferiores
+      (rectificar solo reduce diámetro). Un candidato solo puede donarse si
+      todas sus jaulas "dueñas" son estrictamente superiores a la receptora en
+      el orden de bandas (stock sin dueña = stock muerto, se permite siempre).
+      Dueñas de un candidato: su ``jaula_destino`` si está reservado (el caso
+      normal — todo cilindro rectificado queda Disponible con la reserva de su
+      jaula hasta instalarse), o las jaulas donde es admisible si está libre.
+    - **Dos costos de trasvase**: si el candidato ya entra en la receptora por
+      diámetro y perfil (solo lo retiene una reserva a otra jaula), se
+      **reasigna sin pase** (0 mm, disponible al instante). Si no, se
+      re-perfila con **un pase** de ``MM_REPERFILADO`` mm: solo es candidato si
+      el diámetro proyectado cae en la banda receptora y no baja del mínimo.
+      El descenso multi-banda lo cubre la **cascada** de jaulas, no pases
+      encadenados de un mismo cilindro.
+    - **Piso del donante = el umbral**: ninguna donación deja a una jaula
+      donante por debajo del umbral. Un donante puede quedar entre umbral y
+      objetivo: como las jaulas se procesan de inferior a superior, al llegar
+      su turno se rellena desde SUS superiores hasta el objetivo (efecto
+      cascada dentro de la misma ronda).
+    - **Determinismo**: candidatos ordenados por costo (reasignación antes que
+      re-perfilado), luego mayor holgura del donante, mayor diámetro y por
+      último id; jaulas por banda (desde asc, nº asc).
+    """
+
+    clave, etiqueta = "cascada_umbral", "Cascada sup→inf por umbral"
+
+    def planificar(self, taller: "TallerCilindros",
+                   tiempo: datetime) -> List[Tuple[Cilindro, int]]:
+        objetivo = int(getattr(taller, "trasvase_objetivo", 12))
+        umbral = min(int(getattr(taller, "trasvase_umbral", 8)), objetivo)
+
+        # Orden de bandas: inferior primero (por límite superior 'desde'
+        # ascendente; desempate por nº de jaula). Jaulas sin SubStock no juegan.
+        con_banda = [
+            (ss.desde, j)
+            for j in range(1, taller.cantidad_jaulas + 1)
+            if (ss := taller.obtener_substock_por_jaula(j)) is not None
+        ]
+        orden = [j for _, j in sorted(con_banda)]
+        if len(orden) < 2:
+            return []
+        pos = {j: i for i, j in enumerate(orden)}
+
+        usable = dict(taller.stock_util_por_jaula())
+
+        # Candidatos: TODOS los Disponibles, con su set de jaulas "dueñas" (las
+        # que pierden 1 útil si se dona). Un reservado (jaula_destino, el caso
+        # normal tras un rectificado) tiene una única dueña: su reserva; un
+        # libre, las jaulas donde es admisible hoy.
+        candidatos: List[Tuple[Cilindro, FrozenSet[int]]] = []
+        for c in taller.cilindros.values():
+            if c.estado != EstadoCilindro.DISPONIBLE:
+                continue
+            if c.jaula_destino is not None:
+                duenas = (frozenset({int(c.jaula_destino)})
+                          if c.jaula_destino in pos else frozenset())
+            else:
+                duenas = frozenset(j for j in orden if taller._admisible_en_jaula(c, j))
+            candidatos.append((c, duenas))
+
+        plan: List[Tuple[Cilindro, int]] = []
+        elegidos: Set[str] = set()
+        donaron: Set[int] = set()
+
+        for j in orden:  # de inferior a superior: la cascada se resuelve en 1 ronda
+            stock_j = usable.get(j, 0)
+            if not (stock_j < umbral or (j in donaron and stock_j < objetivo)):
+                continue
+            ss_j = taller.obtener_substock_por_jaula(j)
+            deficit = objetivo - stock_j
+            while deficit > 0:
+                mejor: Optional[Tuple[Cilindro, FrozenSet[int]]] = None
+                mejor_orden = None
+                for c, duenas in candidatos:
+                    if c.id in elegidos or j in duenas:
+                        continue  # ya elegido / ya es útil para j (no hace falta nada)
+                    # Reasignación pura: ya entra en j por diámetro y perfil,
+                    # solo lo retiene una reserva a otra jaula (0 mm de costo).
+                    reasignable = (ss_j.contiene_diametro(c.diametro)
+                                   and taller._perfil_compatible(c.perfil, ss_j.perfil))
+                    if not reasignable:
+                        d_fin = round(c.diametro - MM_REPERFILADO, 2)
+                        if d_fin < taller.diametro_minimo or not ss_j.contiene_diametro(d_fin):
+                            continue  # el pase no lo deja dentro de la banda receptora
+                    if any(pos[k] <= pos[j] for k in duenas):
+                        continue  # dirección: solo desde bandas superiores
+                    if any(usable.get(k, 0) - 1 < umbral for k in duenas):
+                        continue  # piso del donante: nunca dejarlo bajo el umbral
+                    holgura = min((usable.get(k, 0) - umbral for k in duenas),
+                                  default=10 ** 9)  # stock muerto: holgura infinita
+                    orden_cand = (0 if reasignable else 1, -holgura, -c.diametro, c.id)
+                    if mejor is None or orden_cand < mejor_orden:
+                        mejor, mejor_orden = (c, duenas), orden_cand
+                if mejor is None:
+                    break  # sin candidatos: mejor esfuerzo ("o intentarlo")
+                c, duenas = mejor
+                elegidos.add(c.id)
+                for k in duenas:
+                    usable[k] = usable.get(k, 0) - 1
+                    donaron.add(k)
+                usable[j] = usable.get(j, 0) + 1
+                plan.append((c, j))
+                deficit -= 1
+        return plan
+
+
+ESTRATEGIAS_TRASVASE: Dict[str, EstrategiaTrasvase] = {
+    e.clave: e for e in (
+        _SinTrasvase(),
+        _CascadaUmbral(),
+    )
+}
+ESTRATEGIA_TRASVASE_DEFECTO = "ninguno"
+
+
+# ── Estrategias de montaje POR JAULA ─────────────────────────────────────────
+#
+# Cuando una jaula toma stock (subir la pareja al CRC, rearmar la pareja de
+# trabajo o la colocación inicial), la estrategia de montaje de ESA jaula
+# decide qué Disponible admisible va primero. Es configuración POR JAULA
+# (campo opcional ``montaje`` de cada entrada de ``rangos`` en
+# user_config.json, como ``perfil``), así que NO entra en FAMILIAS_ESTRATEGIA
+# (esa tabla cablea claves globales del cfg). El motor la consulta vía
+# ``TallerCilindros._ordenar_montaje``; la GUI (columna Montaje de la tabla de
+# rangos) y el CLI (``config jaula set --montaje``) derivan sus opciones de
+# este registro. Son funciones puras de ordenamiento: estables por diámetro
+# únicamente (los empates conservan el orden de inserción, semántica del
+# motor), sin estado.
+
+
+class EstrategiaMontaje:
+    """Orden en que los Disponibles admisibles se montan en una jaula."""
+
+    clave: str = ""
+    etiqueta: str = ""
+
+    def ordenar(self, disponibles: List[Cilindro]) -> List[Cilindro]:
+        """Devuelve los candidatos ordenados (el primero se monta primero)."""
+        raise NotImplementedError
+
+
+class _MontajeMayorDiametro(EstrategiaMontaje):
+    """Histórico (default): primero el de mayor diámetro."""
+
+    clave, etiqueta = "mayor_diametro", "Mayor diámetro"
+
+    def ordenar(self, disponibles: List[Cilindro]) -> List[Cilindro]:
+        # Byte-idéntico al sort histórico del motor (estable, reverse=True).
+        return sorted(disponibles, key=lambda c: c.diametro, reverse=True)
+
+
+class _MontajeMenorDiametro(EstrategiaMontaje):
+    """Primero el de menor diámetro (apura la rotación del stock chico)."""
+
+    clave, etiqueta = "menor_diametro", "Menor diámetro"
+
+    def ordenar(self, disponibles: List[Cilindro]) -> List[Cilindro]:
+        return sorted(disponibles, key=lambda c: c.diametro)
+
+
+ESTRATEGIAS_MONTAJE: Dict[str, EstrategiaMontaje] = {
+    e.clave: e for e in (
+        _MontajeMayorDiametro(),
+        _MontajeMenorDiametro(),
+    )
+}
+ESTRATEGIA_MONTAJE_DEFECTO = "mayor_diametro"
+
+
 # ── Tabla de familias de estrategia ──────────────────────────────────────────
 #
 # Las tres familias (selección / asignación / reposición) se cablean igual en
@@ -363,4 +584,7 @@ FAMILIAS_ESTRATEGIA = (
     FamiliaEstrategia("estrategia_reposicion", "--estrategia-reposicion",
                       "estrategia_reposicion", "Estrategia de reposicion",
                       ESTRATEGIAS_REPOSICION, ESTRATEGIA_REPOSICION_DEFECTO),
+    FamiliaEstrategia("estrategia_trasvase", "--estrategia-trasvase",
+                      "estrategia_trasvase", "Estrategia de trasvase",
+                      ESTRATEGIAS_TRASVASE, ESTRATEGIA_TRASVASE_DEFECTO),
 )

@@ -63,6 +63,13 @@ DEFAULTS: Dict[str, Any] = {
     "estrategia_seleccion": "mayor_diametro",
     "estrategia_asignacion": "jaula_mas_necesitada",
     "estrategia_reposicion": "ninguna",
+    "estrategia_trasvase": "ninguno",
+    # Trasvase proactivo (solo con estrategia_trasvase != "ninguno"): una jaula
+    # bajo 'umbral' de stock útil se rellena hasta 'objetivo' (mejor esfuerzo)
+    # re-perfilando Disponibles de bandas superiores; ningún donante queda bajo
+    # el umbral (la cascada lo repone desde SUS superiores).
+    "trasvase_umbral": 8,
+    "trasvase_objetivo": 12,
     # Generador sintético del Programa_Cambios a partir de la historia real.
     # ``turnos_cambios`` (régimen propio del laminador) se omite ⇒ 24/7; sólo se
     # persiste el dict compacto cuando no es 24/7 (igual que los turnos de máquina).
@@ -216,6 +223,21 @@ def obtener_estrategia_reposicion(cfg: Dict[str, Any]) -> str:
     return str(cfg.get("estrategia_reposicion", DEFAULTS["estrategia_reposicion"]))
 
 
+def obtener_estrategia_trasvase(cfg: Dict[str, Any]) -> str:
+    """Devuelve la clave de la estrategia de trasvase entre jaulas."""
+    return str(cfg.get("estrategia_trasvase", DEFAULTS["estrategia_trasvase"]))
+
+
+def obtener_trasvase_umbral(cfg: Dict[str, Any]) -> int:
+    """Devuelve el umbral de stock útil que dispara el trasvase proactivo."""
+    return int(cfg.get("trasvase_umbral", DEFAULTS["trasvase_umbral"]))
+
+
+def obtener_trasvase_objetivo(cfg: Dict[str, Any]) -> int:
+    """Devuelve el stock útil objetivo por jaula del trasvase proactivo."""
+    return int(cfg.get("trasvase_objetivo", DEFAULTS["trasvase_objetivo"]))
+
+
 def obtener_generador_cambios(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Devuelve la config del generador de cambios (merge con los defaults)."""
     gc = dict(DEFAULTS["generador_cambios"])
@@ -263,11 +285,25 @@ def obtener_montecarlo(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if "master_seed" in user:
         base["master_seed"] = user["master_seed"]
     base["fijos"].update(user.get("fijos", {}) or {})
+    # Selector fijo del trasvase: si el spec no lo trae, arranca en la
+    # estrategia vigente de la config (no en el primer valor del registro).
+    base["fijos"].setdefault("estrategia_trasvase", obtener_estrategia_trasvase(cfg))
 
     rangos_user = user.get("rangos", {}) or {}
     for clave in ("tiempo_enfriado", "tiempo_traslado_crc"):
         if clave in rangos_user:
             base["rangos"][clave] = [float(x) for x in rangos_user[clave]]
+
+    # Rangos del trasvase proactivo: el persistido si existe, si no uno
+    # degenerado [actual, actual] desde la config vigente (equivale a "fijo en
+    # el valor actual": el sorteo devuelve el extremo con rango nulo). El
+    # usuario los abre desde la GUI para barrer umbral/objetivo.
+    for clave, actual in (("trasvase_umbral", obtener_trasvase_umbral(cfg)),
+                          ("trasvase_objetivo", obtener_trasvase_objetivo(cfg))):
+        if clave in rangos_user:
+            base["rangos"][clave] = [float(x) for x in rangos_user[clave]]
+        else:
+            base["rangos"][clave] = [float(actual), float(actual)]
 
     maq_user = rangos_user.get("maquinas", {}) or {}
     maq_out: Dict[str, Any] = {}
@@ -411,18 +447,27 @@ def remove_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:
 
 
 def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float,
-              perfil: Optional[str] = None) -> Dict[str, Any]:
+              perfil: Optional[str] = None,
+              montaje: Optional[str] = None) -> Dict[str, Any]:
     """Crea o actualiza el rango de una jaula. Valida ``desde > hasta``.
 
     ``perfil`` es el perfil (bombatura) exigido por la jaula. Si es ``None`` se
     conserva el perfil ya existente (no se borra al editar sólo el rango); para
-    quitarlo pásese cadena vacía ``""``.
+    quitarlo pásese cadena vacía ``""``. ``montaje`` (estrategia de montaje de
+    la jaula, clave de ``ESTRATEGIAS_MONTAJE``) sigue la misma convención:
+    ``None`` conserva, ``""`` lo quita (vuelve al default mayor_diametro).
     """
+    from modelos.estrategias import ESTRATEGIAS_MONTAJE  # sin ciclo: modelos no importa config
+
     jaula = int(jaula)
     desde, hasta = float(desde), float(hasta)
     if desde <= hasta:
         raise ValueError(f"Jaula {jaula}: 'desde' ({desde}) debe ser mayor que 'hasta' ({hasta}).")
     perfil_norm = None if perfil in (None, "") else str(perfil)
+    if montaje not in (None, "") and montaje not in ESTRATEGIAS_MONTAJE:
+        raise ValueError(
+            f"Estrategia de montaje inválida '{montaje}' "
+            f"(opciones: {', '.join(ESTRATEGIAS_MONTAJE)}).")
     rangos = cfg.setdefault("rangos", [])
     for r in rangos:
         if int(r["jaula"]) == jaula:
@@ -431,10 +476,16 @@ def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float,
                 r.pop("perfil", None)
             elif perfil is not None:
                 r["perfil"] = perfil_norm
+            if montaje == "":
+                r.pop("montaje", None)
+            elif montaje is not None:
+                r["montaje"] = str(montaje)
             return cfg
     nuevo = {"jaula": jaula, "desde": desde, "hasta": hasta}
     if perfil_norm is not None:
         nuevo["perfil"] = perfil_norm
+    if montaje not in (None, ""):
+        nuevo["montaje"] = str(montaje)
     rangos.append(nuevo)
     rangos.sort(key=lambda r: int(r["jaula"]))
     return cfg
@@ -499,12 +550,17 @@ def verificar_coherencia(cfg: Dict[str, Any]) -> None:
 
 def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado: Optional[float] = None,
             max_iteraciones: Optional[int] = None,
+            trasvase_umbral: Optional[int] = None,
+            trasvase_objetivo: Optional[int] = None,
             **estrategias: Optional[str]) -> Dict[str, Any]:
     """Actualiza los parámetros de simulación indicados.
 
     Las estrategias se pasan como kwargs ``estrategia_*`` (clave_cfg de cada
     familia, ver ``FAMILIAS_ESTRATEGIA``): se escribe en ``cfg`` cada una no None.
     Esto evita enumerar cada familia aquí — agregar una nueva no toca ``set_sim``.
+    Nota: umbral y objetivo de trasvase se editan de forma incremental (como el
+    resto de mutadores); si umbral > objetivo, la estrategia usa el menor de
+    ambos como umbral efectivo en runtime.
     """
     if tiempo_enfriado is not None:
         t = round(float(tiempo_enfriado), 1)
@@ -516,6 +572,16 @@ def set_sim(cfg: Dict[str, Any], *, tiempo_enfriado: Optional[float] = None,
         if n <= 0:
             raise ValueError("El máximo de iteraciones debe ser mayor que 0.")
         cfg["max_iteraciones"] = n
+    if trasvase_umbral is not None:
+        n = int(trasvase_umbral)
+        if n <= 0:
+            raise ValueError("El umbral de trasvase debe ser mayor que 0.")
+        cfg["trasvase_umbral"] = n
+    if trasvase_objetivo is not None:
+        n = int(trasvase_objetivo)
+        if n <= 0:
+            raise ValueError("El objetivo de trasvase debe ser mayor que 0.")
+        cfg["trasvase_objetivo"] = n
     for clave, valor in estrategias.items():
         if valor is not None:
             cfg[clave] = str(valor)

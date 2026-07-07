@@ -82,6 +82,10 @@ def calcular_kpis(taller: TallerCilindros) -> Dict[str, Any]:
     reposicion_entregados = int(getattr(taller, "_repo_contador_id", 0))
     reposicion_pendientes = int(getattr(taller, "_repo_pendientes_fuera", 0))
 
+    # Trasvases entre jaulas (re-perfilados proactivos hacia una jaula bajo
+    # umbral, ver ESTRATEGIAS_TRASVASE). Con la estrategia "ninguno" es 0.
+    trasvases = int(getattr(taller, "_trasvases", 0))
+
     # Descomposición de la utilización por máquina (tipo OEE; disponible × neta =
     # utilización global = ocupada / calendario):
     #   - disponible: factor de disponibilidad = tiempo operativo / calendario, donde
@@ -124,6 +128,7 @@ def calcular_kpis(taller: TallerCilindros) -> Dict[str, Any]:
         "tiempo_parada_h": tiempo_parada_h,
         "reposicion_entregados": reposicion_entregados,
         "reposicion_pendientes": reposicion_pendientes,
+        "trasvases": trasvases,
         "utilizacion_maquinas_pct": utilizacion_maquinas,
         "utilizacion_neta_pct": utilizacion_neta,
         "tiempo_falla_pct": tiempo_falla,

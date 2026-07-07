@@ -33,7 +33,8 @@ from config.persistencia import (cargar_config, guardar_config, obtener_maquinas
                                   obtener_tiempo_enfriado)
 from modelos.enums import TipoRectificado
 from modelos.kpis import calcular_kpis
-from modelos.estrategias import ESTRATEGIAS_SELECCION, FAMILIAS_ESTRATEGIA
+from modelos.estrategias import (ESTRATEGIAS_MONTAJE, ESTRATEGIAS_SELECCION,
+                                 FAMILIAS_ESTRATEGIA)
 from modelos import generador_cambios as gencambios
 from modelos import turnos as turnos_mod
 from nucleo.montecarlo import (EspecMonteCarlo, correr_montecarlo, exportar_resumen_csv,
@@ -82,6 +83,8 @@ def _formatear_resumen(kpis: Dict[str, Any]) -> str:
     if kpis.get("reposicion_entregados") or kpis.get("reposicion_pendientes"):
         lineas.append(f"  Repuestos (entregados) : {kpis['reposicion_entregados']}")
         lineas.append(f"  Reposición pendiente   : {kpis['reposicion_pendientes']}")
+    if kpis.get("trasvases"):
+        lineas.append(f"  Trasvases entre jaulas : {kpis['trasvases']}")
     lineas.append("  Utilización de máquinas (disponible / neta):")
     for nombre, pct in kpis["utilizacion_maquinas_pct"].items():
         neta = kpis["utilizacion_neta_pct"].get(nombre, 0.0)
@@ -174,12 +177,17 @@ def _cmd_config(args: argparse.Namespace) -> int:
             estr_kwargs = {fam.clave_cfg: getattr(args, fam.dest_cli)
                            for fam in FAMILIAS_ESTRATEGIA}
             cfgmod.set_sim(cfg, tiempo_enfriado=args.tiempo_enfriado,
-                           max_iteraciones=args.max_iteraciones, **estr_kwargs)
+                           max_iteraciones=args.max_iteraciones,
+                           trasvase_umbral=args.trasvase_umbral,
+                           trasvase_objetivo=args.trasvase_objetivo,
+                           **estr_kwargs)
             guardar_config(cfg)
             estr_txt = ", ".join(f"{fam.clave_cfg}={cfg.get(fam.clave_cfg, fam.defecto)}"
                                  for fam in FAMILIAS_ESTRATEGIA)
             print(f"Parámetros de simulación: tiempo_enfriado_h="
                   f"{obtener_tiempo_enfriado(cfg)}, max_iteraciones={obtener_max_iteraciones(cfg)}, "
+                  f"trasvase_umbral={cfgmod.obtener_trasvase_umbral(cfg)}, "
+                  f"trasvase_objetivo={cfgmod.obtener_trasvase_objetivo(cfg)}, "
                   f"{estr_txt}")
             return 0
 
@@ -256,10 +264,14 @@ def _cmd_config_jaula(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
         for r in obtener_rangos(cfg):
             perfil = r.get("perfil")
             extra = f" | perfil {perfil}" if perfil not in (None, "") else ""
+            montaje = r.get("montaje")
+            if montaje not in (None, ""):
+                extra += f" | montaje {montaje}"
             print(f"  Jaula {r['jaula']}: {r['hasta']} < d ≤ {r['desde']} mm{extra}")
         return 0
     if accion == "set":
-        cfgmod.set_rango(cfg, args.jaula, args.desde, args.hasta, perfil=args.perfil)
+        cfgmod.set_rango(cfg, args.jaula, args.desde, args.hasta,
+                         perfil=args.perfil, montaje=args.montaje)
         guardar_config(cfg)
         print(f"Rango de la jaula {args.jaula} actualizado.")
         _avisar_incoherencias(cfg)
@@ -539,6 +551,10 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_simcfg = csub.add_parser("sim", help="Edita los parámetros de simulación.")
     p_simcfg.add_argument("--tiempo-enfriado", type=float)
     p_simcfg.add_argument("--max-iteraciones", type=int)
+    p_simcfg.add_argument("--trasvase-umbral", type=int, metavar="N",
+                          help="Stock útil bajo el cual una jaula dispara el trasvase proactivo.")
+    p_simcfg.add_argument("--trasvase-objetivo", type=int, metavar="N",
+                          help="Stock útil objetivo al que se rellena una jaula trasvasada.")
     # Un flag por familia de estrategia, derivado de la tabla (agregar una
     # familia nueva no requiere tocar el CLI).
     for fam in FAMILIAS_ESTRATEGIA:
@@ -568,6 +584,9 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_jau.add_argument("--desde", type=float)
     p_jau.add_argument("--hasta", type=float)
     p_jau.add_argument("--perfil", help="Perfil (bombatura) de la jaula; \"\" lo quita.")
+    p_jau.add_argument("--montaje", choices=list(ESTRATEGIAS_MONTAJE) + [""],
+                       help="Estrategia de montaje de la jaula (qué Disponible sube "
+                            "primero al CRC); \"\" vuelve al default (mayor_diametro).")
 
     p_gen = csub.add_parser("generador", help="Edita la config del generador de cambios.")
     p_gen.add_argument("--generador", choices=list(gencambios.GENERADORES_CAMBIOS))
