@@ -86,7 +86,11 @@ def build_sidebar(window: Any, slider_cls: type[QSlider]) -> QFrame:
     transport = QHBoxLayout()
     transport.setContentsMargins(0, 0, 0, 0)
     transport.setSpacing(5)
-    window.btn_prev = QPushButton("⏮")
+    # Glifos geométricos (◀ ■ ▶, presentación de TEXTO) y no ⏮/⏹/⏭: esos
+    # puntos de código tienen presentación emoji en Windows y se dibujan como
+    # iconos de color (Segoe UI Emoji) en vez de texto plano como el ▶ del
+    # botón de Monte Carlo.
+    window.btn_prev = QPushButton("◀◀")
     window.btn_prev.setObjectName("PlaybackButton")
     window.btn_prev.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     window.btn_prev.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -101,14 +105,14 @@ def build_sidebar(window: Any, slider_cls: type[QSlider]) -> QFrame:
     window.btn_play.clicked.connect(window._toggle_play)
     transport.addWidget(window.btn_play, 2)
 
-    window.btn_stop = QPushButton("⏹")
+    window.btn_stop = QPushButton("■")
     window.btn_stop.setObjectName("PlaybackButton")
     window.btn_stop.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     window.btn_stop.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     window.btn_stop.clicked.connect(window._stop_play)
     transport.addWidget(window.btn_stop, 1)
 
-    window.btn_next = QPushButton("⏭")
+    window.btn_next = QPushButton("▶▶")
     window.btn_next.setObjectName("PlaybackButton")
     window.btn_next.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     window.btn_next.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
