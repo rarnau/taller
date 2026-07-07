@@ -825,9 +825,19 @@ class TallerCilindros:
                 if c.jaula in stock:
                     stock[c.jaula] += 1
             elif c.estado == EstadoCilindro.DISPONIBLE:
-                for j in stock:
-                    if self._admisible_en_jaula(c, j):
-                        stock[j] += 1
+                # Un Disponible RESERVADO es admisible solo en su destino
+                # (``_admisible_en_jaula`` devuelve ``jaula_destino == j``), así
+                # que se cuenta directo sin recorrer todas las jaulas — mid-run
+                # casi todos los Disponibles están reservados (ver diseño del
+                # trasvase), y esto evita el O(jaulas)·admisible por cilindro
+                # que dominaba el perfil. Byte-idéntico al loop original.
+                if c.jaula_destino is not None:
+                    if c.jaula_destino in stock:
+                        stock[c.jaula_destino] += 1
+                else:
+                    for j in stock:
+                        if self._admisible_en_jaula(c, j):
+                            stock[j] += 1
             elif c.estado in en_camino and c.jaula_destino in stock:
                 stock[c.jaula_destino] += 1
         return stock

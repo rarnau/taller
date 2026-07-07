@@ -430,6 +430,15 @@ class _CascadaUmbral(EstrategiaTrasvase):
 
         usable = dict(taller.stock_util_por_jaula())
 
+        # Early-out: si ninguna jaula arranca bajo umbral, el plan es vacío. La
+        # cascada solo marca una jaula donante (``donaron``) DESPUÉS de que una
+        # jaula bajo umbral tire de ella, así que sin ninguna jaula bajo umbral
+        # el bucle de abajo no dispara nada. Evita construir la lista completa
+        # de candidatos en cada evento con el stock sano (el caso normal), que
+        # es donde se iba el grueso del tiempo. Byte-idéntico.
+        if all(usable.get(j, 0) >= umbral for j in orden):
+            return []
+
         # Candidatos: TODOS los Disponibles, con su set de jaulas "dueñas" (las
         # que pierden 1 útil si se dona). Un reservado (jaula_destino, el caso
         # normal tras un rectificado) tiene una única dueña: su reserva; un
