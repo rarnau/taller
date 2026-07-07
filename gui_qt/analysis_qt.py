@@ -98,4 +98,5 @@ class AnalysisPanel(QWidget):
         else:
             frac = max(0.0, min(1.0, idx / (total - 1)))
         self.chart_map.set_snapshot_index(idx)
+        self.chart_dist.set_snapshot_index(idx)
         self.chart_substock.set_cursor_frac(frac)
