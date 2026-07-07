@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QDoubleSpinBox,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -203,8 +204,16 @@ class MonteCarloPanel(QWidget):
         nl.addLayout(self._fila_widget("Número de corridas", self.sp_runs))
         nl.addLayout(presets)
         self.sp_runs.valueChanged.connect(self._sync_run_presets)
-        self.sp_seed = QSpinBox()
-        self.sp_seed.setRange(0, 2_000_000_000)
+        # QDoubleSpinBox con 0 decimales (no QSpinBox): las master seeds que
+        # resuelve resolver_seed son uint32 (hasta 4_294_967_295) y desbordan
+        # el int32 de QSpinBox al reabrir/reanudar un set (OverflowError con
+        # seeds > 2^31-1). El double cubre el rango completo y clampea sin
+        # lanzar si llegara un valor fuera de rango.
+        self.sp_seed = QDoubleSpinBox()
+        self.sp_seed.setDecimals(0)
+        self.sp_seed.setRange(0, 4_294_967_295)
+        self.sp_seed.setSingleStep(1)
+        self.sp_seed.setGroupSeparatorShown(False)
         self.sp_seed.setSpecialValueText("aleatoria")
         nl.addLayout(self._fila_widget("Master seed (0 = aleatoria)", self.sp_seed))
         self.chk_dump = QCheckBox("Volcar tallers a disco")
@@ -276,7 +285,7 @@ class MonteCarloPanel(QWidget):
         lab = QLabel(label)
         lab.setStyleSheet(f"color:{tema.FG2}; font-size:11px;")
         box.addWidget(lab)
-        if isinstance(widget, (QComboBox, QSpinBox)):
+        if isinstance(widget, (QComboBox, QSpinBox, QDoubleSpinBox)):
             widget.setMinimumHeight(28)
         box.addWidget(widget)
         return box
@@ -377,7 +386,7 @@ class MonteCarloPanel(QWidget):
 
         return {
             "runs": self.sp_runs.value(),
-            "master_seed": (self.sp_seed.value() or None),
+            "master_seed": (int(self.sp_seed.value()) or None),
             # Cada chunk refresca progreso Y gráficos parciales ⇒ 10% del total.
             "chunk": max(1, self.sp_runs.value() // 10),
             "fijos": {
