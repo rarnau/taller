@@ -15,13 +15,13 @@ from config import tema
 
 
 class _LegendSwatch(QFrame):
-    """Cuadradito de color para la leyenda."""
+    """Punto de color para la leyenda."""
 
     def __init__(self, color: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedSize(10, 10)
         self.setStyleSheet(
-            f"background-color: {color}; border-radius: 2px;"
+            f"background-color: {color}; border-radius: 5px;"
         )
 
 

@@ -45,8 +45,8 @@ class DashboardPanel(QWidget):
         # por máquina / globales). Los chips se reconstruyen en render() según
         # la cantidad de jaulas del taller.
         self._filter_bar = QHBoxLayout()
-        self._filter_bar.setContentsMargins(2, 0, 2, 0)
-        self._filter_bar.setSpacing(6)
+        self._filter_bar.setContentsMargins(2, 2, 2, 6)
+        self._filter_bar.setSpacing(8)
         lbl = QLabel("JAULA")
         lbl.setObjectName("BoardHeader")
         lbl.setProperty("muted", "true")
@@ -89,12 +89,13 @@ class DashboardPanel(QWidget):
     def _build_cards(self) -> None:
         self.card_estados = DashboardCard("Evolución temporal de estados")
         self.btn_ocultar_bajas = QPushButton("Ocultar bajas")
-        self.btn_ocultar_bajas.setObjectName("PlaybackButton")
+        self.btn_ocultar_bajas.setObjectName("DashboardCardToggle")
         self.btn_ocultar_bajas.setCheckable(True)
         self.btn_ocultar_bajas.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_ocultar_bajas.toggled.connect(self._on_ocultar_bajas)
         self.card_estados.add_header_action(self.btn_ocultar_bajas)
         self.card_estados.add_content(self.chart_estados)
+        self.card_estados.set_legend([(tema.COLORES_ESTADO_DASH[e], e) for e in tema.COLORES_ESTADO_DASH])
 
         self.card_buffer = DashboardCard("Buffer de seguridad global")
         self.card_buffer.add_content(self.chart_buffer)
@@ -138,7 +139,7 @@ class DashboardPanel(QWidget):
         pos = self._filter_bar.count() - 1
         for jid, texto in [(0, "Todas")] + [(j, f"J{j}") for j in jaulas]:
             chip = QPushButton(texto)
-            chip.setObjectName("PlaybackSpeedButton")
+            chip.setObjectName("DashboardJaulaChip")
             chip.setCheckable(True)
             chip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             chip.setChecked(jid == self._jaula_sel)
