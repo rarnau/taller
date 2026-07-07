@@ -19,6 +19,7 @@ from .estrategias import (
     ESTRATEGIAS_ASIGNACION, ESTRATEGIA_ASIGNACION_DEFECTO,
     ESTRATEGIAS_REPOSICION, ESTRATEGIA_REPOSICION_DEFECTO, PedidoReposicion,
     ESTRATEGIAS_TRASVASE, ESTRATEGIA_TRASVASE_DEFECTO, MM_REPERFILADO,
+    ESTRATEGIAS_MONTAJE, ESTRATEGIA_MONTAJE_DEFECTO,
     FAMILIAS_ESTRATEGIA, resolver as _resolver_estrategia,
 )
 from . import turnos as turnos_mod
@@ -219,9 +220,11 @@ class TallerCilindros:
             desde = float(r["desde"])
             hasta = float(r["hasta"])
             perfil = _normalizar_perfil(r.get("perfil"))
+            montaje = str(r.get("montaje") or ESTRATEGIA_MONTAJE_DEFECTO)
             nombre = f"SS{jaula} ({hasta:.0f}-{desde:.0f})"
             self.lista_substocks.append(
-                SubStock(nombre, jaula, desde, hasta, jaula_asignada=jaula, perfil=perfil))
+                SubStock(nombre, jaula, desde, hasta, jaula_asignada=jaula,
+                         perfil=perfil, montaje=montaje))
         self._reindexar_substocks()
 
     def _reindexar_substocks(self) -> None:
@@ -541,9 +544,8 @@ class TallerCilindros:
                     cil.jaula = j_id
                     jaula.cilindros_trabajando.append(cil)
                     continue
-                disponibles = sorted(
-                    self.obtener_disponibles_para_jaula(j_id), key=lambda c: c.diametro, reverse=True
-                )
+                disponibles = self._ordenar_montaje(
+                    j_id, self.obtener_disponibles_para_jaula(j_id))
                 if disponibles:
                     cil = disponibles[0]
                     cil.estado = EstadoCilindro.TRABAJANDO
@@ -608,10 +610,8 @@ class TallerCilindros:
 
         candidatos = list(jaula.cilindros_crc)
         if len(candidatos) < faltan:
-            admisibles = sorted(
-                self.obtener_disponibles_para_jaula(jaula_id, disponibles),
-                key=lambda c: c.diametro, reverse=True
-            )
+            admisibles = self._ordenar_montaje(
+                jaula_id, self.obtener_disponibles_para_jaula(jaula_id, disponibles))
             candidatos += [c for c in admisibles if c not in candidatos]
 
         if len(candidatos) < faltan:
@@ -880,6 +880,19 @@ class TallerCilindros:
     def obtener_cola_rectificado(self) -> List[Cilindro]:
         """Obtiene la lista de cilindros esperando rectificado."""
         return self.obtener_cilindros_por_estado(EstadoCilindro.A_RECTIFICAR)
+
+    def _ordenar_montaje(self, jaula_id: int, disponibles: List[Cilindro]) -> List[Cilindro]:
+        """Ordena los candidatos a montarse en una jaula según SU estrategia.
+
+        Punto único de los tres sitios de montaje (colocación inicial, rearme
+        de pareja y subida al CRC). La estrategia es por jaula
+        (``SubStock.montaje``, registro ESTRATEGIAS_MONTAJE); ausente o
+        desconocida ⇒ mayor diámetro, byte-idéntico al sort histórico.
+        """
+        ss = self.obtener_substock_por_jaula(jaula_id)
+        clave = getattr(ss, "montaje", ESTRATEGIA_MONTAJE_DEFECTO) if ss else ESTRATEGIA_MONTAJE_DEFECTO
+        estrategia = ESTRATEGIAS_MONTAJE.get(clave, ESTRATEGIAS_MONTAJE[ESTRATEGIA_MONTAJE_DEFECTO])
+        return estrategia.ordenar(disponibles)
 
     @staticmethod
     def _tipo_efectivo(cil: Cilindro, maq: MaquinaRectificadora) -> TipoRectificado:
@@ -1165,9 +1178,8 @@ class TallerCilindros:
         if necesarios <= 0:
             return True
 
-        disponibles = sorted(
-            self.obtener_disponibles_para_jaula(jaula_id), key=lambda c: c.diametro, reverse=True
-        )
+        disponibles = self._ordenar_montaje(
+            jaula_id, self.obtener_disponibles_para_jaula(jaula_id))
         if len(disponibles) < necesarios:
             return False  # pareja incompleta: no se coloca un cilindro suelto en el CRC
 

@@ -447,18 +447,27 @@ def remove_maquina(cfg: Dict[str, Any], nombre: str) -> Dict[str, Any]:
 
 
 def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float,
-              perfil: Optional[str] = None) -> Dict[str, Any]:
+              perfil: Optional[str] = None,
+              montaje: Optional[str] = None) -> Dict[str, Any]:
     """Crea o actualiza el rango de una jaula. Valida ``desde > hasta``.
 
     ``perfil`` es el perfil (bombatura) exigido por la jaula. Si es ``None`` se
     conserva el perfil ya existente (no se borra al editar sólo el rango); para
-    quitarlo pásese cadena vacía ``""``.
+    quitarlo pásese cadena vacía ``""``. ``montaje`` (estrategia de montaje de
+    la jaula, clave de ``ESTRATEGIAS_MONTAJE``) sigue la misma convención:
+    ``None`` conserva, ``""`` lo quita (vuelve al default mayor_diametro).
     """
+    from modelos.estrategias import ESTRATEGIAS_MONTAJE  # sin ciclo: modelos no importa config
+
     jaula = int(jaula)
     desde, hasta = float(desde), float(hasta)
     if desde <= hasta:
         raise ValueError(f"Jaula {jaula}: 'desde' ({desde}) debe ser mayor que 'hasta' ({hasta}).")
     perfil_norm = None if perfil in (None, "") else str(perfil)
+    if montaje not in (None, "") and montaje not in ESTRATEGIAS_MONTAJE:
+        raise ValueError(
+            f"Estrategia de montaje inválida '{montaje}' "
+            f"(opciones: {', '.join(ESTRATEGIAS_MONTAJE)}).")
     rangos = cfg.setdefault("rangos", [])
     for r in rangos:
         if int(r["jaula"]) == jaula:
@@ -467,10 +476,16 @@ def set_rango(cfg: Dict[str, Any], jaula: int, desde: float, hasta: float,
                 r.pop("perfil", None)
             elif perfil is not None:
                 r["perfil"] = perfil_norm
+            if montaje == "":
+                r.pop("montaje", None)
+            elif montaje is not None:
+                r["montaje"] = str(montaje)
             return cfg
     nuevo = {"jaula": jaula, "desde": desde, "hasta": hasta}
     if perfil_norm is not None:
         nuevo["perfil"] = perfil_norm
+    if montaje not in (None, ""):
+        nuevo["montaje"] = str(montaje)
     rangos.append(nuevo)
     rangos.sort(key=lambda r: int(r["jaula"]))
     return cfg

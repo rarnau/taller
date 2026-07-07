@@ -33,7 +33,8 @@ from config.persistencia import (cargar_config, guardar_config, obtener_maquinas
                                   obtener_tiempo_enfriado)
 from modelos.enums import TipoRectificado
 from modelos.kpis import calcular_kpis
-from modelos.estrategias import ESTRATEGIAS_SELECCION, FAMILIAS_ESTRATEGIA
+from modelos.estrategias import (ESTRATEGIAS_MONTAJE, ESTRATEGIAS_SELECCION,
+                                 FAMILIAS_ESTRATEGIA)
 from modelos import generador_cambios as gencambios
 from modelos import turnos as turnos_mod
 from nucleo.montecarlo import (EspecMonteCarlo, correr_montecarlo, exportar_resumen_csv,
@@ -263,10 +264,14 @@ def _cmd_config_jaula(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
         for r in obtener_rangos(cfg):
             perfil = r.get("perfil")
             extra = f" | perfil {perfil}" if perfil not in (None, "") else ""
+            montaje = r.get("montaje")
+            if montaje not in (None, ""):
+                extra += f" | montaje {montaje}"
             print(f"  Jaula {r['jaula']}: {r['hasta']} < d ≤ {r['desde']} mm{extra}")
         return 0
     if accion == "set":
-        cfgmod.set_rango(cfg, args.jaula, args.desde, args.hasta, perfil=args.perfil)
+        cfgmod.set_rango(cfg, args.jaula, args.desde, args.hasta,
+                         perfil=args.perfil, montaje=args.montaje)
         guardar_config(cfg)
         print(f"Rango de la jaula {args.jaula} actualizado.")
         _avisar_incoherencias(cfg)
@@ -579,6 +584,9 @@ def _construir_parser() -> argparse.ArgumentParser:
     p_jau.add_argument("--desde", type=float)
     p_jau.add_argument("--hasta", type=float)
     p_jau.add_argument("--perfil", help="Perfil (bombatura) de la jaula; \"\" lo quita.")
+    p_jau.add_argument("--montaje", choices=list(ESTRATEGIAS_MONTAJE) + [""],
+                       help="Estrategia de montaje de la jaula (qué Disponible sube "
+                            "primero al CRC); \"\" vuelve al default (mayor_diametro).")
 
     p_gen = csub.add_parser("generador", help="Edita la config del generador de cambios.")
     p_gen.add_argument("--generador", choices=list(gencambios.GENERADORES_CAMBIOS))

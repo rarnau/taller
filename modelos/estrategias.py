@@ -500,6 +500,60 @@ ESTRATEGIAS_TRASVASE: Dict[str, EstrategiaTrasvase] = {
 ESTRATEGIA_TRASVASE_DEFECTO = "ninguno"
 
 
+# ── Estrategias de montaje POR JAULA ─────────────────────────────────────────
+#
+# Cuando una jaula toma stock (subir la pareja al CRC, rearmar la pareja de
+# trabajo o la colocación inicial), la estrategia de montaje de ESA jaula
+# decide qué Disponible admisible va primero. Es configuración POR JAULA
+# (campo opcional ``montaje`` de cada entrada de ``rangos`` en
+# user_config.json, como ``perfil``), así que NO entra en FAMILIAS_ESTRATEGIA
+# (esa tabla cablea claves globales del cfg). El motor la consulta vía
+# ``TallerCilindros._ordenar_montaje``; la GUI (columna Montaje de la tabla de
+# rangos) y el CLI (``config jaula set --montaje``) derivan sus opciones de
+# este registro. Son funciones puras de ordenamiento: estables por diámetro
+# únicamente (los empates conservan el orden de inserción, semántica del
+# motor), sin estado.
+
+
+class EstrategiaMontaje:
+    """Orden en que los Disponibles admisibles se montan en una jaula."""
+
+    clave: str = ""
+    etiqueta: str = ""
+
+    def ordenar(self, disponibles: List[Cilindro]) -> List[Cilindro]:
+        """Devuelve los candidatos ordenados (el primero se monta primero)."""
+        raise NotImplementedError
+
+
+class _MontajeMayorDiametro(EstrategiaMontaje):
+    """Histórico (default): primero el de mayor diámetro."""
+
+    clave, etiqueta = "mayor_diametro", "Mayor diámetro"
+
+    def ordenar(self, disponibles: List[Cilindro]) -> List[Cilindro]:
+        # Byte-idéntico al sort histórico del motor (estable, reverse=True).
+        return sorted(disponibles, key=lambda c: c.diametro, reverse=True)
+
+
+class _MontajeMenorDiametro(EstrategiaMontaje):
+    """Primero el de menor diámetro (apura la rotación del stock chico)."""
+
+    clave, etiqueta = "menor_diametro", "Menor diámetro"
+
+    def ordenar(self, disponibles: List[Cilindro]) -> List[Cilindro]:
+        return sorted(disponibles, key=lambda c: c.diametro)
+
+
+ESTRATEGIAS_MONTAJE: Dict[str, EstrategiaMontaje] = {
+    e.clave: e for e in (
+        _MontajeMayorDiametro(),
+        _MontajeMenorDiametro(),
+    )
+}
+ESTRATEGIA_MONTAJE_DEFECTO = "mayor_diametro"
+
+
 # ── Tabla de familias de estrategia ──────────────────────────────────────────
 #
 # Las tres familias (selección / asignación / reposición) se cablean igual en

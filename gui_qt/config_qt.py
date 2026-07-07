@@ -45,7 +45,8 @@ from config.persistencia import (
     set_sim,
 )
 from modelos import turnos as turnos_mod
-from modelos.estrategias import FAMILIAS_ESTRATEGIA
+from modelos.estrategias import (ESTRATEGIA_MONTAJE_DEFECTO, ESTRATEGIAS_MONTAJE,
+                                 FAMILIAS_ESTRATEGIA)
 from gui_qt.widgets import StyledTableWidget, make_config_cell_input, make_priority_combo
 
 
@@ -312,13 +313,14 @@ class ConfigPanel(QWidget):
         lbl.setObjectName("CardTitle")
         col.addWidget(lbl)
 
-        note = QLabel("Convención: hasta < diámetro <= desde. Perfil vacío = sin restricción.")
+        note = QLabel("Convención: hasta < diámetro <= desde. Perfil vacío = sin restricción. "
+                      "Montaje: qué Disponible sube primero al CRC/jaula.")
         note.setObjectName("Muted")
         col.addWidget(note)
 
-        self.tbl_ranges = StyledTableWidget(0, 4, self)
+        self.tbl_ranges = StyledTableWidget(0, 5, self)
         self.tbl_ranges.setObjectName("ConfigTable")
-        self.tbl_ranges.setHorizontalHeaderLabels(["Jaula", "Desde", "Hasta", "Perfil"])
+        self.tbl_ranges.setHorizontalHeaderLabels(["Jaula", "Desde", "Hasta", "Perfil", "Montaje"])
         self.tbl_ranges.apply_base_defaults()
         self.tbl_ranges.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self.tbl_ranges.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
@@ -515,12 +517,16 @@ class ConfigPanel(QWidget):
             desde = self._parse_float(self.tbl_ranges, row, 1, "Desde")
             hasta = self._parse_float(self.tbl_ranges, row, 2, "Hasta")
             perfil_txt = self.tbl_ranges.item(row, 3).text().strip()
+            montaje = self._montaje_de_fila(row)
             set_rango(
                 new_cfg,
                 jaula,
                 desde,
                 hasta,
                 perfil=perfil_txt,
+                # El default no se persiste (campo ausente = mayor_diametro),
+                # igual que el perfil vacío.
+                montaje="" if montaje in ("", ESTRATEGIA_MONTAJE_DEFECTO) else montaje,
             )
 
         # Si cambian los parámetros de una máquina (tasas o falla), se descarta
@@ -611,6 +617,8 @@ class ConfigPanel(QWidget):
             self.tbl_ranges.setItem(i, 1, QTableWidgetItem(str(row_data.get("desde", ""))))
             self.tbl_ranges.setItem(i, 2, QTableWidgetItem(str(row_data.get("hasta", ""))))
             self.tbl_ranges.setItem(i, 3, QTableWidgetItem(str(row_data.get("perfil", ""))))
+            self.tbl_ranges.setCellWidget(
+                i, 4, self._make_montaje_combo(str(row_data.get("montaje", "") or "")))
         self.tbl_ranges.blockSignals(False)
 
     def _populate_machines_table(self) -> None:
@@ -668,19 +676,37 @@ class ConfigPanel(QWidget):
                 "desde": self.tbl_ranges.item(row, 1).text() if self.tbl_ranges.item(row, 1) else "",
                 "hasta": self.tbl_ranges.item(row, 2).text() if self.tbl_ranges.item(row, 2) else "",
                 "perfil": self.tbl_ranges.item(row, 3).text() if self.tbl_ranges.item(row, 3) else "",
+                "montaje": self._montaje_de_fila(row),
             }
 
         cantidad = self.sp_jaulas.value()
         self.tbl_ranges.setRowCount(cantidad)
         for i in range(cantidad):
             jaula = i + 1
-            data = prev.get(jaula, {"desde": "", "hasta": "", "perfil": ""})
+            data = prev.get(jaula, {"desde": "", "hasta": "", "perfil": "", "montaje": ""})
             it_jaula = QTableWidgetItem(str(jaula))
             it_jaula.setFlags(it_jaula.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.tbl_ranges.setItem(i, 0, it_jaula)
             self.tbl_ranges.setItem(i, 1, QTableWidgetItem(data["desde"]))
             self.tbl_ranges.setItem(i, 2, QTableWidgetItem(data["hasta"]))
             self.tbl_ranges.setItem(i, 3, QTableWidgetItem(data["perfil"]))
+            self.tbl_ranges.setCellWidget(i, 4, self._make_montaje_combo(data["montaje"]))
+
+    def _make_montaje_combo(self, clave: str) -> QComboBox:
+        """Combo por fila con las estrategias de montaje del registro."""
+        combo = QComboBox(self.tbl_ranges)
+        combo.setObjectName("ConfigCellCombo")
+        for k, estr in ESTRATEGIAS_MONTAJE.items():
+            combo.addItem(estr.etiqueta, k)
+        idx = combo.findData(clave or ESTRATEGIA_MONTAJE_DEFECTO)
+        combo.setCurrentIndex(idx if idx >= 0 else 0)
+        combo.setMaximumHeight(30)
+        return combo
+
+    def _montaje_de_fila(self, row: int) -> str:
+        """Clave de montaje elegida en una fila de rangos ('' si no hay combo)."""
+        w = self.tbl_ranges.cellWidget(row, 4)
+        return str(w.currentData()) if isinstance(w, QComboBox) else ""
 
     def _parse_float(self, table: QTableWidget, row: int, col: int, title: str) -> float:
         """Lee y valida un float de una celda (maneja QLineEdit o item via _cell_text).
