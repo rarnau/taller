@@ -1014,6 +1014,10 @@ class TallerCilindros:
                         cs[estado_val] = cs.get(estado_val, 0) + 1
                 j_attr = self._jaula_atribuida(c)
                 sn.activos_por_jaula[j_attr] = sn.activos_por_jaula.get(j_attr, 0) + 1
+                # Conteo por estado y jaula (misma atribución única): fuente del
+                # filtro por jaula del Dashboard. Reusa j_attr (sin re-calcular).
+                ce = sn.conteo_estado_por_jaula.setdefault(j_attr, {})
+                ce[estado_val] = ce.get(estado_val, 0) + 1
                 # Disponibles con atribución única (reserva primero, si no la
                 # banda de menor jaula): alimenta disponibles_por_substock sin
                 # contar dos veces con bandas solapadas (la suma de las barras

@@ -82,6 +82,11 @@ class DashboardData:
     gantt: Dict[str, List[Tuple[datetime, datetime, str]]]
     paradas_turno: Dict[str, List[Tuple[datetime, datetime]]] = field(default_factory=dict)
     tramos_falla: Dict[str, List[Tuple[datetime, datetime]]] = field(default_factory=dict)
+    # Filtro por jaula del Dashboard (evolución de estados y buffer): ids de
+    # jaula y series por estado con atribución única (Snapshot.conteo_estado_por_jaula).
+    # 'Todas' usa las series globales de arriba; cada Jn usa estas.
+    jaulas: List[int] = field(default_factory=list)
+    series_estado_por_jaula: Dict[int, Dict[str, List[int]]] = field(default_factory=dict)
 
     @property
     def t0(self) -> datetime:
@@ -114,6 +119,17 @@ def extraer_datos_dashboard(taller) -> DashboardData:
     crc = [s.cantidad_crc_total for s in snaps]
     buffer = [d + c for d, c in zip(disponibles, crc)]
 
+    # Series por jaula (atribución única) para el filtro del Dashboard. La
+    # evolución por Jn y su buffer Disp/CRC salen de conteo_estado_por_jaula
+    # (vacío en modo liviano, pero el Dashboard siempre corre snapshots full).
+    jaulas = list(range(1, int(getattr(taller, "cantidad_jaulas", 0)) + 1))
+    series_estado_por_jaula: Dict[int, Dict[str, List[int]]] = {}
+    for j in jaulas:
+        series_estado_por_jaula[j] = {
+            e: [s.conteo_estado_por_jaula.get(j, {}).get(e, 0) for s in snaps]
+            for e in estados
+        }
+
     kpis = calcular_kpis(taller)
     util_disp = dict(kpis["utilizacion_maquinas_pct"])
     util_neta = dict(kpis["utilizacion_neta_pct"])
@@ -145,4 +161,6 @@ def extraer_datos_dashboard(taller) -> DashboardData:
         gantt=gantt,
         paradas_turno=paradas_turno,
         tramos_falla=tramos_falla,
+        jaulas=jaulas,
+        series_estado_por_jaula=series_estado_por_jaula,
     )
