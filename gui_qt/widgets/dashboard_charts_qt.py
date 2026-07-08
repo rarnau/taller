@@ -29,6 +29,32 @@ def _qc(hex_str: str, alpha: int = 255) -> QColor:
     return c
 
 
+# Tope de puntos que se dibujan en las series temporales. Con más snapshots que
+# esto, se **decima** a puntos equiespaciados (>1 por pixel a los anchos usuales,
+# sin pérdida visible). Reconstruir polígonos de decenas de miles de puntos en
+# CADA tick del cursor no alcanza a seguir el playback a alta velocidad; con la
+# serie decimada el repintado por tick es varias veces más barato, así la
+# velocidad de reproducción también escala en Dashboard y Análisis.
+_MAX_PUNTOS_SERIE = 2000
+
+
+def _indices_decimados(n: int, maxn: int = _MAX_PUNTOS_SERIE) -> "List[int] | None":
+    """Índices equiespaciados (<= ``maxn``) que preservan el primero y el último.
+
+    Devuelve ``None`` si no hace falta decimar (``n <= maxn``). Preservar el
+    índice 0 y ``n-1`` mantiene ``t0``/``t1`` y los extremos de las series, así
+    las posiciones X (proporcionales al tiempo real de cada punto muestreado)
+    y el eje quedan correctos.
+    """
+    if n <= maxn:
+        return None
+    k = -(-n // maxn)  # ceil(n / maxn)
+    idx = list(range(0, n, k))
+    if idx[-1] != n - 1:
+        idx.append(n - 1)
+    return idx
+
+
 def _fmt_fecha(dt: datetime, span_days: float) -> str:
     """Etiqueta de eje temporal según el largo de la ventana (igual que el dashboard MPL)."""
     if span_days > 365:
@@ -118,6 +144,10 @@ class StackedAreaChart(_TimeChart):
         self._colores: Dict[str, str] = {}
 
     def set_data(self, tiempos, estados, series, colores) -> None:
+        idx = _indices_decimados(len(tiempos))
+        if idx is not None:
+            tiempos = [tiempos[i] for i in idx]
+            series = {e: [v[i] for i in idx] for e, v in series.items()}
         self.set_tiempos(tiempos)
         self._estados = list(estados)
         self._series = series
@@ -170,6 +200,12 @@ class BufferChart(_TimeChart):
         self._buffer: List[int] = []
 
     def set_data(self, tiempos, disponibles, crc, buffer) -> None:
+        idx = _indices_decimados(len(tiempos))
+        if idx is not None:
+            tiempos = [tiempos[i] for i in idx]
+            disponibles = [disponibles[i] for i in idx]
+            crc = [crc[i] for i in idx]
+            buffer = [buffer[i] for i in idx]
         self.set_tiempos(tiempos)
         self._disp = disponibles
         self._crc = crc
