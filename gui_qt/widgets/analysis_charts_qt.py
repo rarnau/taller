@@ -11,7 +11,8 @@ from PySide6.QtWidgets import QWidget
 
 from config import tema
 from gui_qt.analysis_data import AnalysisData, EMPTY_ANALYSIS_DATA, HistogramBin
-from gui_qt.widgets.dashboard_charts_qt import _fmt_fecha, _qc, _t_frac
+from gui_qt.widgets.dashboard_charts_qt import (_fmt_fecha, _indices_decimados,
+                                                _qc, _t_frac)
 
 
 class CylinderMapChart(QWidget):
@@ -250,10 +251,23 @@ class SubstockEvolutionChart(QWidget):
         super().__init__(parent)
         self.setMinimumHeight(190)
         self._data = EMPTY_ANALYSIS_DATA
+        # Series decimadas (tiempos + evol por SubStock) para no redibujar
+        # decenas de miles de puntos en cada tick del cursor (ver
+        # _indices_decimados). Las paradas/colores se leen de _data (livianos).
+        self._tiempos: List[datetime] = []
+        self._evol: Dict[str, List[int]] = {}
         self._cursor_frac: float | None = None
 
     def set_data(self, data: AnalysisData) -> None:
         self._data = data
+        tiempos = list(data.tiempos)
+        evol = data.evol_substock
+        idx = _indices_decimados(len(tiempos))
+        if idx is not None:
+            tiempos = [tiempos[i] for i in idx]
+            evol = {n: [s[i] for i in idx] for n, s in evol.items()}
+        self._tiempos = tiempos
+        self._evol = dict(evol)
         self.update()
 
     def set_cursor_frac(self, frac: float | None) -> None:
@@ -270,7 +284,7 @@ class SubstockEvolutionChart(QWidget):
             max(1.0, self.height() - self._TOP - self._AXIS_H),
         )
 
-        tiempos = self._data.tiempos
+        tiempos = self._tiempos
         if len(tiempos) < 2:
             p.setPen(QPen(_qc(tema.DASH_AXIS), 1.5))
             p.drawLine(QPointF(r.left(), r.bottom()), QPointF(r.right(), r.bottom()))
@@ -282,7 +296,7 @@ class SubstockEvolutionChart(QWidget):
         def x_of(t: datetime) -> float:
             return r.left() + _t_frac(t, t0, t1) * r.width()
 
-        all_vals = [v for serie in self._data.evol_substock.values() for v in serie]
+        all_vals = [v for serie in self._evol.values() for v in serie]
         ymax = max(all_vals) if all_vals else 1
         ymax = max(1, ymax)
 
@@ -296,7 +310,7 @@ class SubstockEvolutionChart(QWidget):
             p.setBrush(QBrush(_qc(tema.DASH_PARADA_BAND, 30)))
             p.drawRect(QRectF(min(x0, x1), r.top(), abs(x1 - x0), r.height()))
 
-        for nombre, serie in self._data.evol_substock.items():
+        for nombre, serie in self._evol.items():
             if not serie:
                 continue
             pen = QPen(_qc(self._data.colores_substock.get(nombre, "#999999")), 2.4)
