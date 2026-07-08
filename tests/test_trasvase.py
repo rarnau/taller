@@ -308,6 +308,27 @@ def test_kpi_trasvases_expuesto():
     assert k0["trasvases"] == 0
 
 
+def test_contador_disponibles_liviano_coincide_con_pase():
+    """El contador incremental de Disponibles (modo liviano) coincide, snapshot
+    a snapshot, con el conteo del pase (modo completo) — también con el trasvase
+    activo, que re-perfila Disponibles (transición DISPONIBLE→A_RECTIFICAR)."""
+    cfg = _cfg_base(_RANGOS_2J, 2)
+
+    def _run(ligero):
+        t = TallerCilindros()
+        t.configurar(cfg)
+        t.cargar_datos_desde_dataframes(pd.DataFrame(_stock_2j()), _df_cambios([_cambio(1)]))
+        t.snapshot_ligero = ligero
+        t.simular(callback_log=None)
+        return t
+
+    full, light = _run(False), _run(True)
+    assert len(full.snapshots) == len(light.snapshots) > 0
+    for i, (a, b) in enumerate(zip(full.snapshots, light.snapshots)):
+        assert a.cantidad_disponibles == b.cantidad_disponibles, i
+    assert light._trasvases > 0  # el escenario efectivamente trasvasa
+
+
 def test_registry_y_familia():
     assert set(ESTRATEGIAS_TRASVASE) == {"ninguno", "cascada_umbral"}
     assert any(f.clave_cfg == "estrategia_trasvase" for f in FAMILIAS_ESTRATEGIA)

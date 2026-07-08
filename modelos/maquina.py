@@ -166,12 +166,39 @@ class MaquinaRectificadora:
 
         Con grilla None (24/7) devuelve los minutos de reloj, idéntico al
         comportamiento histórico.
+
+        Con grilla, usa el **atajo de semanas completas**: la grilla es semanal
+        (7×24), así que los minutos operativos de una semana entera son una
+        constante (60 × celdas operativas). Se camina hora a hora solo en los
+        bordes parciales (antes del primer lunes 00:00 y después del último
+        bloque de semanas enteras) y las semanas del medio se multiplican. En
+        un horizonte de un año son ~340 iteraciones en vez de ~8.760. El
+        resultado es exacto con bordes alineados a la hora (todos los términos
+        son múltiplos de 60.0); con minutos/segundos sueltos puede diferir del
+        recorrido iterativo en < 1e-9 relativo (mismos términos, distinto
+        orden de suma flotante) — sin efecto práctico en los KPIs.
         """
         if t1 <= t0:
             return 0.0
-        if self.grilla_operativa is None:
+        grilla = self.grilla_operativa
+        if grilla is None:
             return (t1 - t0).total_seconds() / 60.0
-        return self._minutos_si(t0, t1, lambda t: self.grilla_operativa[t.weekday()][t.hour])
+        cond = lambda t: grilla[t.weekday()][t.hour]  # noqa: E731
+
+        # Primer lunes 00:00 >= t0 (si t0 ya es lunes 00:00, es t0 mismo).
+        d0 = t0.replace(hour=0, minute=0, second=0, microsecond=0)
+        w0 = d0 + timedelta(days=(7 - d0.weekday()) % 7)
+        if w0 < t0:
+            w0 += timedelta(days=7)
+        if w0 >= t1:
+            return self._minutos_si(t0, t1, cond)  # sin semana completa adentro
+
+        semanas = (t1 - w0).days // 7
+        fin_semanas = w0 + timedelta(days=7 * semanas)
+        minutos_semana = 60.0 * sum(1 for dia in grilla for celda in dia if celda)
+        return (self._minutos_si(t0, w0, cond)
+                + semanas * minutos_semana
+                + self._minutos_si(fin_semanas, t1, cond))
 
     # ── Tasa de falla (capa de disponibilidad sobre los turnos) ──────────────
 

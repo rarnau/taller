@@ -158,9 +158,16 @@ class DiameterDistributionChart(QWidget):
         super().__init__(parent)
         self.setMinimumHeight(190)
         self._data = EMPTY_ANALYSIS_DATA
+        self._snapshot_index = -1
 
     def set_data(self, data: AnalysisData) -> None:
         self._data = data
+        self._snapshot_index = -1
+        self.update()
+
+    def set_snapshot_index(self, idx: int) -> None:
+        """Selecciona el snapshot a mostrar (la distribución varía con el timeline)."""
+        self._snapshot_index = max(-1, idx)
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -173,7 +180,12 @@ class DiameterDistributionChart(QWidget):
             max(1.0, self.height() - self._TOP - self._BOTTOM),
         )
 
+        # Distribución del snapshot activo (bordes fijos ⇒ barras estables); sin
+        # cursor cae a dist_bins (última foto / estado vacío).
         bins = self._data.dist_bins
+        if self._data.dist_bins_por_snapshot and self._snapshot_index >= 0:
+            i = min(self._snapshot_index, len(self._data.dist_bins_por_snapshot) - 1)
+            bins = self._data.dist_bins_por_snapshot[i]
         lo = min(self._data.diametro_minimo, self._data.dist_min)
         hi = max(self._data.diametro_maximo, self._data.dist_max)
         if hi <= lo:
@@ -196,7 +208,10 @@ class DiameterDistributionChart(QWidget):
             p.setFont(QFont(tema.FONT_FAMILY, 7))
             p.drawText(top_rect, Qt.AlignmentFlag.AlignCenter, label)
 
-        max_count = max((b.count for b in bins), default=1)
+        # Escala por el máximo GLOBAL (sobre todos los snapshots) para que las
+        # alturas sean comparables al mover el timeline; sin él, el bin más alto
+        # de cada snapshot llenaría siempre el alto y no se vería el llenado/vaciado.
+        max_count = self._data.dist_max_count or max((b.count for b in bins), default=1)
         for b in bins:
             if b.right <= b.left:
                 continue

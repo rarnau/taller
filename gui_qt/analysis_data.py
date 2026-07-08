@@ -36,6 +36,8 @@ class AnalysisData:
     diametro_minimo: float
     diametro_maximo: float
     dist_bins: List[HistogramBin]
+    dist_bins_por_snapshot: List[List[HistogramBin]]
+    dist_max_count: int
     dist_min: float
     dist_max: float
     zonas_substock: List[Tuple[str, float, float, str]]
@@ -52,6 +54,8 @@ EMPTY_ANALYSIS_DATA = AnalysisData(
     diametro_minimo=0.0,
     diametro_maximo=1.0,
     dist_bins=[],
+    dist_bins_por_snapshot=[],
+    dist_max_count=1,
     dist_min=0.0,
     dist_max=1.0,
     zonas_substock=[],
@@ -62,28 +66,26 @@ EMPTY_ANALYSIS_DATA = AnalysisData(
 )
 
 
-def _build_histogram(values: Sequence[float], bins: int) -> List[HistogramBin]:
-    if not values:
-        return []
-    lo = min(values)
-    hi = max(values)
+def _build_histogram_fixed(values: Sequence[float], lo: float, hi: float,
+                           bins: int) -> List[HistogramBin]:
+    """Histograma con bordes FIJOS ``[lo, hi]`` (mismos bins en cada snapshot).
+
+    A diferencia de ``_build_histogram`` (que deriva lo/hi de los valores), acá
+    los bordes se fijan afuera, de modo que la distribución por snapshot use la
+    MISMA grilla y las barras no salten al mover el timeline. Con ``values``
+    vacío devuelve igual ``bins`` barras (todas en 0), no ``[]``.
+    """
+    n = max(1, bins)
     if hi <= lo:
         hi = lo + 1.0
-    width = (hi - lo) / max(1, bins)
-    counts = [0 for _ in range(max(1, bins))]
+    width = (hi - lo) / n
+    counts = [0 for _ in range(n)]
     for value in values:
         idx = int((value - lo) / width)
-        if idx >= len(counts):
-            idx = len(counts) - 1
-        if idx < 0:
-            idx = 0
+        idx = 0 if idx < 0 else (n - 1 if idx >= n else idx)
         counts[idx] += 1
-    out: List[HistogramBin] = []
-    for i, count in enumerate(counts):
-        left = lo + i * width
-        right = left + width
-        out.append(HistogramBin(left=left, right=right, count=count))
-    return out
+    return [HistogramBin(left=lo + i * width, right=lo + (i + 1) * width, count=c)
+            for i, c in enumerate(counts)]
 
 
 def _tramos_parada(tiempos: Sequence[datetime], snapshots: Sequence[object]) -> List[Tuple[datetime, datetime]]:
@@ -164,7 +166,31 @@ def extraer_datos_analisis(taller, stock_df: pd.DataFrame | None = None) -> Anal
     activos = [
         c.diametro for c in taller.cilindros.values() if c.estado != EstadoCilindro.BAJA
     ]
-    dist_bins = _build_histogram(activos, bins=13)
+
+    # Distribución de diámetros POR SNAPSHOT: reconstruida del mismo mapa que ya
+    # varía con el timeline (mapa_puntos_por_snapshot), filtrando los BAJA. Los
+    # bordes de los bins son FIJOS (rango global de activos sobre todos los
+    # snapshots) para que las barras no salten, y la escala de altura usa el
+    # máximo global (dist_max_count) para que las alturas sean comparables al
+    # mover el cursor. Fuera de simulación cae al histograma del estado final.
+    _BAJA = EstadoCilindro.BAJA.value
+    _BINS = 13
+    activos_por_snap = [
+        [d for (d, est) in pts if est != _BAJA]
+        for pts in mapa_puntos_por_snapshot
+    ]
+    _todos = [d for lst in activos_por_snap for d in lst] or activos
+    g_lo = min(_todos) if _todos else float(taller.diametro_minimo)
+    g_hi = max(_todos) if _todos else float(taller.diametro_maximo)
+    dist_bins_por_snapshot = [
+        _build_histogram_fixed(lst, g_lo, g_hi, _BINS) for lst in activos_por_snap
+    ]
+    dist_max_count = max(
+        (b.count for bins in dist_bins_por_snapshot for b in bins), default=1)
+    # dist_bins (fallback sin cursor / estado vacío) = última foto si la hay,
+    # con los MISMOS bordes que la serie por snapshot.
+    dist_bins = (dist_bins_por_snapshot[-1] if dist_bins_por_snapshot
+                 else _build_histogram_fixed(activos, g_lo, g_hi, _BINS))
 
     zonas = []
     colores_substock: Dict[str, str] = {}
@@ -196,8 +222,10 @@ def extraer_datos_analisis(taller, stock_df: pd.DataFrame | None = None) -> Anal
         diametro_minimo=float(taller.diametro_minimo),
         diametro_maximo=float(taller.diametro_maximo),
         dist_bins=dist_bins,
-        dist_min=min(activos) if activos else float(taller.diametro_minimo),
-        dist_max=max(activos) if activos else float(taller.diametro_maximo),
+        dist_bins_por_snapshot=dist_bins_por_snapshot,
+        dist_max_count=dist_max_count,
+        dist_min=g_lo,
+        dist_max=g_hi,
         zonas_substock=zonas,
         tiempos=tiempos,
         evol_substock=evol,

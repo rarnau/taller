@@ -350,3 +350,54 @@ def test_avanzar_operativo_regimen_apagado_degrada_a_reloj():
     t = datetime(2024, 1, 3, 9, 0)
     assert T.avanzar_operativo(grid_off, t, 120) == t + timedelta(minutes=120)
     assert T.minutos_operativos(grid_off, t, t + timedelta(hours=5)) == 0.0
+
+
+# ── Atajo de semanas completas en minutos_operativos_entre ──────────────────
+#
+# La versión rápida (bordes iterativos + semanas enteras × constante) debe dar
+# lo mismo que el recorrido hora a hora (_minutos_si, la referencia que quedó
+# como base de los bordes): EXACTO con bordes alineados a la hora (todos los
+# términos son múltiplos de 60.0) y a menos de 1e-9 relativo con bordes de
+# minutos/segundos sueltos (mismos términos, distinto orden de suma flotante).
+# Bordes raros a cubrir: t0/t1 a mitad de hora, t0 en lunes 00:00 exacto,
+# intervalos sin semana completa y cruce de año.
+
+def test_minutos_operativos_atajo_semanas_igual_a_iterativo():
+    import math
+    import random
+
+    rng = random.Random(1234)
+    presets = ["lv3", "3escuadras"]
+    # Grilla personalizada no trivial (patrón irregular por día/hora).
+    grid_custom = [[(d * 5 + h) % 3 == 0 for h in range(24)] for d in range(7)]
+
+    grillas = [T.expandir(T.PRESETS[p]) for p in presets] + [grid_custom]
+    for gi, grilla in enumerate(grillas):
+        maq = MaquinaRectificadora(f"M{gi}")
+        maq.grilla_operativa = grilla
+        cond = lambda t: grilla[t.weekday()][t.hour]  # noqa: E731
+
+        casos = [
+            # (t0, t1) con bordes raros fijos:
+            (datetime(2024, 1, 1, 0, 0), datetime(2024, 3, 4, 0, 0)),      # lunes 00:00 exacto
+            (datetime(2024, 1, 1, 0, 0), datetime(2024, 1, 1, 0, 30)),     # sub-hora
+            (datetime(2024, 12, 28, 22, 17), datetime(2025, 1, 6, 3, 41)), # cruce de año
+            (datetime(2024, 5, 7, 10, 30), datetime(2024, 5, 9, 11, 15)),  # sin semana completa
+        ]
+        for _ in range(20):  # + ~20 intervalos aleatorios (minutos/segundos sueltos)
+            ini = datetime(2024, 1, 1) + timedelta(
+                days=rng.randint(0, 400), hours=rng.randint(0, 23),
+                minutes=rng.randint(0, 59), seconds=rng.randint(0, 59))
+            fin = ini + timedelta(days=rng.randint(0, 60), hours=rng.randint(0, 23),
+                                  minutes=rng.randint(0, 59))
+            casos.append((ini, fin))
+
+        for t0, t1 in casos:
+            rapido = maq.minutos_operativos_entre(t0, t1)
+            referencia = maq._minutos_si(t0, t1, cond)
+            alineado = (t0.minute, t0.second, t1.minute, t1.second) == (0, 0, 0, 0)
+            if alineado:
+                assert rapido == referencia, (gi, t0, t1, rapido, referencia)
+            else:
+                assert math.isclose(rapido, referencia, rel_tol=1e-9, abs_tol=1e-6), \
+                    (gi, t0, t1, rapido, referencia)

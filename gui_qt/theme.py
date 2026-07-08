@@ -348,6 +348,60 @@ def build_qss() -> str:
         color: #E8A13A;
     }}
 
+    QPushButton#DashboardJaulaChip {{
+        background-color: #232A33;
+        border: 1px solid #313A45;
+        border-radius: 13px;
+        color: #9FB0BD;
+        min-height: 26px;
+        padding: 4px 14px;
+        font-size: {tk_theme.FONT_SIZE_SM}px;
+        font-weight: 600;
+        outline: none;
+    }}
+
+    QPushButton#DashboardJaulaChip:focus {{
+        outline: none;
+    }}
+
+    QPushButton#DashboardJaulaChip:hover {{
+        background-color: #2A3340;
+        border: 1px solid #3A4552;
+        color: #C7D3DD;
+    }}
+
+    QPushButton#DashboardJaulaChip:checked {{
+        background-color: #E8A13A33;
+        border: 1px solid #E8A13A;
+        color: #E8A13A;
+    }}
+
+    QPushButton#DashboardCardToggle {{
+        background-color: #1F252D;
+        border: 1px solid #313A45;
+        border-radius: 9px;
+        color: #9FB0BD;
+        padding: 3px 12px;
+        font-size: {tk_theme.FONT_SIZE_SM}px;
+        font-weight: 600;
+        outline: none;
+    }}
+
+    QPushButton#DashboardCardToggle:focus {{
+        outline: none;
+    }}
+
+    QPushButton#DashboardCardToggle:hover {{
+        background-color: #2A3340;
+        border: 1px solid #3A4552;
+        color: #C7D3DD;
+    }}
+
+    QPushButton#DashboardCardToggle:checked {{
+        border: 1px solid #E8A13A;
+        color: #E8A13A;
+    }}
+
     QPushButton#ConfigInlineButton {{
         background-color: transparent;
         border: 1px solid #3A4656;

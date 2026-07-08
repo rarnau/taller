@@ -63,6 +63,13 @@ class Snapshot:
         # total de activos. Alimenta la evolución de stock por jaula (Análisis).
         self.activos_por_jaula: Dict[int, int] = {}
 
+        # Conteo por estado Y jaula, con la MISMA atribución única que
+        # activos_por_jaula (0 = sin banda; los BAJA no entran, no tienen
+        # jaula). Alimenta el filtro por jaula del Dashboard (evolución de
+        # estados y buffer Disp/CRC por jaula). No es un campo de KPI: en modo
+        # liviano queda vacío. {jaula: {estado: n}}.
+        self.conteo_estado_por_jaula: Dict[int, Dict[str, int]] = {}
+
         # Conteo de CRC por jaula
         self.crc_por_jaula: Dict[int, int] = {}
 

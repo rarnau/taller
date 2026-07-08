@@ -113,6 +113,9 @@ class TallerCilindros:
         self.lista_substocks: List[SubStock] = []
         # Índice jaula → SubStock (O(1)); se reconstruye al poblar lista_substocks.
         self._substock_por_jaula: Dict[int, SubStock] = {}
+        # Bandas (jaula, hasta, desde) en orden de jaula, para la atribución
+        # única en caliente (ver _reindexar_substocks).
+        self._bandas_attr: List[Tuple[int, float, float]] = []
         self.maquinas: Dict[str, MaquinaRectificadora] = {}
         self.jaulas: Dict[int, Jaula] = {}
         self.eventos_programados: List[EventoCambio] = []
@@ -194,6 +197,10 @@ class TallerCilindros:
         self._repo_pendientes_fuera: int = 0
         self._cambios_pendientes: int = 0
         self._trasvases: int = 0
+        # Contador incremental de cilindros DISPONIBLE (para el snapshot liviano,
+        # que si no re-escanea todo el stock por evento). Se recalcula por scan
+        # al inicio de simular() y lo mantiene _set_estado en cada transición.
+        self._n_disponibles: int = 0
 
     # ── Pickling (paso a procesos: worker GUI y batch_simular) ───────────────
 
@@ -209,6 +216,11 @@ class TallerCilindros:
     def __setstate__(self, estado: Dict[str, Any]) -> None:
         self.__dict__.update(estado)
         self._seq_cola = itertools.count()
+        # Tallers pickleados por versiones previas no traen las bandas
+        # precomputadas de la atribución única: derivarlas del índice existente.
+        if "_bandas_attr" not in self.__dict__:
+            self._bandas_attr = sorted(
+                (j, ss.hasta, ss.desde) for j, ss in self._substock_por_jaula.items())
 
     # ── Configuración externa ───────────────────────────────────────────────
 
@@ -230,6 +242,14 @@ class TallerCilindros:
     def _reindexar_substocks(self) -> None:
         """Reconstruye el índice jaula → SubStock tras poblar ``lista_substocks``."""
         self._substock_por_jaula = {ss.jaula_asignada: ss for ss in self.lista_substocks}
+        # Bandas precomputadas para la atribución única (nº de jaula asc, con
+        # los límites desempaquetados): _jaula_atribuida y stock_activos_por_jaula
+        # se llaman cientos de miles de veces por corrida (estrategia de
+        # asignación ponderada) y así evitan el dict.get + método por banda.
+        # Misma semántica que iterar j=1..cantidad con _substock_por_jaula.get(j)
+        # (el filtro j <= cantidad_jaulas se aplica en el punto de uso).
+        self._bandas_attr = sorted(
+            (j, ss.hasta, ss.desde) for j, ss in self._substock_por_jaula.items())
 
     def aplicar_prioridades_maquinas(self, prioridades: Dict[str, str]) -> None:
         """Asigna el tipo de rectificado prioritario a cada máquina."""
@@ -582,7 +602,7 @@ class TallerCilindros:
     def _instalar_en_jaula(self, cil: Cilindro, jaula_id: int, tiempo: datetime, motivo: str) -> None:
         """Mueve un cilindro al estado TRABAJANDO en la jaula indicada."""
         jaula = self.jaulas[jaula_id]
-        cil.estado = EstadoCilindro.TRABAJANDO
+        self._set_estado(cil, EstadoCilindro.TRABAJANDO)
         cil.jaula = jaula_id
         if cil in jaula.cilindros_crc:
             jaula.cilindros_crc.remove(cil)
@@ -781,9 +801,14 @@ class TallerCilindros:
             return int(cil.jaula)
         if cil.jaula_destino is not None:
             return int(cil.jaula_destino)
-        for j in range(1, self.cantidad_jaulas + 1):
-            ss = self._substock_por_jaula.get(j)
-            if ss is not None and ss.contiene_diametro(cil.diametro):
+        # Bandas precomputadas (nº de jaula asc): equivale a iterar j=1..cantidad
+        # con _substock_por_jaula.get(j) + contiene_diametro (hasta < d <= desde).
+        d = cil.diametro
+        n = self.cantidad_jaulas
+        for j, hasta, desde in self._bandas_attr:
+            if j > n:
+                break
+            if hasta < d <= desde:
                 return j
         return 0
 
@@ -795,14 +820,52 @@ class TallerCilindros:
         conteos por SubStock). Es la métrica que balancean las estrategias de
         asignación ponderadas y la que grafica la evolución de stock por jaula
         en Análisis. La clave 0 agrupa los activos que no caen en ninguna banda.
+
+        Camino caliente (la estrategia de asignación ponderada la llama en cada
+        inicio de rectificado): la atribución está inlineada sobre las bandas
+        precomputadas — misma regla que ``_jaula_atribuida``, sin una llamada a
+        método por cilindro.
         """
-        stock: Dict[int, int] = {j: 0 for j in range(1, self.cantidad_jaulas + 1)}
+        n = self.cantidad_jaulas
+        stock: Dict[int, int] = {j: 0 for j in range(1, n + 1)}
+        bandas = self._bandas_attr
+        _BAJA = EstadoCilindro.BAJA
+        _TRAB = EstadoCilindro.TRABAJANDO
+        _CRC = EstadoCilindro.CRC
         for c in self.cilindros.values():
-            if c.estado == EstadoCilindro.BAJA:
+            estado = c.estado
+            if estado is _BAJA:
                 continue
-            j = self._jaula_atribuida(c)
-            stock[j] = stock.get(j, 0) + 1
+            if (estado is _TRAB or estado is _CRC) and c.jaula:
+                j_attr = int(c.jaula)
+            elif c.jaula_destino is not None:
+                j_attr = int(c.jaula_destino)
+            else:
+                j_attr = 0
+                d = c.diametro
+                for j, hasta, desde in bandas:
+                    if j > n:
+                        break
+                    if hasta < d <= desde:
+                        j_attr = j
+                        break
+            stock[j_attr] = stock.get(j_attr, 0) + 1
         return stock
+
+    def _set_estado(self, cil: Cilindro, nuevo: EstadoCilindro) -> None:
+        """Único punto de cambio de estado en el motor (fuera de la máquina).
+
+        Mantiene ``self._n_disponibles`` leyendo el estado anterior antes de
+        escribir, de modo que el contador es correcto sin importar la transición.
+        La máquina cambia el estado por su cuenta (``finalizar_rectificado``
+        → DISPONIBLE); ese +1 se aplica explícito en ``_finalizar_y_continuar``.
+        """
+        if cil.estado is not nuevo:
+            if cil.estado == EstadoCilindro.DISPONIBLE:
+                self._n_disponibles -= 1
+            if nuevo == EstadoCilindro.DISPONIBLE:
+                self._n_disponibles += 1
+        cil.estado = nuevo
 
     def stock_util_por_jaula(self) -> Dict[int, int]:
         """Stock útil (perfil incluido) por jaula: cilindros que HOY pueden servirla.
@@ -825,9 +888,19 @@ class TallerCilindros:
                 if c.jaula in stock:
                     stock[c.jaula] += 1
             elif c.estado == EstadoCilindro.DISPONIBLE:
-                for j in stock:
-                    if self._admisible_en_jaula(c, j):
-                        stock[j] += 1
+                # Un Disponible RESERVADO es admisible solo en su destino
+                # (``_admisible_en_jaula`` devuelve ``jaula_destino == j``), así
+                # que se cuenta directo sin recorrer todas las jaulas — mid-run
+                # casi todos los Disponibles están reservados (ver diseño del
+                # trasvase), y esto evita el O(jaulas)·admisible por cilindro
+                # que dominaba el perfil. Byte-idéntico al loop original.
+                if c.jaula_destino is not None:
+                    if c.jaula_destino in stock:
+                        stock[c.jaula_destino] += 1
+                else:
+                    for j in stock:
+                        if self._admisible_en_jaula(c, j):
+                            stock[j] += 1
             elif c.estado in en_camino and c.jaula_destino in stock:
                 stock[c.jaula_destino] += 1
         return stock
@@ -949,9 +1022,13 @@ class TallerCilindros:
         """`tiempo` lo estampa ya Snapshot.__init__(tiempo); nada que computar."""
 
     def _snap_kpi_cantidad_disponibles(self, sn: Snapshot) -> None:
-        sn.cantidad_disponibles = sum(
-            1 for c in self.cilindros.values() if c.estado == EstadoCilindro.DISPONIBLE
-        )
+        # Contador incremental (mantenido por _set_estado + el +1 de
+        # finalizar_rectificado) en vez de re-escanear los N cilindros en cada
+        # uno de los miles de snapshots livianos. El modo completo NO lo usa
+        # (toma cantidad_disponibles del pase por conteo_por_estado), así que el
+        # golden no depende de esto; la equivalencia full⇄liviano
+        # (tests/test_snapshot_ligero.py) valida que el contador es correcto.
+        sn.cantidad_disponibles = self._n_disponibles
 
     def _snap_kpi_jaulas_paradas(self, sn: Snapshot) -> None:
         # Mismo orden que el modo completo (iteración de self.jaulas).
@@ -1014,6 +1091,10 @@ class TallerCilindros:
                         cs[estado_val] = cs.get(estado_val, 0) + 1
                 j_attr = self._jaula_atribuida(c)
                 sn.activos_por_jaula[j_attr] = sn.activos_por_jaula.get(j_attr, 0) + 1
+                # Conteo por estado y jaula (misma atribución única): fuente del
+                # filtro por jaula del Dashboard. Reusa j_attr (sin re-calcular).
+                ce = sn.conteo_estado_por_jaula.setdefault(j_attr, {})
+                ce[estado_val] = ce.get(estado_val, 0) + 1
                 # Disponibles con atribución única (reserva primero, si no la
                 # banda de menor jaula): alimenta disponibles_por_substock sin
                 # contar dos veces con bandas solapadas (la suma de las barras
@@ -1184,7 +1265,7 @@ class TallerCilindros:
             return False  # pareja incompleta: no se coloca un cilindro suelto en el CRC
 
         for cil in disponibles[:necesarios]:
-            cil.estado = EstadoCilindro.CRC
+            self._set_estado(cil, EstadoCilindro.CRC)
             cil.jaula = jaula_id
             jaula.cilindros_crc.append(cil)
             cil.registrar_evento(tiempo, f"Traslado a CRC Jaula {jaula_id}")
@@ -1276,7 +1357,7 @@ class TallerCilindros:
                 log(f"  {tiempo.strftime('%m-%d %H:%M')} | Trasvase | Cilindro {cil.id} "
                     f"→ Jaula {j_dest} (reasignado, sin pase)")
             else:
-                cil.estado = EstadoCilindro.A_RECTIFICAR
+                self._set_estado(cil, EstadoCilindro.A_RECTIFICAR)
                 cil.tipo_rectificado_actual = TipoRectificado.PRODUCCION
                 cil.mm_a_rectificar = _MM_REPERFILADO
                 cil.jaula_destino = j_dest
@@ -1302,10 +1383,16 @@ class TallerCilindros:
         simulación (ambos cierran rectificados en curso de idéntica forma).
         """
         cil_terminado = maquina.finalizar_rectificado(tiempo)
+        if cil_terminado is not None:
+            # finalizar_rectificado dejó el cilindro en DISPONIBLE por su cuenta
+            # (RECTIFICANDO→DISPONIBLE): contabilizamos ese +1 acá; las
+            # transiciones posteriores (BAJA / re-perfilado / instalación) pasan
+            # por _set_estado y ajustan el contador desde DISPONIBLE.
+            self._n_disponibles += 1
         if cil_terminado and cil_terminado.diametro < self.diametro_minimo:
             # El pase ya se aplicó (diámetro real reducido): ahora que quedó por
             # debajo del mínimo, recién se da de BAJA ("rectificar y luego BAJA").
-            cil_terminado.estado = EstadoCilindro.BAJA
+            self._set_estado(cil_terminado, EstadoCilindro.BAJA)
             cil_terminado.registrar_evento(
                 tiempo, "BAJA",
                 f"Diámetro {cil_terminado.diametro:.2f} < {self.diametro_minimo}")
@@ -1323,7 +1410,7 @@ class TallerCilindros:
                 tiempo, "INFO",
                 f"Cilindro {cil_terminado.id} no colocable; re-perfilado "
                 f"producción {_MM_REPERFILADO} mm"))
-            cil_terminado.estado = EstadoCilindro.A_RECTIFICAR
+            self._set_estado(cil_terminado, EstadoCilindro.A_RECTIFICAR)
             cil_terminado.tipo_rectificado_actual = TipoRectificado.PRODUCCION
             cil_terminado.mm_a_rectificar = _MM_REPERFILADO
             cil_terminado.jaula_destino = None
@@ -1600,6 +1687,10 @@ class TallerCilindros:
         # procesa cuando ya no quedan cambios pendientes cae fuera de B (el
         # último cambio, ya desplazado por las PARADAs) y no se entrega.
         self._cambios_pendientes = len(self.eventos_programados)
+        # Baseline del contador de Disponibles tras la carga (lo mantiene
+        # _set_estado en cada transición runtime a partir de acá).
+        self._n_disponibles = sum(
+            1 for c in self.cilindros.values() if c.estado == EstadoCilindro.DISPONIBLE)
         self.generar_snapshot(t_actual)
 
         # Cola de prioridad (heap) por (tiempo, secuencia): push/pop en O(log n)

@@ -15,13 +15,13 @@ from config import tema
 
 
 class _LegendSwatch(QFrame):
-    """Cuadradito de color para la leyenda."""
+    """Punto de color para la leyenda."""
 
     def __init__(self, color: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedSize(10, 10)
         self.setStyleSheet(
-            f"background-color: {color}; border-radius: 2px;"
+            f"background-color: {color}; border-radius: 5px;"
         )
 
 
@@ -57,11 +57,21 @@ class DashboardCard(QFrame):
         self._root.setContentsMargins(14, 14, 14, 14)
         self._root.setSpacing(10)
 
+        # Header: título a la izquierda + zona de acciones a la derecha (para
+        # botones opcionales como "Ocultar bajas" en el mockup).
+        self._header = QHBoxLayout()
+        self._header.setContentsMargins(0, 0, 0, 0)
         self.title_label = QLabel(title)
         self.title_label.setObjectName("DashboardCardTitle")
-        self._root.addWidget(self.title_label)
+        self._header.addWidget(self.title_label)
+        self._header.addStretch(1)
+        self._root.addLayout(self._header)
 
         self._legend: QWidget | None = None
+
+    def add_header_action(self, widget: QWidget) -> None:
+        """Agrega un control (p. ej. un toggle) a la derecha del título."""
+        self._header.addWidget(widget)
 
     def add_content(self, widget: QWidget, stretch: int = 1) -> None:
         self._root.addWidget(widget, stretch)
