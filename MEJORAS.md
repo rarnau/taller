@@ -80,20 +80,13 @@ criterios de aceptación. El análisis de origen ya está hecho; no repetirlo.
 - **Riesgo alto de golden**: cualquier cambio de orden rompe. Si el benchmark no
   da >10%, abandonar el ítem y documentarlo.
 
-### A3. `_minutos_si` por semanas completas (KPIs de turnos)
-- **Qué es**: `MaquinaRectificadora.minutos_operativos_entre` / `minutos_falla_entre`
-  (`modelos/maquina.py`) iteran hora por hora todo el horizonte. Se calculan al
-  final de cada corrida (en `calcular_kpis`), por máquina. Crece con el horizonte
-  (Monte Carlo permite hasta 120 días).
-- **Implementación**: para `minutos_operativos_entre` con grilla: los minutos
-  operativos de una semana completa son constantes (`sum(grilla)` × 60). Alinear
-  `t0` al próximo lunes 00:00, iterar solo los bordes parciales y multiplicar las
-  semanas enteras. `minutos_falla_entre` NO admite el atajo (la falla depende de
-  la hora absoluta), pero puede saltear las horas fuera de turno consultando la
-  grilla antes del sorteo.
-- **Verificación**: test unitario nuevo comparando la versión rápida vs la
-  iterativa en ~20 intervalos aleatorios (bordes raros: t0/t1 a mitad de hora,
-  cruce de año). Golden intacto (mismos valores exactos).
+### A3. `_minutos_si` por semanas completas (KPIs de turnos) — ✅ HECHO
+Implementado en `minutos_operativos_entre`: atajo de semanas completas (bordes
+iterativos + semanas enteras × constante), ~45x con grilla en horizontes de un
+año. `minutos_falla_entre` ya salteaba el sorteo fuera de turno (el predicado
+corta en `esta_operativa` antes de `en_falla`). Verificado rápida-vs-iterativa
+en bordes raros (`tests/test_turnos.py`); exacto con bordes a la hora, <1e-9
+relativo con minutos/segundos sueltos. Golden intacto (escenarios 24/7).
 
 ### A4. Estructuras O(1) en asignación (`cola.remove`, `not in`)
 - **Qué es**: `asignar_trabajo_maquinas` hace `cola.remove(cil)` y
@@ -386,4 +379,4 @@ Esto también cubre la mitad de C7 (sets durables por archivo, aún sin nombre).
 | 2 | A1 (bisect), D1 (progreso) | Rendimiento + UX básica (C8 ya hecho) |
 | 3 | B3/B5/B6/B7, D3, D4, D5, E2 | KPIs y GUI incrementales |
 | 4 | C3, C6, C7, D2, D6–D9, E1, E3, E5 | Funcionalidad ampliada |
-| 5 | A2, A3, A4, C4, C5, E4, E6, B8 | Requieren medición previa o decisiones de producto |
+| 5 | A2, A4, C4, C5, E4, E6, B8 | Requieren medición previa o decisiones de producto (A3 ya hecho) |
