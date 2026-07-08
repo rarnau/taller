@@ -113,6 +113,9 @@ class TallerCilindros:
         self.lista_substocks: List[SubStock] = []
         # Índice jaula → SubStock (O(1)); se reconstruye al poblar lista_substocks.
         self._substock_por_jaula: Dict[int, SubStock] = {}
+        # Bandas (jaula, hasta, desde) en orden de jaula, para la atribución
+        # única en caliente (ver _reindexar_substocks).
+        self._bandas_attr: List[Tuple[int, float, float]] = []
         self.maquinas: Dict[str, MaquinaRectificadora] = {}
         self.jaulas: Dict[int, Jaula] = {}
         self.eventos_programados: List[EventoCambio] = []
@@ -213,6 +216,11 @@ class TallerCilindros:
     def __setstate__(self, estado: Dict[str, Any]) -> None:
         self.__dict__.update(estado)
         self._seq_cola = itertools.count()
+        # Tallers pickleados por versiones previas no traen las bandas
+        # precomputadas de la atribución única: derivarlas del índice existente.
+        if "_bandas_attr" not in self.__dict__:
+            self._bandas_attr = sorted(
+                (j, ss.hasta, ss.desde) for j, ss in self._substock_por_jaula.items())
 
     # ── Configuración externa ───────────────────────────────────────────────
 
@@ -234,6 +242,14 @@ class TallerCilindros:
     def _reindexar_substocks(self) -> None:
         """Reconstruye el índice jaula → SubStock tras poblar ``lista_substocks``."""
         self._substock_por_jaula = {ss.jaula_asignada: ss for ss in self.lista_substocks}
+        # Bandas precomputadas para la atribución única (nº de jaula asc, con
+        # los límites desempaquetados): _jaula_atribuida y stock_activos_por_jaula
+        # se llaman cientos de miles de veces por corrida (estrategia de
+        # asignación ponderada) y así evitan el dict.get + método por banda.
+        # Misma semántica que iterar j=1..cantidad con _substock_por_jaula.get(j)
+        # (el filtro j <= cantidad_jaulas se aplica en el punto de uso).
+        self._bandas_attr = sorted(
+            (j, ss.hasta, ss.desde) for j, ss in self._substock_por_jaula.items())
 
     def aplicar_prioridades_maquinas(self, prioridades: Dict[str, str]) -> None:
         """Asigna el tipo de rectificado prioritario a cada máquina."""
@@ -785,9 +801,14 @@ class TallerCilindros:
             return int(cil.jaula)
         if cil.jaula_destino is not None:
             return int(cil.jaula_destino)
-        for j in range(1, self.cantidad_jaulas + 1):
-            ss = self._substock_por_jaula.get(j)
-            if ss is not None and ss.contiene_diametro(cil.diametro):
+        # Bandas precomputadas (nº de jaula asc): equivale a iterar j=1..cantidad
+        # con _substock_por_jaula.get(j) + contiene_diametro (hasta < d <= desde).
+        d = cil.diametro
+        n = self.cantidad_jaulas
+        for j, hasta, desde in self._bandas_attr:
+            if j > n:
+                break
+            if hasta < d <= desde:
                 return j
         return 0
 
@@ -799,13 +820,36 @@ class TallerCilindros:
         conteos por SubStock). Es la métrica que balancean las estrategias de
         asignación ponderadas y la que grafica la evolución de stock por jaula
         en Análisis. La clave 0 agrupa los activos que no caen en ninguna banda.
+
+        Camino caliente (la estrategia de asignación ponderada la llama en cada
+        inicio de rectificado): la atribución está inlineada sobre las bandas
+        precomputadas — misma regla que ``_jaula_atribuida``, sin una llamada a
+        método por cilindro.
         """
-        stock: Dict[int, int] = {j: 0 for j in range(1, self.cantidad_jaulas + 1)}
+        n = self.cantidad_jaulas
+        stock: Dict[int, int] = {j: 0 for j in range(1, n + 1)}
+        bandas = self._bandas_attr
+        _BAJA = EstadoCilindro.BAJA
+        _TRAB = EstadoCilindro.TRABAJANDO
+        _CRC = EstadoCilindro.CRC
         for c in self.cilindros.values():
-            if c.estado == EstadoCilindro.BAJA:
+            estado = c.estado
+            if estado is _BAJA:
                 continue
-            j = self._jaula_atribuida(c)
-            stock[j] = stock.get(j, 0) + 1
+            if (estado is _TRAB or estado is _CRC) and c.jaula:
+                j_attr = int(c.jaula)
+            elif c.jaula_destino is not None:
+                j_attr = int(c.jaula_destino)
+            else:
+                j_attr = 0
+                d = c.diametro
+                for j, hasta, desde in bandas:
+                    if j > n:
+                        break
+                    if hasta < d <= desde:
+                        j_attr = j
+                        break
+            stock[j_attr] = stock.get(j_attr, 0) + 1
         return stock
 
     def _set_estado(self, cil: Cilindro, nuevo: EstadoCilindro) -> None:
