@@ -233,6 +233,17 @@ def eliminar_fila_stock(df: pd.DataFrame, id_cilindro: str) -> pd.DataFrame:
     return df.loc[~mask].reset_index(drop=True)
 
 
+def contar_activos(df: Optional[pd.DataFrame]) -> int:
+    """Cilindros del stock que NO están en Baja (contadores de la GUI).
+
+    Las bajas siguen en el DataFrame (son parte del inventario) pero no cuentan
+    como stock utilizable en el flujo de trabajo.
+    """
+    if df is None or df.empty or COL_ESTADO not in df.columns:
+        return 0
+    return int((df[COL_ESTADO].astype(str) != EstadoCilindro.BAJA.value).sum())
+
+
 def guardar_stock_excel(
     path: str,
     stock_df: pd.DataFrame,

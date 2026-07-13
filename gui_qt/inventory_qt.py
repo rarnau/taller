@@ -332,9 +332,12 @@ class InventoryPanel(QWidget):
         self._registros_visibles = ordenar_registros(visibles, columna, descendente)
         self._paint_rows(self._registros_visibles)
         total, vis = len(self._registros), len(self._registros_visibles)
-        self.count.setText(
-            f"{vis} de {total} registros" if vis != total else f"{total} registros"
-        )
+        texto = f"{vis} de {total} registros" if vis != total else f"{total} registros"
+        bajas = sum(1 for r in self._registros
+                    if r["estado"] == EstadoCilindro.BAJA.value)
+        if bajas:
+            texto += f" / {bajas} baja"
+        self.count.setText(texto)
         self._update_action_states()
 
     def _build_records(self) -> List[Dict[str, Any]]:

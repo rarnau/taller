@@ -45,7 +45,7 @@ from gui_qt.services import (MonteCarloRequest, MonteCarloService,
 from gui_qt.tab_kpis_qt import KpisPanel
 from gui_qt.vista_realtime import RealTimeView
 from gui_qt.widgets import FlowCard, SectionCard, StatusBarWidget, TabsCornerInfoWidget
-from nucleo.stock import guardar_stock_excel
+from nucleo.stock import contar_activos, guardar_stock_excel
 
 
 @dataclass
@@ -337,7 +337,8 @@ class MainWindow(QMainWindow):
         # Excel cargado (sin generación) ⇒ sin seed de fallas reproducible.
         self.fallas_seed = None
         # Cargar un nuevo Excel invalida overlays de PARADA previos.
-        self.flow_card.set_counts(inventario=len(self.stock_df) if self.stock_df is not None else 0)
+        # El flujo cuenta stock utilizable: las bajas quedan fuera del contador.
+        self.flow_card.set_counts(inventario=contar_activos(self.stock_df))
         self._set_flow_status(inventario=True)
         self.generation_panel.set_simulation_snapshots([])
         self.inventory_panel.refresh(taller=self.taller, stock_df=self.stock_df)
@@ -355,7 +356,7 @@ class MainWindow(QMainWindow):
         self._stock_dirty = True
         self._stock_editado_post_sim = self.taller is not None
         self.montecarlo_panel.set_stock_df(self.stock_df)
-        self.flow_card.set_counts(inventario=len(self.stock_df))
+        self.flow_card.set_counts(inventario=contar_activos(self.stock_df))
         self._set_flow_status(inventario=len(self.stock_df) > 0)
         self.inventory_panel.set_stale(self._stock_editado_post_sim)
         self.inventory_panel.refresh(taller=self.taller, stock_df=self.stock_df)

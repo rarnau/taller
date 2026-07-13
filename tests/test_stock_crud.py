@@ -25,6 +25,7 @@ from nucleo.stock import (
     COLUMNAS_STOCK,
     actualizar_fila_stock,
     agregar_fila_stock,
+    contar_activos,
     eliminar_fila_stock,
     guardar_stock_excel,
     validar_fila_stock,
@@ -209,6 +210,15 @@ def test_jaula_none_queda_nan():
                                               COL_ESTADO: "Trabajando"}))
     assert nuevo.iloc[0][COL_JAULA] == 2
     assert nuevo.iloc[0][COL_POSICION] == 1
+
+
+def test_contar_activos_excluye_bajas():
+    df = _stock_df()  # 3 filas, ninguna Baja
+    assert contar_activos(df) == 3
+    con_baja = agregar_fila_stock(df, _fila(**{COL_ID: "CIL-B01", COL_ESTADO: "Baja"}))
+    assert contar_activos(con_baja) == 3
+    assert contar_activos(None) == 0
+    assert contar_activos(pd.DataFrame()) == 0
 
 
 # ── Roundtrip guardar → cargar → construir taller ────────────────────────────
