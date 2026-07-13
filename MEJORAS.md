@@ -63,22 +63,23 @@ criterios de aceptación. El análisis de origen ya está hecho; no repetirlo.
   ese debe seguir usando el camino lineal). Benchmark antes/después del modo
   completo.
 
-### A2. Índices por estado de cilindro
-- **Qué es**: `obtener_cilindros_por_estado()` escanea todo `self.cilindros` y se
-  llama varias veces por evento (cola de rectificado en `asignar_trabajo_maquinas`,
-  disponibles en `_intentar_reactivar_jaulas`/`reponer_buffer_crc`, y el bloque
-  liviano `_snap_kpi_cantidad_disponibles`).
-- **Implementación**: mantener `self._por_estado: Dict[EstadoCilindro, List[Cilindro]]`
-  actualizado en cada transición. ⚠️ El orden de iteración actual (orden de
-  inserción de `self.cilindros`) es semántico: los `sorted()` posteriores
-  desempatan por él. El índice debe preservar **orden de inserción del dict
-  global**, no orden de transición — la opción segura es un índice
-  `Dict[EstadoCilindro, int]` de solo conteos + escaneo solo cuando se necesita
-  la lista, o listas reconstruidas con estabilidad demostrada. **Hacer esto solo
-  con el golden como red y con benchmark que justifique** (si A1 ya se hizo, el
-  beneficio restante puede ser chico; medí primero).
-- **Riesgo alto de golden**: cualquier cambio de orden rompe. Si el benchmark no
-  da >10%, abandonar el ítem y documentarlo.
+### A2. Índices por estado de cilindro — ❌ DESCARTADO (medido)
+Medido (2026-07-13) sobre `datos/simulacion_140cils_1semana.xlsx`, config
+default prístina (aislamiento de `tests/_generar_golden.py`), media de 25
+corridas de `simular()`: **100.6 ± 10.6 ms** modo completo, **20.2 ± 4.1 ms**
+modo liviano. Con un wrapper `perf_counter` sobre `obtener_cilindros_por_estado`
+(282 llamadas/corrida), el tiempo TOTAL dentro de la función es **3.3%**
+(completo) y **8.0%** (liviano) de `simular()` — ese es el TECHO teórico de
+cualquier índice (si la llamada fuera gratis), y ya queda bajo el umbral de
+>10% en ambos modos; un índice realista con orden estable (nº de secuencia de
+carga + sort, o listas con remociones O(n)) recupera solo una fracción de eso.
+Además, la mitad rentable del ítem **ya estaba hecha**: el bloque liviano
+`_snap_kpi_cantidad_disponibles` usa el contador incremental `_n_disponibles`
+mantenido por el chokepoint `_set_estado` (commit 3689e56 — la opción (a)
+"índice de solo conteos" de este ítem), y `_intentar_reactivar_jaulas` ya
+comparte una única lista de Disponibles entre jaulas. Con 140 cilindros el
+escaneo restante es un listcomp trivial; el riesgo de golden (orden semántico)
+no se justifica. No se tocó el motor.
 
 ### A3. `_minutos_si` por semanas completas (KPIs de turnos) — ✅ HECHO
 Implementado en `minutos_operativos_entre`: atajo de semanas completas (bordes
@@ -379,4 +380,4 @@ Esto también cubre la mitad de C7 (sets durables por archivo, aún sin nombre).
 | 2 | A1 (bisect), D1 (progreso) | Rendimiento + UX básica (C8 ya hecho) |
 | 3 | B3/B5/B6/B7, D3, D4, D5, E2 | KPIs y GUI incrementales |
 | 4 | C3, C6, C7, D2, D6–D9, E1, E3, E5 | Funcionalidad ampliada |
-| 5 | A2, A4, C4, C5, E4, E6, B8 | Requieren medición previa o decisiones de producto (A3 ya hecho) |
+| 5 | A4, C4, C5, E4, E6, B8 | Requieren medición previa o decisiones de producto (A3 ya hecho; A2 descartado por medición) |
