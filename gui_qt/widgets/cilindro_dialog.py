@@ -85,6 +85,7 @@ class CilindroDialog(QDialog):
         root.addLayout(form)
 
         self.ed_id = QLineEdit()
+        self.ed_id.setObjectName("InventoryFilterInput")
         self.ed_id.setPlaceholderText("p. ej. CIL-141")
         if self._editando:
             self.ed_id.setReadOnly(True)
@@ -92,6 +93,7 @@ class CilindroDialog(QDialog):
         form.addRow("ID", self.ed_id)
 
         self.sp_diametro = QDoubleSpinBox()
+        self.sp_diametro.setObjectName("InventoryFilterSpin")
         self.sp_diametro.setDecimals(1)
         self.sp_diametro.setRange(1.0, diametro_maximo)
         self.sp_diametro.setSuffix(" mm")
@@ -99,6 +101,7 @@ class CilindroDialog(QDialog):
         form.addRow("Diámetro", self.sp_diametro)
 
         self.cb_estado = QComboBox()
+        self.cb_estado.setObjectName("InventoryFilterCombo")
         for e in EstadoCilindro:
             self.cb_estado.addItem(e.value)
         self.cb_estado.setCurrentText(EstadoCilindro.DISPONIBLE.value)
@@ -106,22 +109,26 @@ class CilindroDialog(QDialog):
         form.addRow("Estado", self.cb_estado)
 
         self.cb_jaula = QComboBox()
+        self.cb_jaula.setObjectName("InventoryFilterCombo")
         self.cb_jaula.addItem(_SIN_VALOR, None)
         for j in range(1, cantidad_jaulas + 1):
             self.cb_jaula.addItem(f"Jaula {j}", j)
         form.addRow("Jaula asignada", self.cb_jaula)
 
         self.cb_posicion = QComboBox()
+        self.cb_posicion.setObjectName("InventoryFilterCombo")
         self.cb_posicion.addItem(_SIN_VALOR, None)
         self.cb_posicion.addItem("1", 1)
         self.cb_posicion.addItem("2", 2)
         form.addRow("Posición", self.cb_posicion)
 
         self.ed_perfil = QLineEdit()
+        self.ed_perfil.setObjectName("InventoryFilterInput")
         self.ed_perfil.setPlaceholderText("opcional (se deriva de la jaula)")
         form.addRow("Perfil", self.ed_perfil)
 
         self.sp_mm = QDoubleSpinBox()
+        self.sp_mm.setObjectName("InventoryFilterSpin")
         self.sp_mm.setDecimals(2)
         self.sp_mm.setRange(0.0, 50.0)
         self.sp_mm.setSuffix(" mm")
@@ -129,6 +136,7 @@ class CilindroDialog(QDialog):
         form.addRow("mm a rectificar", self.sp_mm)
 
         self.cb_tipo = QComboBox()
+        self.cb_tipo.setObjectName("InventoryFilterCombo")
         for t in TipoRectificado:
             self.cb_tipo.addItem(t.value)
         form.addRow("Tipo rectificado", self.cb_tipo)

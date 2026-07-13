@@ -84,7 +84,7 @@ class InventoryPanel(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(4)
+        root.setSpacing(8)
 
         # ── Fila 1: título + acciones de archivo ────────────────────────
         toolbar = QHBoxLayout()
@@ -141,20 +141,21 @@ class InventoryPanel(QWidget):
             "Resultado desactualizado — el stock inicial fue editado después de simular"
         )
         self.stale_label.setObjectName("InventoryStale")
-        self.stale_label.setStyleSheet(f"color: {tk_theme.ORANGE}; font-weight: 600;")
         self.stale_label.setVisible(False)
         viewbar.addWidget(self.stale_label)
         viewbar.addStretch(1)
 
         self.btn_add = QPushButton("+ Agregar")
+        self.btn_add.setObjectName("PrimaryAction")
         self.btn_edit = QPushButton("Editar")
+        self.btn_edit.setObjectName("InventoryToolbarButton")
         self.btn_delete = QPushButton("Eliminar")
+        self.btn_delete.setObjectName("InventoryDeleteButton")
         for btn, handler in (
             (self.btn_add, self._on_add),
             (self.btn_edit, self._on_edit),
             (self.btn_delete, self._on_delete),
         ):
-            btn.setObjectName("InventoryToolbarButton")
             btn.clicked.connect(handler)
             viewbar.addWidget(btn)
 
@@ -164,32 +165,47 @@ class InventoryPanel(QWidget):
         filterbar.setSpacing(8)
         root.addLayout(filterbar)
 
+        def _filter_label(texto: str) -> QLabel:
+            lbl = QLabel(texto)
+            lbl.setObjectName("InventoryFilterLabel")
+            return lbl
+
         self.ed_filter_id = QLineEdit()
+        self.ed_filter_id.setObjectName("InventoryFilterInput")
         self.ed_filter_id.setPlaceholderText("Buscar ID…")
         self.ed_filter_id.setClearButtonEnabled(True)
-        self.ed_filter_id.setMaximumWidth(170)
+        self.ed_filter_id.setFixedWidth(170)
         filterbar.addWidget(self.ed_filter_id)
 
-        filterbar.addWidget(QLabel("Estado"))
+        filterbar.addWidget(_filter_label("Estado"))
         self.cb_filter_estado = QComboBox()
+        self.cb_filter_estado.setObjectName("InventoryFilterCombo")
         self.cb_filter_estado.addItem(_FILTRO_TODOS)
         for e in EstadoCilindro:
             self.cb_filter_estado.addItem(e.value)
+        self.cb_filter_estado.setMinimumWidth(120)
         filterbar.addWidget(self.cb_filter_estado)
 
-        filterbar.addWidget(QLabel("Jaula"))
+        filterbar.addWidget(_filter_label("Jaula"))
         self.cb_filter_jaula = QComboBox()
+        self.cb_filter_jaula.setObjectName("InventoryFilterCombo")
+        self.cb_filter_jaula.setMinimumWidth(105)
         self._poblar_filtro_jaulas()
         filterbar.addWidget(self.cb_filter_jaula)
 
         self.sp_filter_dmin = QDoubleSpinBox()
         self.sp_filter_dmax = QDoubleSpinBox()
         for etiqueta, sp in (("Ø mín", self.sp_filter_dmin), ("Ø máx", self.sp_filter_dmax)):
+            sp.setObjectName("InventoryFilterSpin")
             sp.setDecimals(1)
             sp.setRange(0.0, 9999.0)
             sp.setValue(0.0)
             sp.setSpecialValueText("—")  # 0 = sin límite
-            filterbar.addWidget(QLabel(etiqueta))
+            # Sin flechitas: valor tipeado, look pill como el resto de filtros.
+            sp.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
+            sp.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            sp.setFixedWidth(72)
+            filterbar.addWidget(_filter_label(etiqueta))
             filterbar.addWidget(sp)
 
         self.btn_filter_clear = QPushButton("Limpiar")
@@ -248,7 +264,6 @@ class InventoryPanel(QWidget):
         header.sectionClicked.connect(self._on_header_clicked)
 
         self._apply_table_style()
-        self._apply_toggle_style()
         self._sync_sort_indicator()
         self._update_action_states()
 
@@ -597,6 +612,10 @@ class InventoryPanel(QWidget):
                 border-radius: 0px;
                 gridline-color: transparent;
             }}
+            QTableWidget#InventoryTable::item:selected {{
+                background-color: #2A3F5C;
+                color: #FFFFFF;
+            }}
             QHeaderView::section {{
                 background-color: #141B26;
                 color: #6F7B89;
@@ -621,30 +640,6 @@ class InventoryPanel(QWidget):
         self.table.setColumnWidth(0, 118)
         self.table.setColumnWidth(4, 110)
         self.table.setColumnWidth(5, 72)
-
-    def _apply_toggle_style(self) -> None:
-        """Estilo segmentado del toggle Inicial/Final (colores del tema)."""
-        for btn in (self.btn_view_inicial, self.btn_view_final):
-            btn.setStyleSheet(
-                f"""
-                QPushButton#InventoryViewToggle {{
-                    background-color: {tk_theme.BG_CARD};
-                    color: {tk_theme.FG_DIM};
-                    border: 1px solid #242F3A;
-                    border-radius: 6px;
-                    padding: 4px 14px;
-                    font-weight: 600;
-                }}
-                QPushButton#InventoryViewToggle:checked {{
-                    background-color: {tk_theme.ACCENT};
-                    color: {tk_theme.BG};
-                    border-color: {tk_theme.ACCENT};
-                }}
-                QPushButton#InventoryViewToggle:disabled {{
-                    color: #3A4657;
-                }}
-                """
-            )
 
     # ── Acciones de archivo ──────────────────────────────────────────────
 
