@@ -351,7 +351,7 @@ ESTRATEGIA_REPOSICION_DEFECTO = "ninguna"
 # cambio programado). Fuente única del valor: el motor lo consume como
 # taller._MM_REPERFILADO (alias) y las estrategias de trasvase lo usan para
 # proyectar el diámetro post-pase de los candidatos.
-MM_REPERFILADO: float = 0.8
+MM_REPERFILADO: float = 0.08
 
 
 class EstrategiaTrasvase:

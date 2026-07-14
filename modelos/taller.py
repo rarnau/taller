@@ -27,7 +27,7 @@ from . import turnos as turnos_mod
 logger = logging.getLogger(__name__)
 
 # ── Constantes de simulación ────────────────────────────────────────────────
-_MM_RECTIFICAR_DEFECTO: float = 0.8
+_MM_RECTIFICAR_DEFECTO: float = 0.08
 _TIPO_RECTIFICADO_DEFECTO: str = "produccion"
 # mm que se rebajan (rectificado de producción) cuando un cilindro queda
 # Disponible pero su (perfil, diámetro) no es colocable en ninguna jaula: se lo

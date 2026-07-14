@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from config.persistencia import obtener_config_global
 from modelos.enums import EstadoCilindro, TipoRectificado
+from modelos.taller import _MM_RECTIFICAR_DEFECTO
 from nucleo.stock import (
     COL_DIAMETRO,
     COL_ESTADO,
@@ -132,7 +133,8 @@ class CilindroDialog(QDialog):
         self.sp_mm.setDecimals(2)
         self.sp_mm.setRange(0.0, 50.0)
         self.sp_mm.setSuffix(" mm")
-        self.sp_mm.setValue(0.5)
+        # Prellenado = default del motor (lo que asumiría si la celda viniera vacía).
+        self.sp_mm.setValue(_MM_RECTIFICAR_DEFECTO)
         form.addRow("mm a rectificar", self.sp_mm)
 
         self.cb_tipo = QComboBox()
