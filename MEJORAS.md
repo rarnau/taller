@@ -143,7 +143,7 @@ Para cada uno: agregar la clave al dict `kpis`, el label a `KPI_META_BASE`
   `calcular_kpis`. KPI de compras: el más valioso para negocio de esta lista.
 
 ### B5. mm desperdiciados en re-perfilado
-- **Qué**: nº de pases de re-perfilado × `_MM_REPERFILADO` (0.8). Detecta bandas
+- **Qué**: nº de pases de re-perfilado × `_MM_REPERFILADO` (0.08). Detecta bandas
   mal diseñadas.
 - **Datos**: contar en la rama de re-perfilado de `_finalizar_y_continuar`
   (`self._reperfilados: int`). Exponer `reperfilados` y `mm_reperfilado`.

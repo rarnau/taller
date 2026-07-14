@@ -912,6 +912,116 @@ def build_qss() -> str:
         border-color: #4A5563;
     }}
 
+    QPushButton#InventoryToolbarButton:disabled {{
+        color: #4A5563;
+        border-color: #2B333D;
+    }}
+
+    QPushButton#InventoryViewToggle {{
+        background-color: #1F252D;
+        border: 1px solid #313A45;
+        border-radius: 13px;
+        color: #9FB0BD;
+        min-height: 26px;
+        padding: 4px 14px;
+        font-size: {tk_theme.FONT_SIZE_SM}px;
+        font-weight: 600;
+        outline: none;
+    }}
+
+    QPushButton#InventoryViewToggle:focus {{
+        outline: none;
+    }}
+
+    QPushButton#InventoryViewToggle:hover {{
+        background-color: #2A3340;
+        border: 1px solid #3A4552;
+        color: #C7D3DD;
+    }}
+
+    QPushButton#InventoryViewToggle:checked {{
+        background-color: #E8A13A33;
+        border: 1px solid #E8A13A;
+        color: #E8A13A;
+    }}
+
+    QPushButton#InventoryViewToggle:disabled {{
+        color: #4A5563;
+        border-color: #2B333D;
+    }}
+
+    QLineEdit#InventoryFilterInput,
+    QComboBox#InventoryFilterCombo,
+    QDoubleSpinBox#InventoryFilterSpin {{
+        background-color: #232A33;
+        border: 1px solid #313A45;
+        border-radius: 8px;
+        padding: 3px 10px;
+        color: #E9ECEF;
+        min-height: 26px;
+        font-size: {tk_theme.FONT_SIZE_SM}px;
+        selection-background-color: #2563EB;
+        selection-color: #FFFFFF;
+    }}
+
+    QLineEdit#InventoryFilterInput:hover,
+    QComboBox#InventoryFilterCombo:hover,
+    QDoubleSpinBox#InventoryFilterSpin:hover,
+    QLineEdit#InventoryFilterInput:focus,
+    QComboBox#InventoryFilterCombo:focus,
+    QDoubleSpinBox#InventoryFilterSpin:focus {{
+        border: 1px solid #3A4552;
+        background-color: #2A3340;
+    }}
+
+    QComboBox#InventoryFilterCombo::drop-down {{
+        border: none;
+        width: 18px;
+    }}
+
+    QComboBox#InventoryFilterCombo QAbstractItemView {{
+        background-color: #1A1F26;
+        border: 1px solid #2B333D;
+        selection-background-color: #2A3340;
+        color: #E9ECEF;
+        outline: none;
+    }}
+
+    QLabel#InventoryFilterLabel {{
+        color: #86909B;
+        font-size: {tk_theme.FONT_SIZE_SM}px;
+        background-color: transparent;
+    }}
+
+    QLabel#InventoryStale {{
+        color: #E8A13A;
+        font-weight: 600;
+        font-size: {tk_theme.FONT_SIZE_SM}px;
+        background-color: transparent;
+    }}
+
+    QPushButton#InventoryDeleteButton {{
+        background-color: #232B37;
+        color: #F56B6B;
+        border: 1px solid #5A3038;
+        border-radius: 8px;
+        padding: 5px 11px;
+        font-size: {tk_theme.FONT_SIZE_SM}px;
+        font-weight: 600;
+        min-height: 28px;
+    }}
+
+    QPushButton#InventoryDeleteButton:hover {{
+        background-color: #F56B6B22;
+        color: #FF8E8E;
+        border-color: #F56B6B;
+    }}
+
+    QPushButton#InventoryDeleteButton:disabled {{
+        color: #4A5563;
+        border-color: #3A4452;
+    }}
+
     QLabel#InventoryStateBadge {{
         padding: 2px 6px;
         border-radius: 8px;

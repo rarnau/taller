@@ -2,8 +2,10 @@
 
 Cuando el stock útil de una jaula (perfil incluido) cae bajo ``trasvase_umbral``,
 la estrategia "cascada_umbral" re-perfila Disponibles de bandas SUPERIORES hacia
-ella (pase de producción de 0.8 mm que le talla el perfil receptor) hasta
-dejarla en ``trasvase_objetivo`` — o lo que se pueda (mejor esfuerzo). Reglas
+ella (pase de producción de ``MM_REPERFILADO`` mm que le talla el perfil
+receptor) hasta dejarla en ``trasvase_objetivo`` — o lo que se pueda (mejor
+esfuerzo). Los fixtures colocan los donantes a fracciones de ``MM_REPERFILADO``
+del borde de banda, así los tests valen para cualquier valor del pase. Reglas
 fijadas por estos tests: dirección solo descendente, piso del donante = umbral,
 efecto cascada en una misma ronda (J3 rellena a J2 que donó a J1), y la
 estrategia por defecto ("ninguno") no toca nada (golden master intacto).
@@ -73,20 +75,24 @@ def _simular(cfg, stock_rows, cambios_rows) -> TallerCilindros:
 # ── Escenario base: 2 jaulas contiguas con perfiles distintos ────────────────
 #
 # J1 (520-540, perfil A) queda sin stock útil tras su cambio; J2 (540-575,
-# perfil B) tiene 4 Disponibles al borde inferior de su banda (Ø 540.2-540.5,
-# a un pase de 0.8 mm de entrar en la banda de J1).
+# perfil B) tiene 4 Disponibles al borde inferior de su banda, a menos de un
+# pase (MM_REPERFILADO) de entrar en la banda de J1.
 
 _RANGOS_2J = [
     {"jaula": 1, "desde": 540.0, "hasta": 520.0, "perfil": "A"},
     {"jaula": 2, "desde": 575.0, "hasta": 540.0, "perfil": "B"},
 ]
 
+# Diámetros de los Disponibles B: dentro de la banda de J2 (> 540) y con
+# d − MM_REPERFILADO ≤ 540 (candidatos a re-perfilado hacia J1).
+_DIAM_DISP_B = [round(540.0 + MM_REPERFILADO * f, 6) for f in (0.9, 0.8, 0.7, 0.6)]
+
 
 def _stock_2j(n_disponibles_b=4):
     return (
         [_fila("W1", 530.0, "Trabajando", 1, 1), _fila("W2", 530.0, "Trabajando", 1, 2),
          _fila("W3", 550.0, "Trabajando", 2, 1), _fila("W4", 550.0, "Trabajando", 2, 2)]
-        + [_fila(f"D{i}", 540.5 - i * 0.1, perfil="B") for i in range(n_disponibles_b)]
+        + [_fila(f"D{i}", _DIAM_DISP_B[i], perfil="B") for i in range(n_disponibles_b)]
     )
 
 
@@ -134,7 +140,7 @@ def test_donante_sin_holgura_no_dona():
     t = _simular(_cfg_base(_RANGOS_2J, 2), _stock_2j(n_disponibles_b=1), [_cambio(1)])
     assert t._trasvases == 0
     assert t.cilindros["D0"].perfil == "B"
-    assert t.cilindros["D0"].diametro == 540.5  # sin pase de re-perfilado
+    assert t.cilindros["D0"].diametro == pytest.approx(_DIAM_DISP_B[0])  # sin pase
     # Hubo un episodio de PARADA (nadie pudo rearmar la jaula al instante).
     assert any(1 in s.jaulas_paradas for s in t.snapshots)
 
@@ -147,7 +153,7 @@ def test_estrategia_ninguno_no_trasvasa():
     assert not any(a.mensaje.startswith("TRASVASE") for a in t.alertas)
     # Los Disponibles B quedan intactos: mismo perfil y diámetro de carga.
     assert all(t.cilindros[f"D{i}"].perfil == "B" for i in range(4))
-    assert all(t.cilindros[f"D{i}"].diametro == pytest.approx(540.5 - i * 0.1)
+    assert all(t.cilindros[f"D{i}"].diametro == pytest.approx(_DIAM_DISP_B[i])
                for i in range(4))
 
 
@@ -163,10 +169,11 @@ def test_cascada_rellena_al_donante_desde_su_superior():
         _fila("W1", 530.0, "Trabajando", 1, 1), _fila("W2", 530.0, "Trabajando", 1, 2),
         _fila("W3", 550.0, "Trabajando", 2, 1), _fila("W4", 550.0, "Trabajando", 2, 2),
         _fila("W5", 565.0, "Trabajando", 3, 1), _fila("W6", 565.0, "Trabajando", 3, 2),
-        _fila("DB1", 540.5, perfil="B"),   # único candidato J2 → J1
-        _fila("DC1", 558.5, perfil="C"),   # candidatos J3 → J2
-        _fila("DC2", 558.4, perfil="C"),
-        _fila("DC3", 558.3, perfil="C"),
+        # Todos a menos de un pase (MM_REPERFILADO) del borde de la banda inferior.
+        _fila("DB1", round(540.0 + MM_REPERFILADO * 0.9, 6), perfil="B"),  # J2 → J1
+        _fila("DC1", round(558.0 + MM_REPERFILADO * 0.9, 6), perfil="C"),  # J3 → J2
+        _fila("DC2", round(558.0 + MM_REPERFILADO * 0.8, 6), perfil="C"),
+        _fila("DC3", round(558.0 + MM_REPERFILADO * 0.7, 6), perfil="C"),
     ]
     t = _simular(_cfg_base(rangos, 3, umbral=2, objetivo=3), stock, [_cambio(1)])
 
@@ -332,7 +339,7 @@ def test_contador_disponibles_liviano_coincide_con_pase():
 def test_registry_y_familia():
     assert set(ESTRATEGIAS_TRASVASE) == {"ninguno", "cascada_umbral"}
     assert any(f.clave_cfg == "estrategia_trasvase" for f in FAMILIAS_ESTRATEGIA)
-    assert MM_REPERFILADO == 0.8
+    assert MM_REPERFILADO == 0.08
 
 
 def test_config_roundtrip_y_defaults():

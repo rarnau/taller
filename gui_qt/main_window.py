@@ -45,6 +45,7 @@ from gui_qt.services import (MonteCarloRequest, MonteCarloService,
 from gui_qt.tab_kpis_qt import KpisPanel
 from gui_qt.vista_realtime import RealTimeView
 from gui_qt.widgets import FlowCard, SectionCard, StatusBarWidget, TabsCornerInfoWidget
+from nucleo.stock import contar_activos, guardar_stock_excel
 
 
 @dataclass
@@ -81,6 +82,10 @@ class MainWindow(QMainWindow):
         self.estrategia = obtener_estrategia_seleccion(self.user_cfg)
         self.stock_df: "pd.DataFrame | None" = None
         self.cambios_df: "pd.DataFrame | None" = None
+        # Ediciones del stock inicial (CRUD del Inventario) sin guardar a Excel.
+        self._stock_dirty = False
+        # El stock fue editado después de la última simulación (vista Final stale).
+        self._stock_editado_post_sim = False
         # Seed de fallas (la de la generación de cambios); None ⇒ sin fallas.
         self.fallas_seed: int | None = None
         self.taller = None
@@ -189,6 +194,9 @@ class MainWindow(QMainWindow):
         self.analysis_panel = AnalysisPanel(self)
         self.inventory_panel = InventoryPanel(self)
         self.inventory_panel.set_load_callback(self._load_excel)
+        self.inventory_panel.set_cfg_provider(lambda: self.user_cfg)
+        self.inventory_panel.set_stock_edited_callback(self._on_stock_edited)
+        self.inventory_panel.set_save_callback(self._save_stock_excel)
         self.generation_panel = GenerationPanel(
             self.user_cfg,
             on_cfg_saved=self._on_cfg_saved,
@@ -294,6 +302,16 @@ class MainWindow(QMainWindow):
 
     def _load_excel(self) -> None:
         """Carga stock+cambios desde un Excel y habilita la simulacion."""
+        if self._stock_dirty:
+            resp = QMessageBox.question(
+                self,
+                "Cambios sin guardar",
+                "Hay cambios sin guardar en el stock inicial. "
+                "¿Descartarlos y cargar otro Excel?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if resp != QMessageBox.StandardButton.Yes:
+                return
         selected, _ = QFileDialog.getOpenFileName(
             self,
             "Seleccionar Excel de simulacion",
@@ -312,15 +330,59 @@ class MainWindow(QMainWindow):
 
         self.status_main_label.setText(f"Excel cargado: {Path(selected).name}")
         self.top_state.setText("● excel cargado")
+        self._stock_dirty = False
+        self._stock_editado_post_sim = False
+        self.inventory_panel.set_stale(False)
         self.montecarlo_panel.set_stock_df(self.stock_df)
         # Excel cargado (sin generación) ⇒ sin seed de fallas reproducible.
         self.fallas_seed = None
         # Cargar un nuevo Excel invalida overlays de PARADA previos.
-        self.flow_card.set_counts(inventario=len(self.stock_df) if self.stock_df is not None else 0)
+        # El flujo cuenta stock utilizable: las bajas quedan fuera del contador.
+        self.flow_card.set_counts(inventario=contar_activos(self.stock_df))
         self._set_flow_status(inventario=True)
         self.generation_panel.set_simulation_snapshots([])
         self.inventory_panel.refresh(taller=self.taller, stock_df=self.stock_df)
         self._update_run_button_state()
+
+    def _on_stock_edited(self, nuevo_df: "pd.DataFrame") -> None:
+        """Recibe el stock_df nuevo tras un alta/edición/baja del Inventario.
+
+        MainWindow es el dueño del stock: acá se reemplaza la referencia y se
+        propaga a los paneles que lo consumen. El taller simulado NO se
+        invalida (playback/Dashboard/KPIs siguen disponibles); la vista Final
+        del inventario se marca desactualizada hasta la próxima corrida.
+        """
+        self.stock_df = nuevo_df
+        self._stock_dirty = True
+        self._stock_editado_post_sim = self.taller is not None
+        self.montecarlo_panel.set_stock_df(self.stock_df)
+        self.flow_card.set_counts(inventario=contar_activos(self.stock_df))
+        self._set_flow_status(inventario=len(self.stock_df) > 0)
+        self.inventory_panel.set_stale(self._stock_editado_post_sim)
+        self.inventory_panel.refresh(taller=self.taller, stock_df=self.stock_df)
+        self._update_run_button_state()
+
+    def _save_stock_excel(self) -> None:
+        """Guarda el stock inicial vigente (y el programa, si hay) a un .xlsx
+        recargable por el flujo de carga normal."""
+        if self.stock_df is None or self.stock_df.empty:
+            QMessageBox.information(self, "Inventario", "No hay stock para guardar.")
+            return
+        fp, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar stock inicial",
+            str(Path.cwd() / "stock_editado.xlsx"),
+            "Excel (*.xlsx)",
+        )
+        if not fp:
+            return
+        try:
+            guardar_stock_excel(fp, self.stock_df, self.cambios_df)
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"No se pudo guardar el Excel:\n{exc}")
+            return
+        self._stock_dirty = False
+        QMessageBox.information(self, "Inventario", f"Stock guardado en:\n{fp}")
 
     def _run_simulation(self) -> None:
         """Lanza la simulacion usando el servicio en proceso separado."""
@@ -403,6 +465,10 @@ class MainWindow(QMainWindow):
         self.dashboard_panel.render(self.taller)
         self.analysis_panel.render(self.taller, self.stock_df)
         self.kpis_panel.render(self.taller)
+        # La corrida nueva ya usó el stock editado ⇒ la vista Final vuelve a
+        # estar al día (el dirty de guardado a Excel es independiente).
+        self._stock_editado_post_sim = False
+        self.inventory_panel.set_stale(False)
         self.inventory_panel.refresh(taller=self.taller, stock_df=self.stock_df)
         # Entrega snapshots a Generacion para overlays/marcadores de PARADA.
         self.generation_panel.set_simulation_snapshots(self.taller.snapshots)
